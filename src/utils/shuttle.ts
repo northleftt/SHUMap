@@ -1,3 +1,4 @@
+import academicCalendarData from "../../data/academic-calendar.json";
 import shuttleData from "../../data/shuttle-schedule.json";
 
 export type DateBucket = "weekday" | "weekend" | "holiday" | "winterBreak" | "summerBreak";
@@ -13,6 +14,7 @@ export interface ShuttleRoute {
   from: string;
   to: string;
   sourcePage: number;
+  note?: string;
   schedules: {
     weekday: ScheduleItem[];
     weekend: ScheduleItem[];
@@ -21,6 +23,23 @@ export interface ShuttleRoute {
     summerBreak: ScheduleItem[];
   };
 }
+
+interface DateRange {
+  start: string;
+  end: string;
+}
+
+interface AcademicYear {
+  id: string;
+  firstSemester: DateRange;
+  winterBreak: DateRange;
+  secondSemester: DateRange;
+  summerBreak: DateRange;
+  holidayDates: string[];
+  workdayOverrideDates?: string[];
+}
+
+const academicCalendar = academicCalendarData as { academicYears: AcademicYear[] };
 
 const campuses = ["宝山校区", "嘉定校区", "延长校区", "陈太公寓"] as const;
 export type Campus = (typeof campuses)[number];
@@ -58,20 +77,40 @@ export function findRoute(from: Campus, to: Campus): ShuttleRoute | undefined {
   return (shuttleData as { routes: ShuttleRoute[] }).routes.find((r) => r.id === routeId);
 }
 
+function toDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function isDateInRange(dateKey: string, range: DateRange): boolean {
+  return dateKey >= range.start && dateKey <= range.end;
+}
+
+function findAcademicYear(dateKey: string): AcademicYear | undefined {
+  return academicCalendar.academicYears.find((year) => {
+    const ranges = [year.firstSemester, year.winterBreak, year.secondSemester, year.summerBreak];
+    return (
+      ranges.some((range) => isDateInRange(dateKey, range)) ||
+      year.holidayDates.includes(dateKey) ||
+      year.workdayOverrideDates?.includes(dateKey)
+    );
+  });
+}
+
 export function getCurrentDateBucket(date: Date = new Date()): DateBucket {
-  const day = date.getDay();
-  const month = date.getMonth() + 1;
+  const dateKey = toDateKey(date);
+  const academicYear = findAcademicYear(dateKey);
 
-  // 寒暑假判定（简化逻辑，实际需要根据academic-calendar.json）
-  // 寒假：1-2月，暑假：7-8月
-  if (month === 1 || month === 2) return "winterBreak";
-  if (month === 7 || month === 8) return "summerBreak";
+  if (academicYear) {
+    if (academicYear.holidayDates.includes(dateKey)) return "holiday";
+    if (isDateInRange(dateKey, academicYear.winterBreak)) return "winterBreak";
+    if (isDateInRange(dateKey, academicYear.summerBreak)) return "summerBreak";
+    if (academicYear.workdayOverrideDates?.includes(dateKey)) return "weekday";
+  }
 
-  // 周末判定
-  if (day === 0 || day === 6) return "weekend";
-
-  // 默认工作日
-  return "weekday";
+  return date.getDay() === 0 || date.getDay() === 6 ? "weekend" : "weekday";
 }
 
 export function formatDate(date: Date): { month: number; day: number; weekday: string } {

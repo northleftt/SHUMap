@@ -1,12 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import {
   getCampuses,
-  getAllSchedules,
   formatDate,
   type Campus,
   type ScheduleItem,
   getCurrentDateBucket,
-  parseTime,
+  getRemainingBuses,
+  getTodaySchedules,
 } from "../utils/shuttle";
 
 const ArrowDownIcon = () => (
@@ -173,6 +173,19 @@ function isToday(date: Date): boolean {
   );
 }
 
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function getSafeDate(baseDate: Date, type: "month" | "day", value: number): Date {
+  const year = baseDate.getFullYear();
+  const month = type === "month" ? value - 1 : baseDate.getMonth();
+  const dayLimit = getDaysInMonth(year, month);
+  const day = type === "day" ? Math.min(value, dayLimit) : Math.min(baseDate.getDate(), dayLimit);
+
+  return new Date(year, month, day);
+}
+
 export function ShuttlePage() {
   const [from, setFrom] = useState<Campus>("宝山校区");
   const [to, setTo] = useState<Campus>("嘉定校区");
@@ -190,27 +203,36 @@ export function ShuttlePage() {
   const dateInfo = useMemo(() => formatDate(selectedDate), [selectedDate]);
   const dateBucket = useMemo(() => getCurrentDateBucket(selectedDate), [selectedDate]);
   const todayFlag = useMemo(() => isToday(selectedDate), [selectedDate]);
+  const dayMax = useMemo(
+    () => getDaysInMonth(selectedDate.getFullYear(), selectedDate.getMonth()),
+    [selectedDate],
+  );
 
   // 计算显示的班次
-  const { nextBus, all } = useMemo(() => {
-    const result = getAllSchedules(from, to, todayFlag ? currentTime : selectedDate);
+  const { nextBus, allSchedules, visibleSchedules } = useMemo(() => {
+    const allSchedules = getTodaySchedules(from, to, selectedDate);
 
-    // 如果是当天，过滤出当前时间之后的班次
-    if (todayFlag) {
-      const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
-      const upcoming = result.all.filter((s) => parseTime(s.departureTime) > currentMinutes);
-      return { nextBus: result.nextBus, all: upcoming };
+    if (!todayFlag) {
+      return { nextBus: null, allSchedules, visibleSchedules: allSchedules };
     }
 
-    // 如果不是当天，显示当日所有时刻
-    return { nextBus: null, all: result.all };
+    const visibleSchedules = getRemainingBuses(allSchedules, currentTime);
+    return {
+      nextBus: visibleSchedules[0] ?? null,
+      allSchedules,
+      visibleSchedules,
+    };
   }, [from, to, selectedDate, currentTime, todayFlag]);
 
   // 其他时刻（排除最近一班）
   const otherBuses = useMemo(() => {
-    if (!nextBus) return all;
-    return all.filter((bus) => bus.departureTime !== nextBus.departureTime);
-  }, [all, nextBus]);
+    if (!nextBus) return visibleSchedules;
+
+    const nextBusIndex = visibleSchedules.indexOf(nextBus);
+    if (nextBusIndex === -1) return visibleSchedules;
+
+    return visibleSchedules.filter((_, index) => index !== nextBusIndex);
+  }, [visibleSchedules, nextBus]);
 
   const handleExchange = () => {
     setFrom(to);
@@ -224,13 +246,7 @@ export function ShuttlePage() {
   };
 
   const handleDateChange = (type: "month" | "day", value: number) => {
-    const newDate = new Date(selectedDate);
-    if (type === "month") {
-      newDate.setMonth(value - 1);
-    } else {
-      newDate.setDate(value);
-    }
-    setSelectedDate(newDate);
+    setSelectedDate((currentSelectedDate) => getSafeDate(currentSelectedDate, type, value));
   };
 
   const bucketLabels: Record<string, string> = {
@@ -280,7 +296,7 @@ export function ShuttlePage() {
               value={dateInfo.day}
               onChange={(v) => handleDateChange("day", v)}
               min={1}
-              max={31}
+              max={dayMax}
               label="日"
             />
             <span className="text-lg text-[#0F172A] font-medium ml-2">
@@ -350,7 +366,7 @@ export function ShuttlePage() {
                   {nextBus.isReservation ? "预约车" : "非预约车"}
                 </span>
               </div>
-            ) : all.length > 0 ? (
+            ) : allSchedules.length > 0 ? (
               <div className="bg-[#F1F5F9] rounded-[20px] px-5 py-4 text-center">
                 <p className="text-[#6F7C8E]">今日班次已结束</p>
               </div>
@@ -361,7 +377,7 @@ export function ShuttlePage() {
         )}
 
         {/* Other Buses Section */}
-        {all.length > 0 && (
+        {visibleSchedules.length > 0 && (
           <div className="mb-5">
             <div className="flex items-center justify-between mb-2">
               <h2 className="text-xl font-semibold text-[#0F172A]">
@@ -428,7 +444,7 @@ export function ShuttlePage() {
             乘车点导航
           </button>
           <button
-            onClick={() => window.open("/校车时刻表/校车时刻表.pdf", "_blank")}
+            onClick={() => window.open("/docs/shuttle-schedule.pdf", "_blank")}
             className="text-[14px] font-medium text-[#CBD5E1] hover:text-[#6F7C8E] transition-colors flex items-center gap-1"
           >
             查看全部时刻表

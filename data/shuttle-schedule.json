@@ -1,5 +1,5 @@
 {
-  "sourceFile": "校车时刻表/校车时刻表.pdf",
+  "sourceFile": "/docs/shuttle-schedule.pdf",
   "version": "Ver2025.11",
   "normalizationNotes": [
     "源表中的“双休/假日/寒假”已同步拆分到 weekend、holiday、winterBreak 三个字段，三者时刻相同。",
