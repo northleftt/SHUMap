@@ -1,0 +1,10 @@
+node_modules/
+dist/
+tmp/
+output/
+__pycache__/
+*.pyc
+.DS_Store
+.claude/
+.env.local
+*.env.local

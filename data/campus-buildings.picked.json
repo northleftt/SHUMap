@@ -1,0 +1,2180 @@
+[
+  {
+    "svgElementId": "building_A",
+    "name": "A 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39552,
+      "latitude": 31.313513,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 A楼",
+      "mapDisplayName": "上海大学宝山校区 A楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:13:21.988Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_B",
+    "name": "B 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.395155,
+      "latitude": 31.313926,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 B楼",
+      "mapDisplayName": "上海大学宝山校区 B楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:13:28.271Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_C",
+    "name": "C 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.394817,
+      "latitude": 31.314357,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 C楼",
+      "mapDisplayName": "上海大学宝山校区 C楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:13:34.092Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D",
+    "name": "D 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.394506,
+      "latitude": 31.314769,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D楼",
+      "mapDisplayName": "上海大学宝山校区 D楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:13:37.359Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "main_library",
+    "name": "本部图书馆",
+    "campus": "宝山校区",
+    "category": "library",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.392253,
+      "latitude": 31.316795,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 本部图书馆",
+      "mapDisplayName": "上海大学宝山校区 本部图书馆",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:13:44.006Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_AJ",
+    "name": "AJ 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.396904,
+      "latitude": 31.314027,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 AJ楼",
+      "mapDisplayName": "上海大学宝山校区 AJ楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:13:54.100Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_BJ",
+    "name": "BJ 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.396566,
+      "latitude": 31.314453,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 BJ楼",
+      "mapDisplayName": "上海大学宝山校区 BJ楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:13:59.411Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_CJ",
+    "name": "CJ 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.396191,
+      "latitude": 31.314888,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 CJ楼",
+      "mapDisplayName": "上海大学宝山校区 CJ楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:06.804Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_DJ",
+    "name": "DJ 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.395842,
+      "latitude": 31.315328,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 DJ楼",
+      "mapDisplayName": "上海大学宝山校区 DJ楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:13.167Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_E",
+    "name": "E 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.394072,
+      "latitude": 31.316006,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 E楼",
+      "mapDisplayName": "上海大学宝山校区 E楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:17.650Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_F",
+    "name": "F 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.393862,
+      "latitude": 31.316469,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 F楼",
+      "mapDisplayName": "上海大学宝山校区 F楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:22.255Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_G",
+    "name": "G 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39346,
+      "latitude": 31.316918,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 G楼",
+      "mapDisplayName": "上海大学宝山校区 G楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:26.711Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "weichang_building",
+    "name": "伟长楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.395418,
+      "latitude": 31.317849,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 伟长楼",
+      "mapDisplayName": "上海大学宝山校区 伟长楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:32.908Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_EJ",
+    "name": "EJ 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.395177,
+      "latitude": 31.316401,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 EJ楼",
+      "mapDisplayName": "上海大学宝山校区 EJ楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:37.960Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_FJ",
+    "name": "FJ 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.394844,
+      "latitude": 31.316813,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 FJ楼",
+      "mapDisplayName": "上海大学宝山校区 FJ楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:40.869Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_GJ",
+    "name": "GJ 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.394517,
+      "latitude": 31.317239,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 GJ楼",
+      "mapDisplayName": "上海大学宝山校区 GJ楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:46.347Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_4th_canteen",
+    "name": "水秀食堂",
+    "campus": "宝山校区",
+    "category": "canteen",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.395692,
+      "latitude": 31.316336,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 水秀食堂",
+      "mapDisplayName": "上海大学宝山校区 水秀食堂",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:50.260Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_HA",
+    "name": "HA 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.396695,
+      "latitude": 31.316689,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HA楼",
+      "mapDisplayName": "上海大学宝山校区 HA楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:14:57.657Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_HB",
+    "name": "HB 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39684,
+      "latitude": 31.316259,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HB楼",
+      "mapDisplayName": "上海大学宝山校区 HB楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:15:01.751Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_HD",
+    "name": "HD 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.396346,
+      "latitude": 31.315846,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HD楼",
+      "mapDisplayName": "上海大学宝山校区 HD楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:02.193Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_HC",
+    "name": "HC 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.396974,
+      "latitude": 31.315704,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HC楼",
+      "mapDisplayName": "上海大学宝山校区 HC楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:05.497Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_HE",
+    "name": "HE 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39663,
+      "latitude": 31.315127,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 HE楼",
+      "mapDisplayName": "上海大学宝山校区 HE楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:07.987Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "GYM",
+    "name": "体育馆",
+    "campus": "宝山校区",
+    "category": "other",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.395386,
+      "latitude": 31.319503,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 体育馆",
+      "mapDisplayName": "上海大学宝山校区 体育馆",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:15.698Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "swimming_pool",
+    "name": "游泳馆",
+    "campus": "宝山校区",
+    "category": "other",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.394077,
+      "latitude": 31.319425,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 游泳馆",
+      "mapDisplayName": "上海大学宝山校区 游泳馆",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:21.502Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_J",
+    "name": "J 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.393787,
+      "latitude": 31.315232,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 J楼",
+      "mapDisplayName": "上海大学宝山校区 J楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:30.052Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "art_college",
+    "name": "美术学院",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.393557,
+      "latitude": 31.312858,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 美术学院",
+      "mapDisplayName": "上海大学宝山校区 美术学院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:38.452Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_1",
+    "name": "1号楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.389029,
+      "latitude": 31.315388,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 1号楼",
+      "mapDisplayName": "上海大学宝山校区 1号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:16:56.377Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_2",
+    "name": "2号楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.389292,
+      "latitude": 31.314966,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 2号楼",
+      "mapDisplayName": "上海大学宝山校区 2号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:17.409Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_3",
+    "name": "3号楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.38948,
+      "latitude": 31.314599,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 3号楼",
+      "mapDisplayName": "上海大学宝山校区 3号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:22.612Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_4",
+    "name": "4号楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.390193,
+      "latitude": 31.315012,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 4号楼",
+      "mapDisplayName": "上海大学宝山校区 4号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:27.142Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_5",
+    "name": "5号楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.390263,
+      "latitude": 31.314627,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 5号楼",
+      "mapDisplayName": "上海大学宝山校区 5号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:29.559Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_1st_canteen",
+    "name": "益新食堂",
+    "campus": "宝山校区",
+    "category": "canteen",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.38927,
+      "latitude": 31.316167,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 益新食堂",
+      "mapDisplayName": "上海大学宝山校区 益新食堂",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:33.533Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_M",
+    "name": "M楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.390048,
+      "latitude": 31.31608,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 M楼",
+      "mapDisplayName": "上海大学宝山校区 M楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:42.206Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_N",
+    "name": "N楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.390198,
+      "latitude": 31.316465,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 N楼",
+      "mapDisplayName": "上海大学宝山校区 N楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:45.144Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_P",
+    "name": "P楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.389957,
+      "latitude": 31.316813,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 P楼",
+      "mapDisplayName": "上海大学宝山校区 P楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:47.862Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_Q",
+    "name": "Q楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.390209,
+      "latitude": 31.31717,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 Q楼",
+      "mapDisplayName": "上海大学宝山校区 Q楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:51.159Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_R",
+    "name": "R楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39008,
+      "latitude": 31.317468,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 R楼",
+      "mapDisplayName": "上海大学宝山校区 R楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:53.978Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_I",
+    "name": "I楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.389877,
+      "latitude": 31.31784,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 I楼",
+      "mapDisplayName": "上海大学宝山校区 I楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:17:59.574Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_O",
+    "name": "O楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.38978,
+      "latitude": 31.318151,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 O楼",
+      "mapDisplayName": "上海大学宝山校区 O楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:04.196Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_K",
+    "name": "K楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.389614,
+      "latitude": 31.318504,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 K楼",
+      "mapDisplayName": "上海大学宝山校区 K楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:13.117Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_L",
+    "name": "L楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.389287,
+      "latitude": 31.318784,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 L楼",
+      "mapDisplayName": "上海大学宝山校区 L楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:21.352Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_3rd_canteen",
+    "name": "山明食堂",
+    "campus": "宝山校区",
+    "category": "canteen",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.388739,
+      "latitude": 31.317679,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 山明食堂",
+      "mapDisplayName": "上海大学宝山校区 山明食堂",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:24.293Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_T",
+    "name": "T楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.388836,
+      "latitude": 31.31723,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 T楼",
+      "mapDisplayName": "上海大学宝山校区 T楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:29.498Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_S",
+    "name": "S楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.388949,
+      "latitude": 31.316854,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 S楼",
+      "mapDisplayName": "上海大学宝山校区 S楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:31.748Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_X",
+    "name": "X楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39118,
+      "latitude": 31.31816,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 X楼",
+      "mapDisplayName": "上海大学宝山校区 X楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:37.342Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_Y",
+    "name": "Y楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.391121,
+      "latitude": 31.31849,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 Y楼",
+      "mapDisplayName": "上海大学宝山校区 Y楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:39.489Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_Z",
+    "name": "Z楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.390612,
+      "latitude": 31.31888,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 Z楼",
+      "mapDisplayName": "上海大学宝山校区 Z楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:44.993Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_W",
+    "name": "W楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.391899,
+      "latitude": 31.31871,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 W楼",
+      "mapDisplayName": "上海大学宝山校区 W楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:48.189Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_U",
+    "name": "U楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.392044,
+      "latitude": 31.318357,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 U楼",
+      "mapDisplayName": "上海大学宝山校区 U楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:50.648Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_2nd_canteen",
+    "name": "尔美食堂",
+    "campus": "宝山校区",
+    "category": "canteen",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39133,
+      "latitude": 31.31932,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 尔美食堂",
+      "mapDisplayName": "上海大学宝山校区 尔美食堂",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:18:52.977Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "qianweichang_library",
+    "name": "钱伟长图书馆",
+    "campus": "宝山校区",
+    "category": "library",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399559,
+      "latitude": 31.314283,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 钱伟长图书馆",
+      "mapDisplayName": "上海大学宝山校区 钱伟长图书馆",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:02.528Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_6th_canteen",
+    "name": "留韵食堂",
+    "campus": "宝山校区",
+    "category": "canteen",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.398433,
+      "latitude": 31.314829,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 留韵食堂",
+      "mapDisplayName": "上海大学宝山校区 留韵食堂",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:05.291Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D10",
+    "name": "D10 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.398535,
+      "latitude": 31.315557,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D10楼",
+      "mapDisplayName": "上海大学宝山校区 D10楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:17.063Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D11",
+    "name": "D11 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.398411,
+      "latitude": 31.316057,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D11楼",
+      "mapDisplayName": "上海大学宝山校区 D11楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:21.068Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D12",
+    "name": "D12 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.398417,
+      "latitude": 31.316465,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D12楼",
+      "mapDisplayName": "上海大学宝山校区 D12楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:24.609Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D13",
+    "name": "D13 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.398433,
+      "latitude": 31.317001,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D13楼",
+      "mapDisplayName": "上海大学宝山校区 D13楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:26.754Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D1",
+    "name": "D1 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399044,
+      "latitude": 31.313335,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D1楼",
+      "mapDisplayName": "上海大学宝山校区 D1楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:37.494Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D3",
+    "name": "D3 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.398642,
+      "latitude": 31.313587,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D3楼",
+      "mapDisplayName": "上海大学宝山校区 D3楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:42.144Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D2",
+    "name": "D2 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399479,
+      "latitude": 31.313655,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D2楼",
+      "mapDisplayName": "上海大学宝山校区 D2楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:45.342Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D4",
+    "name": "D4 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.400418,
+      "latitude": 31.314004,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D4楼",
+      "mapDisplayName": "上海大学宝山校区 D4楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:48.356Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D5",
+    "name": "D5 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.400353,
+      "latitude": 31.31438,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D5楼",
+      "mapDisplayName": "上海大学宝山校区 D5楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:50.440Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D6",
+    "name": "D6 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.400284,
+      "latitude": 31.314654,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D6楼",
+      "mapDisplayName": "上海大学宝山校区 D6楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:52.674Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D7",
+    "name": "D7 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399731,
+      "latitude": 31.314966,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D7楼",
+      "mapDisplayName": "上海大学宝山校区 D7楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:19:57.841Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D9",
+    "name": "D9 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.39964,
+      "latitude": 31.316245,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D9楼",
+      "mapDisplayName": "上海大学宝山校区 D9楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:04.890Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D14",
+    "name": "D14 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399232,
+      "latitude": 31.316973,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D14楼",
+      "mapDisplayName": "上海大学宝山校区 D14楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:10.674Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D15",
+    "name": "D15 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399388,
+      "latitude": 31.317368,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D15楼",
+      "mapDisplayName": "上海大学宝山校区 D15楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:16.448Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D16",
+    "name": "D16 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399769,
+      "latitude": 31.31789,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D16楼",
+      "mapDisplayName": "上海大学宝山校区 D16楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:20.079Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D17",
+    "name": "D17 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.399522,
+      "latitude": 31.318344,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D17楼",
+      "mapDisplayName": "上海大学宝山校区 D17楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:24.040Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D18",
+    "name": "D18 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.400466,
+      "latitude": 31.319338,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D18楼",
+      "mapDisplayName": "上海大学宝山校区 D18楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:30.744Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "building_D19",
+    "name": "D19 楼",
+    "campus": "宝山校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.400434,
+      "latitude": 31.31987,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 D19楼",
+      "mapDisplayName": "上海大学宝山校区 D19楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:33.730Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "hospital",
+    "name": "校医院",
+    "campus": "宝山校区",
+    "category": "other",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.388696,
+      "latitude": 31.320062,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 校医院",
+      "mapDisplayName": "上海大学宝山校区 校医院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:40.030Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_6",
+    "name": "6号楼",
+    "campus": "宝山校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.390134,
+      "latitude": 31.315475,
+      "address": "上海市宝山区上大路99号 上海大学宝山校区 6号楼",
+      "mapDisplayName": "上海大学宝山校区 6号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:20:58.405Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "wenwu_building",
+    "name": "文武大楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.45614,
+      "latitude": 31.277975,
+      "address": "上海市静安区延长路149号 上海大学延长校区 文武大楼",
+      "mapDisplayName": "上海大学延长校区 文武大楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:21:26.726Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "yinli_building",
+    "name": "引力楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.456735,
+      "latitude": 31.27836,
+      "address": "上海市静安区延长路149号 上海大学延长校区 引力楼",
+      "mapDisplayName": "上海大学延长校区 引力楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:21:29.201Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "xingjian_building",
+    "name": "行健楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.457615,
+      "latitude": 31.278158,
+      "address": "上海市静安区延长路149号 上海大学延长校区 行健楼",
+      "mapDisplayName": "上海大学延长校区 行健楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:21:33.115Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "quishi_building",
+    "name": "秋实楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.45836,
+      "latitude": 31.278071,
+      "address": "上海市静安区延长路149号 上海大学延长校区 秋实楼",
+      "mapDisplayName": "上海大学延长校区 秋实楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:21:36.265Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "keji_building",
+    "name": "科技楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458596,
+      "latitude": 31.277581,
+      "address": "上海市静安区延长路149号 上海大学延长校区 科技楼",
+      "mapDisplayName": "上海大学延长校区 科技楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:21:38.244Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "wenhui_library",
+    "name": "文荟图书馆",
+    "campus": "延长校区",
+    "category": "library",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458473,
+      "latitude": 31.277076,
+      "address": "上海市静安区延长路149号 上海大学延长校区 文荟图书馆",
+      "mapDisplayName": "上海大学延长校区 文荟图书馆",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:21:52.815Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "shanghai_art_college",
+    "name": "上海美术学院",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458044,
+      "latitude": 31.276315,
+      "address": "上海市静安区延长路149号 上海大学延长校区 上海美术学院",
+      "mapDisplayName": "上海大学延长校区 上海美术学院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:07.045Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "communication_center",
+    "name": "交流展示中心",
+    "campus": "延长校区",
+    "category": "other",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458355,
+      "latitude": 31.275696,
+      "address": "上海市静安区延长路149号 上海大学延长校区 交流展示中心",
+      "mapDisplayName": "上海大学延长校区 交流展示中心",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:10.481Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "north_building",
+    "name": "北大楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458457,
+      "latitude": 31.274788,
+      "address": "上海市静安区延长路149号 上海大学延长校区 北大楼",
+      "mapDisplayName": "上海大学延长校区 北大楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:14.095Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "vancouver_film_college_2",
+    "name": "温哥华电影学院",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.457341,
+      "latitude": 31.274426,
+      "address": "上海市静安区延长路149号 上海大学延长校区 温哥华电影学院",
+      "mapDisplayName": "上海大学延长校区 温哥华电影学院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:21.415Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "vancouver_film_college",
+    "name": "温哥华电影学院",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458119,
+      "latitude": 31.273858,
+      "address": "上海市静安区延长路149号 上海大学延长校区 温哥华电影学院",
+      "mapDisplayName": "上海大学延长校区 温哥华电影学院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:25.255Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_3rd_teaching_building",
+    "name": "第三教学楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.457545,
+      "latitude": 31.273775,
+      "address": "上海市静安区延长路149号 上海大学延长校区 第三教学楼",
+      "mapDisplayName": "上海大学延长校区 第三教学楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:28.555Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_2nd_teaching_building",
+    "name": "第二教学楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.457663,
+      "latitude": 31.27345,
+      "address": "上海市静安区延长路149号 上海大学延长校区 第二教学楼",
+      "mapDisplayName": "上海大学延长校区 第二教学楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:30.493Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "hospital",
+    "name": "校医院",
+    "campus": "延长校区",
+    "category": "other",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.457663,
+      "latitude": 31.273211,
+      "address": "上海市静安区延长路149号 上海大学延长校区 校医院",
+      "mapDisplayName": "上海大学延长校区 校医院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:39.476Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "xinyuan_building",
+    "name": "莘远楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.457899,
+      "latitude": 31.272698,
+      "address": "上海市静安区延长路149号 上海大学延长校区 莘远楼",
+      "mapDisplayName": "上海大学延长校区 莘远楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:42.429Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "lehu_building",
+    "name": "乐乎楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458473,
+      "latitude": 31.273115,
+      "address": "上海市静安区延长路149号 上海大学延长校区 乐乎楼",
+      "mapDisplayName": "上海大学延长校区 乐乎楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:44.654Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "south_building",
+    "name": "南大楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.458972,
+      "latitude": 31.273376,
+      "address": "上海市静安区延长路149号 上海大学延长校区 南大楼",
+      "mapDisplayName": "上海大学延长校区 南大楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:48.266Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dianji_building",
+    "name": "电机楼",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.459916,
+      "latitude": 31.273624,
+      "address": "上海市静安区延长路149号 上海大学延长校区 电机楼",
+      "mapDisplayName": "上海大学延长校区 电机楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:53.097Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "shanghai_film_college",
+    "name": "上海电影学院",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.459744,
+      "latitude": 31.274307,
+      "address": "上海市静安区延长路149号 上海大学延长校区 上海电影学院",
+      "mapDisplayName": "上海大学延长校区 上海电影学院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:22:57.283Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "news_communication_college",
+    "name": "新传学院",
+    "campus": "延长校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.459567,
+      "latitude": 31.274903,
+      "address": "上海市静安区延长路149号 上海大学延长校区 新传学院",
+      "mapDisplayName": "上海大学延长校区 新传学院",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:22.030Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_7",
+    "name": "7号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.249922,
+      "latitude": 31.378545,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 7号楼",
+      "mapDisplayName": "上海大学嘉定校区 7号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:42.718Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_1st_canteen",
+    "name": "一食堂",
+    "campus": "嘉定校区",
+    "category": "canteen",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.249536,
+      "latitude": 31.378994,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 一食堂",
+      "mapDisplayName": "上海大学嘉定校区 一食堂",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:46.361Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_6",
+    "name": "6号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.250121,
+      "latitude": 31.378252,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 6号楼",
+      "mapDisplayName": "上海大学嘉定校区 6号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:48.553Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_5",
+    "name": "5号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.250271,
+      "latitude": 31.378019,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 5号楼",
+      "mapDisplayName": "上海大学嘉定校区 5号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:50.713Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_4",
+    "name": "4号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.250475,
+      "latitude": 31.377748,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 4号楼",
+      "mapDisplayName": "上海大学嘉定校区 4号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:52.975Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_3",
+    "name": "3号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.250657,
+      "latitude": 31.377437,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 3号楼",
+      "mapDisplayName": "上海大学嘉定校区 3号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:54.830Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_2",
+    "name": "2号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.250883,
+      "latitude": 31.377126,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 2号楼",
+      "mapDisplayName": "上海大学嘉定校区 2号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:57.145Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_1",
+    "name": "1号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.251129,
+      "latitude": 31.376846,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 1号楼",
+      "mapDisplayName": "上海大学嘉定校区 1号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:23:58.862Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_1st_teaching_building",
+    "name": "第一教学楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.250019,
+      "latitude": 31.375733,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 第一教学楼",
+      "mapDisplayName": "上海大学嘉定校区 第一教学楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:02.532Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_2nd_teaching_building",
+    "name": "第二教学楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.249144,
+      "latitude": 31.376127,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 第二教学楼",
+      "mapDisplayName": "上海大学嘉定校区 第二教学楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:05.126Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "microelectronic_A_building",
+    "name": "微电子A楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.249804,
+      "latitude": 31.376278,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 微电子A楼",
+      "mapDisplayName": "上海大学嘉定校区 微电子A楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:08.926Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "chemistry_building_",
+    "name": "化学楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.250094,
+      "latitude": 31.375234,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 化学楼",
+      "mapDisplayName": "上海大学嘉定校区 化学楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:12.192Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_9",
+    "name": "9号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.248474,
+      "latitude": 31.374717,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 9号楼",
+      "mapDisplayName": "上海大学嘉定校区 9号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:15.656Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "wende_building",
+    "name": "文德楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.248222,
+      "latitude": 31.376883,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文德楼",
+      "mapDisplayName": "上海大学嘉定校区 文德楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:20.805Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "wenhui_building",
+    "name": "文荟楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.248356,
+      "latitude": 31.377501,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文荟楼",
+      "mapDisplayName": "上海大学嘉定校区 文荟楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:23.624Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "wenshang_building",
+    "name": "文商楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.248517,
+      "latitude": 31.378,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文商楼",
+      "mapDisplayName": "上海大学嘉定校区 文商楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:28.849Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "wenda_building",
+    "name": "文达楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.248259,
+      "latitude": 31.378307,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 文达楼",
+      "mapDisplayName": "上海大学嘉定校区 文达楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:31.196Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "GYM",
+    "name": "体育馆",
+    "campus": "嘉定校区",
+    "category": "other",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.248651,
+      "latitude": 31.378316,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 体育馆",
+      "mapDisplayName": "上海大学嘉定校区 体育馆",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:33.252Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "jd_library",
+    "name": "图书馆",
+    "campus": "嘉定校区",
+    "category": "library",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.247492,
+      "latitude": 31.376677,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 图书馆",
+      "mapDisplayName": "上海大学嘉定校区 图书馆",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:37.227Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "_2nd_canteen",
+    "name": "二食堂",
+    "campus": "嘉定校区",
+    "category": "canteen",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.249541,
+      "latitude": 31.374739,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 二食堂",
+      "mapDisplayName": "上海大学嘉定校区 二食堂",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:40.816Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_F",
+    "name": "F 楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.247208,
+      "latitude": 31.375848,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 F楼",
+      "mapDisplayName": "上海大学嘉定校区 F楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:43.421Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_E",
+    "name": "E 楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.246977,
+      "latitude": 31.376127,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 E楼",
+      "mapDisplayName": "上海大学嘉定校区 E楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:45.357Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_D",
+    "name": "D 楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.246763,
+      "latitude": 31.376347,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 D楼",
+      "mapDisplayName": "上海大学嘉定校区 D楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:47.247Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_C",
+    "name": "C 楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.246473,
+      "latitude": 31.376571,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 C楼",
+      "mapDisplayName": "上海大学嘉定校区 C楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:48.837Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_B",
+    "name": "B 楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.246226,
+      "latitude": 31.376787,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 B楼",
+      "mapDisplayName": "上海大学嘉定校区 B楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:50.487Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_A",
+    "name": "A 楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.246028,
+      "latitude": 31.376993,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 A楼",
+      "mapDisplayName": "上海大学嘉定校区 A楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:52.453Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "dorm_8",
+    "name": "8号楼",
+    "campus": "嘉定校区",
+    "category": "dorm",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.246006,
+      "latitude": 31.377432,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 8号楼",
+      "mapDisplayName": "上海大学嘉定校区 8号楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:24:55.032Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "admin_building",
+    "name": "行政楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.247106,
+      "latitude": 31.377771,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 行政楼",
+      "mapDisplayName": "上海大学嘉定校区 行政楼",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:25:01.122Z",
+      "pickerSource": "keyword-scope"
+    }
+  },
+  {
+    "svgElementId": "xingjian_center",
+    "name": "行健文体中心",
+    "campus": "嘉定校区",
+    "category": "other",
+    "navigation": {
+      "coordSystem": "gcj02",
+      "longitude": 121.248678,
+      "latitude": 31.378307,
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 行健文体中心",
+      "mapDisplayName": "上海大学嘉定校区 行健文体中心",
+      "source": "opengps-playwright",
+      "verified": true,
+      "geocodeStatus": "manual-picked",
+      "pickedAt": "2026-03-10T10:25:04.076Z",
+      "pickerSource": "keyword-scope"
+    }
+  }
+]

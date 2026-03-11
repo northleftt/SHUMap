@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  font-family:
+    "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei",
+    sans-serif;
+  --color-primary: #1e80c1;
+  --color-primary-dark: #125b8b;
+  --color-primary-soft: #d7e8f3;
+  --color-page: #fffbf2;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f1f5f9;
+  --color-text: #0f172a;
+  --color-text-muted: #6f7c8e;
+  --color-border: #cbd5e1;
+  --color-success: #16a34a;
+  --color-warning: #f59e0b;
+  --color-danger: #dc2626;
+  --shadow-sheet: 0 -2px 18px rgba(15, 23, 42, 0.14);
+  --shadow-floating: 0 6px 18px rgba(15, 23, 42, 0.14);
+  --radius-search: 20.5px;
+  --radius-pill: 16px;
+  --radius-sheet: 28px;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overscroll-behavior: none;
+  background:
+    radial-gradient(circle at top left, rgba(215, 232, 243, 0.9), transparent 38%),
+    linear-gradient(180deg, #fffdf8 0%, var(--color-page) 100%);
+}
+
+html {
+  overflow: hidden;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+#root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.safe-bottom-padding {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 4px);
+}
+
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
