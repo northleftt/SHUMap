@@ -41,6 +41,25 @@ const LocationIcon = () => (
   </svg>
 );
 
+const LeftArrowIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+    <path
+      d="M11 7H3.5"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M6.5 3.5L3 7L6.5 10.5"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 interface TimeSelectorProps {
   value: number;
   onChange: (value: number) => void;
@@ -128,14 +147,104 @@ function CampusSelector({ value, onChange, placeholder, exclude }: CampusSelecto
   );
 }
 
+type ScheduleStatus = "reservation" | "nonReservation" | "mixed";
+
+interface DisplayScheduleItem {
+  departureTime: string;
+  status: ScheduleStatus;
+}
+
+function mergeSchedulesByTime(schedules: ScheduleItem[]): DisplayScheduleItem[] {
+  const merged = new Map<string, { hasReservation: boolean; hasNonReservation: boolean }>();
+
+  schedules.forEach((schedule) => {
+    const current = merged.get(schedule.departureTime) ?? {
+      hasReservation: false,
+      hasNonReservation: false,
+    };
+
+    if (schedule.isReservation) {
+      current.hasReservation = true;
+    } else {
+      current.hasNonReservation = true;
+    }
+
+    merged.set(schedule.departureTime, current);
+  });
+
+  return Array.from(merged.entries()).map(([departureTime, availability]) => ({
+    departureTime,
+    status:
+      availability.hasReservation && availability.hasNonReservation
+        ? "mixed"
+        : availability.hasReservation
+          ? "reservation"
+          : "nonReservation",
+  }));
+}
+
+function getScheduleStatusTextClass(status: Exclude<ScheduleStatus, "mixed">): string {
+  return status === "reservation" ? "text-[var(--color-primary)]" : "text-[var(--color-text-muted)]";
+}
+
+function getScheduleStatusBadgeClasses(status: Exclude<ScheduleStatus, "mixed">): string {
+  return status === "reservation"
+    ? "bg-[var(--color-primary-soft)] text-[var(--color-primary)]"
+    : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]";
+}
+
+function ScheduleStatusInline({
+  status,
+  size = "text-xs",
+}: {
+  status: ScheduleStatus;
+  size?: string;
+}) {
+  if (status === "mixed") {
+    return (
+      <span className={`inline-flex items-center gap-1 whitespace-nowrap font-medium ${size}`}>
+        <span className={getScheduleStatusTextClass("reservation")}>预</span>
+        <span className={getScheduleStatusTextClass("nonReservation")}>非</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className={`whitespace-nowrap font-medium ${size} ${getScheduleStatusTextClass(status)}`}>
+      {status === "reservation" ? "预" : "非"}
+    </span>
+  );
+}
+
+function ScheduleStatusBadge({ status }: { status: ScheduleStatus }) {
+  if (status === "mixed") {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-medium text-[var(--color-primary)]">
+          预约车
+        </span>
+        <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-sm font-medium text-[var(--color-text-muted)]">
+          非预约车
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <span className={`rounded-full px-3 py-1 text-sm font-medium ${getScheduleStatusBadgeClasses(status)}`}>
+      {status === "reservation" ? "预约车" : "非预约车"}
+    </span>
+  );
+}
+
 // 时刻表网格项 - 支持左中右对齐
 function ScheduleTimeItem({
   time,
-  isReservation,
+  status,
   align = "center"
 }: {
   time: string;
-  isReservation: boolean;
+  status: ScheduleStatus;
   align?: "left" | "center" | "right";
 }) {
   const alignClass = {
@@ -147,9 +256,7 @@ function ScheduleTimeItem({
   return (
     <div className={`flex items-center gap-1.5 py-2 ${alignClass[align]}`}>
       <span className="text-base font-medium text-[#0F172A]">{time}</span>
-      <span className={`text-xs font-medium ${isReservation ? "text-[#F59E0B]" : "text-[#6F7C8E]"}`}>
-        {isReservation ? "预" : "非"}
-      </span>
+      <ScheduleStatusInline status={status} />
     </div>
   );
 }
@@ -211,12 +318,14 @@ export function ShuttlePage() {
   // 计算显示的班次
   const { nextBus, allSchedules, visibleSchedules } = useMemo(() => {
     const allSchedules = getTodaySchedules(from, to, selectedDate);
+    const visibleSchedules = mergeSchedulesByTime(
+      todayFlag ? getRemainingBuses(allSchedules, currentTime) : allSchedules,
+    );
 
     if (!todayFlag) {
-      return { nextBus: null, allSchedules, visibleSchedules: allSchedules };
+      return { nextBus: null, allSchedules, visibleSchedules };
     }
 
-    const visibleSchedules = getRemainingBuses(allSchedules, currentTime);
     return {
       nextBus: visibleSchedules[0] ?? null,
       allSchedules,
@@ -227,11 +336,7 @@ export function ShuttlePage() {
   // 其他时刻（排除最近一班）
   const otherBuses = useMemo(() => {
     if (!nextBus) return visibleSchedules;
-
-    const nextBusIndex = visibleSchedules.indexOf(nextBus);
-    if (nextBusIndex === -1) return visibleSchedules;
-
-    return visibleSchedules.filter((_, index) => index !== nextBusIndex);
+    return visibleSchedules.slice(1);
   }, [visibleSchedules, nextBus]);
 
   const handleExchange = () => {
@@ -259,7 +364,7 @@ export function ShuttlePage() {
 
   // 将时刻分组显示（每行3个）
   const groupedBuses = useMemo(() => {
-    const groups: ScheduleItem[][] = [];
+    const groups: DisplayScheduleItem[][] = [];
     for (let i = 0; i < otherBuses.length; i += 3) {
       groups.push(otherBuses.slice(i, i + 3));
     }
@@ -283,8 +388,8 @@ export function ShuttlePage() {
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto px-8 pb-24">
         {/* Date Selector Row with Back to Today Button */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
+        <div className="mb-4 flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
             <TimeSelector
               value={dateInfo.month}
               onChange={(v) => handleDateChange("month", v)}
@@ -299,16 +404,19 @@ export function ShuttlePage() {
               max={dayMax}
               label="日"
             />
-            <span className="text-lg text-[#0F172A] font-medium ml-2">
+            <span className="ml-1 min-w-[2.2em] text-lg font-medium text-[#0F172A]">
               {dateInfo.weekday}
             </span>
           </div>
           {!todayFlag && (
             <button
               onClick={handleBackToToday}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#1E80C1] text-white text-sm font-medium hover:bg-[#125B8B] transition-colors"
+              className="ml-3 inline-flex h-8 shrink-0 items-center gap-0.5 rounded-full bg-[var(--color-primary)] px-2.5 text-[13px] font-medium text-white transition-colors hover:bg-[var(--color-primary-dark)]"
+              title="返回今日"
+              aria-label="返回今日"
             >
-              返回今日
+              <LeftArrowIcon />
+              <span>今日</span>
             </button>
           )}
         </div>
@@ -316,7 +424,7 @@ export function ShuttlePage() {
         {/* Date Bucket Label */}
         <div className="mb-3 text-xs text-[#6F7C8E]">
           当前：{bucketLabels[dateBucket]}
-          {!todayFlag && <span className="ml-2 text-[#F59E0B]">（非今日，显示全部时刻）</span>}
+          {!todayFlag && <span className="ml-2 text-[var(--color-warning)]">（非今日，显示全部时刻）</span>}
         </div>
 
         {/* Route Selector Card */}
@@ -356,15 +464,7 @@ export function ShuttlePage() {
             {nextBus ? (
               <div className="bg-[#D7E8F3] rounded-[20px] px-5 py-4 flex items-center justify-between">
                 <span className="text-2xl font-semibold text-[#0F172A]">{nextBus.departureTime}</span>
-                <span
-                  className={`text-sm font-medium px-3 py-1 rounded-full ${
-                    nextBus.isReservation
-                      ? "bg-[#F59E0B]/20 text-[#F59E0B]"
-                      : "bg-[#16A34A]/20 text-[#16A34A]"
-                  }`}
-                >
-                  {nextBus.isReservation ? "预约车" : "非预约车"}
-                </span>
+                <ScheduleStatusBadge status={nextBus.status} />
               </div>
             ) : allSchedules.length > 0 ? (
               <div className="bg-[#F1F5F9] rounded-[20px] px-5 py-4 text-center">
@@ -386,7 +486,7 @@ export function ShuttlePage() {
             </div>
             <p className="text-[13px] text-[#6F7C8E] mb-3">
               <span className="inline-flex items-center gap-1 mr-3">
-                <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
+                <span className="h-2 w-2 rounded-full bg-[var(--color-primary)]" />
                 预=预约车
               </span>
               <span className="inline-flex items-center gap-1">
@@ -400,26 +500,26 @@ export function ShuttlePage() {
               {groupedBuses.length > 0 ? (
                 <div className="space-y-1">
                   {groupedBuses.map((group, rowIndex) => (
-                    <div key={rowIndex} className="grid grid-cols-3">
+                    <div key={rowIndex} className="grid grid-cols-3 gap-x-8">
                       {group[0] && (
                         <ScheduleTimeItem
                           time={group[0].departureTime}
-                          isReservation={group[0].isReservation}
+                          status={group[0].status}
                           align="left"
                         />
                       )}
                       {group[1] && (
                         <ScheduleTimeItem
                           time={group[1].departureTime}
-                          isReservation={group[1].isReservation}
-                          align="center"
+                          status={group[1].status}
+                          align="left"
                         />
                       )}
                       {group[2] && (
                         <ScheduleTimeItem
                           time={group[2].departureTime}
-                          isReservation={group[2].isReservation}
-                          align="right"
+                          status={group[2].status}
+                          align="left"
                         />
                       )}
                     </div>
