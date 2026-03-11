@@ -46,13 +46,13 @@ export const campusByKey = Object.fromEntries(
 
 export const filters: Array<{ key: FilterKey; label: string }> = [
   { key: "teaching", label: "教学楼" },
-  { key: "office", label: "办公楼" },
+  { key: "library", label: "图书馆" },
   { key: "dorm", label: "宿舍楼" },
   { key: "canteen", label: "食堂" },
-  { key: "library", label: "图书馆" },
   { key: "commercial", label: "商业" },
   { key: "printing", label: "打印机" },
   { key: "parking", label: "停车场" },
+  { key: "powerBank", label: "充电宝" },
 ];
 
 function getCampusKey(campus: string): CampusKey {

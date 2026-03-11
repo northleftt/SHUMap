@@ -14,21 +14,12 @@ const SNAP_TOPS = {
 } satisfies Record<MapSheetMode, number>;
 
 const POI_CLOSE_DRAG_THRESHOLD_PX = 70;
-const FILTER_PILL_MIN_WIDTH_PX = 70;
-
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
 function getFilterRows(metrics: ReturnType<typeof useViewportMetrics>, filterCount: number) {
-  const sheetWidth = metrics.shellWidth - metrics.sheetSideInset * 2;
-  const horizontalPadding = metrics.isCompactHeight ? 32 : 40;
-  const gapX = metrics.isCompactHeight ? 10 : 12;
-  const contentWidth = Math.max(0, sheetWidth - horizontalPadding);
-  const columnCount = Math.max(
-    1,
-    Math.floor((contentWidth + gapX) / (FILTER_PILL_MIN_WIDTH_PX + gapX)),
-  );
+  const columnCount = Math.min(4, filterCount);
   return Math.ceil(filterCount / columnCount);
 }
 

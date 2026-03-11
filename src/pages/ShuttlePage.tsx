@@ -154,6 +154,12 @@ interface DisplayScheduleItem {
   status: ScheduleStatus;
 }
 
+interface RecentBusItem {
+  departureTime: string;
+  status: Exclude<ScheduleStatus, "mixed">;
+  label: string;
+}
+
 function mergeSchedulesByTime(schedules: ScheduleItem[]): DisplayScheduleItem[] {
   const merged = new Map<string, { hasReservation: boolean; hasNonReservation: boolean }>();
 
@@ -187,12 +193,6 @@ function getScheduleStatusTextClass(status: Exclude<ScheduleStatus, "mixed">): s
   return status === "reservation" ? "text-[var(--color-primary)]" : "text-[var(--color-text-muted)]";
 }
 
-function getScheduleStatusBadgeClasses(status: Exclude<ScheduleStatus, "mixed">): string {
-  return status === "reservation"
-    ? "bg-[var(--color-primary-soft)] text-[var(--color-primary)]"
-    : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]";
-}
-
 function ScheduleStatusInline({
   status,
   size = "text-xs",
@@ -212,27 +212,6 @@ function ScheduleStatusInline({
   return (
     <span className={`whitespace-nowrap font-medium ${size} ${getScheduleStatusTextClass(status)}`}>
       {status === "reservation" ? "预" : "非"}
-    </span>
-  );
-}
-
-function ScheduleStatusBadge({ status }: { status: ScheduleStatus }) {
-  if (status === "mixed") {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="rounded-full bg-[var(--color-primary-soft)] px-3 py-1 text-sm font-medium text-[var(--color-primary)]">
-          预约车
-        </span>
-        <span className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-sm font-medium text-[var(--color-text-muted)]">
-          非预约车
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <span className={`rounded-full px-3 py-1 text-sm font-medium ${getScheduleStatusBadgeClasses(status)}`}>
-      {status === "reservation" ? "预约车" : "非预约车"}
     </span>
   );
 }
@@ -316,28 +295,48 @@ export function ShuttlePage() {
   );
 
   // 计算显示的班次
-  const { nextBus, allSchedules, visibleSchedules } = useMemo(() => {
+  const { visibleSchedules, recentBuses } = useMemo(() => {
     const allSchedules = getTodaySchedules(from, to, selectedDate);
-    const visibleSchedules = mergeSchedulesByTime(
-      todayFlag ? getRemainingBuses(allSchedules, currentTime) : allSchedules,
-    );
+    const remainingSchedules = todayFlag ? getRemainingBuses(allSchedules, currentTime) : allSchedules;
+    const visibleSchedules = mergeSchedulesByTime(remainingSchedules);
 
     if (!todayFlag) {
-      return { nextBus: null, allSchedules, visibleSchedules };
+      return { visibleSchedules, recentBuses: [] as RecentBusItem[] };
+    }
+
+    const nextReservationBus = remainingSchedules.find((schedule) => schedule.isReservation);
+    const nextNonReservationBus = remainingSchedules.find((schedule) => !schedule.isReservation);
+    const recentBuses: RecentBusItem[] = [];
+
+    if (nextReservationBus) {
+      recentBuses.push({
+        departureTime: nextReservationBus.departureTime,
+        status: "reservation",
+        label: "最近预约车",
+      });
+    }
+
+    if (nextNonReservationBus) {
+      recentBuses.push({
+        departureTime: nextNonReservationBus.departureTime,
+        status: "nonReservation",
+        label: "最近非预约车",
+      });
     }
 
     return {
-      nextBus: visibleSchedules[0] ?? null,
-      allSchedules,
       visibleSchedules,
+      recentBuses,
     };
   }, [from, to, selectedDate, currentTime, todayFlag]);
 
   // 其他时刻（排除最近一班）
   const otherBuses = useMemo(() => {
-    if (!nextBus) return visibleSchedules;
-    return visibleSchedules.slice(1);
-  }, [visibleSchedules, nextBus]);
+    if (!todayFlag || recentBuses.length === 0) return visibleSchedules;
+
+    const recentDepartureTimes = new Set(recentBuses.map((schedule) => schedule.departureTime));
+    return visibleSchedules.filter((schedule) => !recentDepartureTimes.has(schedule.departureTime));
+  }, [todayFlag, visibleSchedules, recentBuses]);
 
   const handleExchange = () => {
     setFrom(to);
@@ -458,21 +457,28 @@ export function ShuttlePage() {
         </div>
 
         {/* Next Bus Section - 仅当天显示 */}
-        {todayFlag && (
+        {todayFlag && recentBuses.length > 0 && (
           <div className="mb-5">
             <h2 className="text-xl font-semibold text-[#0F172A] mb-3">最近一班</h2>
-            {nextBus ? (
-              <div className="bg-[#D7E8F3] rounded-[20px] px-5 py-4 flex items-center justify-between">
-                <span className="text-2xl font-semibold text-[#0F172A]">{nextBus.departureTime}</span>
-                <ScheduleStatusBadge status={nextBus.status} />
+            <div className="rounded-[20px] bg-white px-5 py-5">
+              <div className={`grid gap-6 ${recentBuses.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+                {recentBuses.map((bus) => (
+                  <div
+                    key={`${bus.status}-${bus.departureTime}`}
+                    className={
+                      recentBuses.length === 1
+                        ? "justify-self-start"
+                        : bus.status === "reservation"
+                          ? "justify-self-start"
+                          : "justify-self-center"
+                    }
+                  >
+                    <p className="mb-2 text-sm font-medium text-[var(--color-primary)]">{bus.label}</p>
+                    <span className="text-2xl font-semibold text-[#0F172A]">{bus.departureTime}</span>
+                  </div>
+                ))}
               </div>
-            ) : allSchedules.length > 0 ? (
-              <div className="bg-[#F1F5F9] rounded-[20px] px-5 py-4 text-center">
-                <p className="text-[#6F7C8E]">今日班次已结束</p>
-              </div>
-            ) : (
-              <EmptyState />
-            )}
+            </div>
           </div>
         )}
 
@@ -525,7 +531,7 @@ export function ShuttlePage() {
                     </div>
                   ))}
                 </div>
-              ) : todayFlag && nextBus ? (
+              ) : todayFlag && recentBuses.length > 0 ? (
                 <p className="text-[#6F7C8E] text-center py-4">无其他时刻</p>
               ) : null}
             </div>
@@ -545,7 +551,7 @@ export function ShuttlePage() {
           </button>
           <button
             onClick={() => window.open("/docs/shuttle-schedule.pdf", "_blank")}
-            className="text-[14px] font-medium text-[#CBD5E1] hover:text-[#6F7C8E] transition-colors flex items-center gap-1"
+            className="flex items-center gap-1 text-[14px] font-medium text-[var(--color-text-muted)] transition-colors hover:text-[#0F172A]"
           >
             查看全部时刻表
             <span className="text-lg">›</span>

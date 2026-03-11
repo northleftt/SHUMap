@@ -112,7 +112,7 @@ function FilterPills({
 }) {
   return (
     <div
-      className={`grid grid-cols-[repeat(auto-fit,minmax(70px,1fr))] ${
+      className={`grid grid-cols-4 ${
         isCompact ? "mt-3 gap-x-2.5 gap-y-2" : "mt-4 gap-x-3 gap-y-2.5"
       }`}
     >
@@ -123,7 +123,7 @@ function FilterPills({
             key={filter.key}
             className={`rounded-[16px] px-2 font-medium transition-colors ${
               isCompact ? "h-[24px]" : "h-[26px]"
-            } ${isNarrow ? "text-[10px]" : "text-[11px]"}`}
+            } ${isNarrow ? "text-[9px]" : "text-[10px]"}`}
             style={{
               background: active ? "var(--color-primary)" : "var(--color-primary-soft)",
               color: active ? "#d7e8f3" : "var(--color-primary)",

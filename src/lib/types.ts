@@ -8,7 +8,8 @@ export type FilterKey =
   | "library"
   | "commercial"
   | "printing"
-  | "parking";
+  | "parking"
+  | "powerBank";
 
 export type MapSheetMode =
   | "fullscreen_map"
