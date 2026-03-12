@@ -32,6 +32,20 @@ interface MapBottomSheetProps {
 
 const PARTIAL_RESULTS_PREVIEW_COUNT = 2;
 const DRAG_HANDLE_OFFSET_TOP_PX = 28;
+type FacilityKey =
+  | "hasPrinter"
+  | "hasElevator"
+  | "hasVendingMachine"
+  | "hasPowerBank"
+  | "hasParking";
+
+const facilityLabels: Array<{ key: FacilityKey; label: string }> = [
+  { key: "hasPrinter", label: "打印机" },
+  { key: "hasElevator", label: "电梯" },
+  { key: "hasVendingMachine", label: "贩卖机" },
+  { key: "hasPowerBank", label: "充电宝" },
+  { key: "hasParking", label: "停车场" },
+];
 
 function SearchIcon() {
   return (
@@ -139,42 +153,75 @@ function FilterPills({
   );
 }
 
-function PlaceholderMeta({
+function getMetaTags(building: MapBuilding) {
+  const tags: string[] = [];
+  const typeLabel = building.detail.typeLabel.trim();
+
+  if (typeLabel) {
+    tags.push(typeLabel);
+  }
+
+  facilityLabels.forEach(({ key, label }) => {
+    if (building.detail[key] === true) {
+      tags.push(label);
+    }
+  });
+
+  return tags;
+}
+
+function getDisplayText(value: string) {
+  const trimmed = value.trim();
+  return trimmed || "\u00A0";
+}
+
+function PoiMetaTags({
+  building,
   compact,
-  includeOpenTime = true,
 }: {
+  building: MapBuilding;
   compact?: boolean;
-  includeOpenTime?: boolean;
 }) {
-  const tags = compact ? ["打印机", "电梯"] : ["打印机", "电梯", "贩卖机"];
+  const tags = getMetaTags(building);
+
+  if (tags.length === 0) {
+    return null;
+  }
+
   return (
-    <>
-      <div className={`${compact ? "" : "mt-3"} flex flex-wrap gap-2`}>
-        {tags.map((tag, index) => (
-          <span
-            key={tag}
-            className="rounded-full px-2 py-[2px] text-[10px] font-medium"
-            style={{
-              background:
-                index === tags.length - 1 && !compact
-                  ? "var(--color-primary-soft)"
-                  : "var(--color-primary)",
-              color:
-                index === tags.length - 1 && !compact
-                  ? "rgba(255,255,255,0.88)"
-                  : "#ffffff",
-            }}
-          >
-            {tag}
-          </span>
-        ))}
-      </div>
-      {includeOpenTime ? (
-        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          开放时间：每日工作时段
-        </p>
-      ) : null}
-    </>
+    <div className={`${compact ? "" : "mt-3"} flex flex-wrap gap-2`}>
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className="rounded-full bg-[var(--color-primary-soft)] px-2 py-[2px] text-[10px] font-medium text-[var(--color-primary)]"
+        >
+          {tag}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function PoiImage({
+  src,
+  alt,
+  className,
+}: {
+  src: string;
+  alt: string;
+  className: string;
+}) {
+  const hasImage = src.trim().length > 0;
+
+  if (hasImage) {
+    return <img alt={alt} className={`${className} object-cover`} src={src} />;
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      className={`${className} bg-[#EEF3F8] shadow-[inset_0_1px_0_rgba(255,255,255,0.65)]`}
+    />
   );
 }
 
@@ -201,6 +248,8 @@ function ResultCard({
   onClick: (poiKey: string) => void;
   isLast?: boolean;
 }) {
+  const openHours = building.detail.openHours.trim();
+
   return (
     <button
       className={`group w-full px-4 py-3 text-left transition-colors hover:bg-white/80 ${
@@ -210,7 +259,11 @@ function ResultCard({
       type="button"
     >
       <div className="flex items-start gap-4">
-        <div className="h-[68px] w-[88px] shrink-0 rounded-[4px] bg-[#5168bb] shadow-[inset_0_1px_0_rgba(255,255,255,0.18)]" />
+        <PoiImage
+          alt={building.name}
+          className="h-[68px] w-[88px] shrink-0 rounded-[4px]"
+          src={building.detail.coverImageUrl}
+        />
         <div className="min-w-0 flex-1 pr-1">
           <div className="flex items-start gap-3">
             <div className="flex h-[68px] min-w-0 flex-1 flex-col justify-between py-[2px]">
@@ -223,9 +276,9 @@ function ResultCard({
                 </span>
               </div>
               <p className="text-[11px] leading-none text-[var(--color-text-muted)]">
-                开放时间：每日工作时段
+                {openHours ? `开放时间：${openHours}` : "\u00A0"}
               </p>
-              <PlaceholderMeta compact includeOpenTime={false} />
+              <PoiMetaTags building={building} compact />
             </div>
             <span className="mt-[4px] shrink-0 text-[var(--color-text-muted)] transition-transform group-hover:translate-x-0.5">
               <ResultCardArrow />
@@ -251,6 +304,11 @@ function PoiDetail({
 }: {
   building: MapBuilding;
 }) {
+  const organization = getDisplayText(building.detail.organization);
+  const accessMethod = getDisplayText(building.detail.accessMethod);
+  const openHours = getDisplayText(building.detail.openHours);
+  const phone = getDisplayText(building.detail.phone);
+
   return (
     <div className="pb-8 pl-10 pr-8 pt-6">
       {/* 标题行：楼名左对齐，到这去靠右 */}
@@ -275,23 +333,35 @@ function PoiDetail({
 
       <div className="mb-3 h-px bg-[var(--color-border)]" />
       {/* tags 仅展示，不重复开放时间（底部信息行已有） */}
-      <PlaceholderMeta includeOpenTime={false} />
+      <PoiMetaTags building={building} />
       <div className="mt-3 grid grid-cols-2 gap-4">
-        <div className="h-[81px] rounded-[4px] bg-[#4a60b2]" />
-        <div className="h-[81px] rounded-[4px] bg-[#4a60b2]" />
+        <PoiImage
+          alt={`${building.name} 图片 1`}
+          className="h-[81px] rounded-[4px]"
+          src={building.detail.coverImageUrl}
+        />
+        <PoiImage
+          alt={`${building.name} 图片 2`}
+          className="h-[81px] rounded-[4px]"
+          src={building.detail.galleryImageUrl}
+        />
       </div>
       <div className="mt-5 space-y-3 text-[13px]">
         <p className="flex items-center justify-between gap-4 leading-none">
+          <span className="text-[var(--color-text-muted)]">所属单位</span>
+          <span className="font-medium text-[var(--color-text)]">{organization}</span>
+        </p>
+        <p className="flex items-center justify-between gap-4 leading-none">
           <span className="text-[var(--color-text-muted)]">进入方式</span>
-          <span className="font-medium text-[var(--color-text)]">刷校园卡</span>
+          <span className="font-medium text-[var(--color-text)]">{accessMethod}</span>
         </p>
         <p className="flex items-center justify-between gap-4 leading-none">
           <span className="text-[var(--color-text-muted)]">开放时间</span>
-          <span className="font-medium text-[var(--color-text)]">每日工作时段</span>
+          <span className="font-medium text-[var(--color-text)]">{openHours}</span>
         </p>
         <p className="flex items-center justify-between gap-4 leading-none">
           <span className="text-[var(--color-text-muted)]">联系电话</span>
-          <span className="font-medium text-[var(--color-text)]">12345678900</span>
+          <span className="font-medium text-[var(--color-text)]">{phone}</span>
         </p>
       </div>
     </div>

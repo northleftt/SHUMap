@@ -2,7 +2,14 @@ import baoshanSvg from "../../地图/宝山本部地图.svg?raw";
 import jiadingSvg from "../../地图/嘉定校区地图.svg?raw";
 import yanchangSvg from "../../地图/延长校区地图.svg?raw";
 import rawBuildings from "../../data/campus-buildings.picked.json";
-import type { CampusConfig, CampusKey, FilterKey, MapBuilding, RawBuilding } from "./types";
+import type {
+  CampusConfig,
+  CampusKey,
+  FilterKey,
+  MapBuilding,
+  PoiDetailData,
+  RawBuilding,
+} from "./types";
 
 export const campusConfigs: CampusConfig[] = [
   {
@@ -55,6 +62,24 @@ export const filters: Array<{ key: FilterKey; label: string }> = [
   { key: "powerBank", label: "充电宝" },
 ];
 
+function normalizePoiDetail(detail?: Partial<PoiDetailData>): PoiDetailData {
+  return {
+    typeLabel: detail?.typeLabel ?? "",
+    facilityNotes: detail?.facilityNotes ?? "",
+    organization: detail?.organization ?? "",
+    openHours: detail?.openHours ?? "",
+    phone: detail?.phone ?? "",
+    accessMethod: detail?.accessMethod ?? "",
+    coverImageUrl: detail?.coverImageUrl ?? "",
+    galleryImageUrl: detail?.galleryImageUrl ?? "",
+    hasPrinter: detail?.hasPrinter ?? null,
+    hasElevator: detail?.hasElevator ?? null,
+    hasVendingMachine: detail?.hasVendingMachine ?? null,
+    hasPowerBank: detail?.hasPowerBank ?? null,
+    hasParking: detail?.hasParking ?? null,
+  };
+}
+
 function getCampusKey(campus: string): CampusKey {
   if (campus.includes("宝山")) return "baoshan";
   if (campus.includes("嘉定")) return "jiading";
@@ -74,37 +99,59 @@ function buildAmapUrl(building: RawBuilding) {
 }
 
 function getFilterGroups(building: RawBuilding): FilterKey[] {
+  const detail = normalizePoiDetail(building.detail);
+  const groups = new Set<FilterKey>();
+
   switch (building.category) {
     case "dorm":
-      return ["dorm"];
+      groups.add("dorm");
+      break;
     case "canteen":
-      return ["canteen", "commercial"];
+      groups.add("canteen");
+      groups.add("commercial");
+      break;
     case "library":
-      return ["library", "printing"];
+      groups.add("library");
+      groups.add("printing");
+      break;
     case "other":
-      return ["commercial", "parking"];
+      groups.add("commercial");
+      groups.add("parking");
+      break;
     case "building":
     default: {
       const normalizedName = building.name.toLowerCase();
-      const groups: FilterKey[] = [];
       if (/[a-z]\s*楼|教学|实验|学院|馆/.test(normalizedName) || /楼/.test(building.name)) {
-        groups.push("teaching");
+        groups.add("teaching");
       }
       if (/行政|办公|中心|伟长/.test(building.name)) {
-        groups.push("office");
+        groups.add("office");
       }
-      if (groups.length === 0) {
-        groups.push("teaching");
+      if (groups.size === 0) {
+        groups.add("teaching");
       }
-      return groups;
+      break;
     }
   }
+
+  if (detail.hasPrinter === true) {
+    groups.add("printing");
+  }
+  if (detail.hasPowerBank === true) {
+    groups.add("powerBank");
+  }
+  if (detail.hasParking === true) {
+    groups.add("parking");
+  }
+
+  return Array.from(groups);
 }
 
 export const buildings: MapBuilding[] = (rawBuildings as RawBuilding[]).map((building) => {
   const campusKey = getCampusKey(building.campus);
   return {
     ...building,
+    detail: normalizePoiDetail(building.detail),
     campusKey,
     campusLabel: building.campus,
     poiKey: `${campusKey}:${building.svgElementId}`,

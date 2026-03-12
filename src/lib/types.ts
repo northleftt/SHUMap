@@ -18,6 +18,22 @@ export type MapSheetMode =
   | "full_results"
   | "poi_detail";
 
+export interface PoiDetailData {
+  typeLabel: string;
+  facilityNotes: string;
+  organization: string;
+  openHours: string;
+  phone: string;
+  accessMethod: string;
+  coverImageUrl: string;
+  galleryImageUrl: string;
+  hasPrinter: boolean | null;
+  hasElevator: boolean | null;
+  hasVendingMachine: boolean | null;
+  hasPowerBank: boolean | null;
+  hasParking: boolean | null;
+}
+
 export interface NavigationData {
   coordSystem: string;
   longitude: number;
@@ -32,6 +48,7 @@ export interface RawBuilding {
   campus: string;
   category: string;
   navigation?: NavigationData;
+  detail?: Partial<PoiDetailData>;
 }
 
 export interface CampusConfig {
@@ -46,7 +63,8 @@ export interface CampusConfig {
   selectionScaleMultiplier: number;
 }
 
-export interface MapBuilding extends RawBuilding {
+export interface MapBuilding extends Omit<RawBuilding, "detail"> {
+  detail: PoiDetailData;
   campusKey: CampusKey;
   poiKey: string;
   campusLabel: string;
