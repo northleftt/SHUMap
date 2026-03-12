@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:cloudflare": "npm run build",
     "build:edgeone": "VITE_ROUTER_MODE=hash npm run build",
     "preview": "vite preview",
     "pick:coords": "node scripts/pick_coords_playwright.js",
