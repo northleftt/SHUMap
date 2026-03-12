@@ -63,11 +63,42 @@ npm run dev
 npm run build
 ```
 
+如果你想本地模拟静态托管更稳妥的路由模式，也可以这样构建：
+
+```bash
+VITE_ROUTER_MODE=hash npm run build
+```
+
 ### 本地预览构建结果
 
 ```bash
 npm run preview
 ```
+
+## 网页部署
+
+项目构建后会输出到 `dist/`，可以直接部署到常见静态托管平台。
+
+- 默认构建：`npm run build`
+- 更适合静态托管的路由模式：`npm run build:edgeone`
+
+如果后面改成自定义域名、EdgeOne、Vercel、Netlify 或国内云厂商静态托管，也可以继续沿用当前项目；需要时只要调整构建环境变量即可。
+
+### EdgeOne Pages
+
+如果要快速发布一个更适合中国大陆访问的原型站，可以直接使用 EdgeOne Pages：
+
+```bash
+npm run build:edgeone
+```
+
+然后将构建产物 `dist/` 上传到 EdgeOne Pages，或使用官方 CLI 执行：
+
+```bash
+edgeone pages deploy ./dist -n shumap
+```
+
+这个项目在 EdgeOne 上建议继续使用 `hash` 路由模式，能减少静态托管场景下的刷新路由问题。
 
 ## 常用脚本
 
