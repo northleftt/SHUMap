@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { FilterKey, MapBuilding, MapSheetMode } from "../lib/types";
 
 interface FilterOption {
@@ -25,6 +26,8 @@ interface MapBottomSheetProps {
   onClosePoi: () => void;
   onOpenFullResults: () => void;
   onDragPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  filterOpen: boolean;
+  onToggleFilterOpen: () => void;
   isCompact: boolean;
   isShort: boolean;
   isNarrow: boolean;
@@ -32,20 +35,6 @@ interface MapBottomSheetProps {
 
 const PARTIAL_RESULTS_PREVIEW_COUNT = 2;
 const DRAG_HANDLE_OFFSET_TOP_PX = 28;
-type FacilityKey =
-  | "hasPrinter"
-  | "hasElevator"
-  | "hasVendingMachine"
-  | "hasPowerBank"
-  | "hasParking";
-
-const facilityLabels: Array<{ key: FacilityKey; label: string }> = [
-  { key: "hasPrinter", label: "打印机" },
-  { key: "hasElevator", label: "电梯" },
-  { key: "hasVendingMachine", label: "贩卖机" },
-  { key: "hasPowerBank", label: "充电宝" },
-  { key: "hasParking", label: "停车场" },
-];
 
 function SearchIcon() {
   return (
@@ -61,6 +50,14 @@ function CloseIcon() {
     <svg aria-hidden="true" className="size-3.5" viewBox="0 0 16 16" fill="none">
       <path d="M3 3L13 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path d="M13 3L3 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg aria-hidden="true" className="size-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
   );
 }
@@ -111,7 +108,7 @@ function SearchBar({
   );
 }
 
-function FilterPills({
+function FilterPopup({
   activeFilter,
   filters,
   onToggle,
@@ -125,54 +122,48 @@ function FilterPills({
   isNarrow: boolean;
 }) {
   return (
-    <div
-      className={`grid grid-cols-4 ${
-        isCompact ? "mt-3 gap-x-2.5 gap-y-2" : "mt-4 gap-x-3 gap-y-2.5"
-      }`}
-    >
-      {filters.map((filter) => {
-        const active = activeFilter === filter.key;
-        return (
-          <button
-            key={filter.key}
-            className={`rounded-[16px] px-2 font-medium transition-colors ${
-              isCompact ? "h-[24px]" : "h-[26px]"
-            } ${isNarrow ? "text-[9px]" : "text-[10px]"}`}
-            style={{
-              background: active ? "var(--color-primary)" : "var(--color-primary-soft)",
-              color: active ? "#d7e8f3" : "var(--color-primary)",
-            }}
-            onClick={() => onToggle(filter.key)}
-            type="button"
-          >
-            {filter.label}
-          </button>
-        );
-      })}
+    <div className={isCompact ? "px-4 py-2" : "px-5 py-2.5"}>
+      <div
+        className={`grid grid-cols-4 max-h-[148px] overflow-y-auto ${
+          isCompact ? "gap-x-2.5 gap-y-2" : "gap-x-3 gap-y-2.5"
+        }`}
+      >
+        {filters.map((filter) => {
+          const active = activeFilter === filter.key;
+          return (
+            <button
+              key={filter.key}
+              className={`rounded-[16px] px-2 font-medium transition-colors ${
+                isCompact ? "h-[28px]" : "h-[30px]"
+              } ${isNarrow ? "text-[10px]" : "text-[11px]"}`}
+              style={{
+                background: active ? "var(--color-primary)" : "var(--color-primary-soft)",
+                color: active ? "#d7e8f3" : "var(--color-primary)",
+              }}
+              onClick={() => onToggle(filter.key)}
+              type="button"
+            >
+              {filter.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 function getMetaTags(building: MapBuilding) {
-  const tags: string[] = [];
-  const typeLabel = building.detail.typeLabel.trim();
-
-  if (typeLabel) {
-    tags.push(typeLabel);
-  }
-
-  facilityLabels.forEach(({ key, label }) => {
-    if (building.detail[key] === true) {
-      tags.push(label);
-    }
-  });
-
-  return tags;
+  return building.tags ?? [];
 }
 
 function getDisplayText(value: string) {
   const trimmed = value.trim();
   return trimmed || "\u00A0";
+}
+
+function getMediaUrl(building: MapBuilding, role: "cover" | "gallery", index = 0) {
+  const items = building.detail.media.filter((item) => item.role === role && item.url.trim());
+  return items[index]?.url ?? "";
 }
 
 function PoiMetaTags({
@@ -248,7 +239,7 @@ function ResultCard({
   onClick: (poiKey: string) => void;
   isLast?: boolean;
 }) {
-  const openHours = building.detail.openHours.trim();
+  const openHours = building.detail.facts.find((fact) => fact.label === "开放时间")?.value.trim() ?? "";
 
   return (
     <button
@@ -262,7 +253,7 @@ function ResultCard({
         <PoiImage
           alt={building.name}
           className="h-[68px] w-[88px] shrink-0 rounded-[4px]"
-          src={building.detail.coverImageUrl}
+          src={getMediaUrl(building, "cover")}
         />
         <div className="min-w-0 flex-1 pr-1">
           <div className="flex items-start gap-3">
@@ -304,10 +295,19 @@ function PoiDetail({
 }: {
   building: MapBuilding;
 }) {
-  const organization = getDisplayText(building.detail.organization);
-  const accessMethod = getDisplayText(building.detail.accessMethod);
-  const openHours = getDisplayText(building.detail.openHours);
-  const phone = getDisplayText(building.detail.phone);
+  const [navigationOpen, setNavigationOpen] = useState(false);
+  const defaultFacts = ["所属单位", "进入方式", "开放时间", "联系电话"];
+  const facts = building.detail.facts.length > 0
+    ? building.detail.facts
+    : defaultFacts.map((label) => ({ label, value: "" }));
+  const navigationOptions = building.navigationUrls
+    ? [
+      { label: "高德地图", url: building.navigationUrls.amap },
+      { label: "腾讯地图", url: building.navigationUrls.tencent },
+      { label: "百度地图", url: building.navigationUrls.baidu },
+      { label: "系统地图", url: building.navigationUrls.system },
+    ]
+    : [];
 
   return (
     <div className="pb-8 pl-10 pr-8 pt-6">
@@ -316,19 +316,36 @@ function PoiDetail({
         <h2 className="min-w-0 flex-1 text-[30px] font-medium leading-tight text-black">
           {building.name}
         </h2>
-        <a
-          className={`inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold no-underline ${
-            building.amapUrl
-              ? "bg-[var(--color-primary-soft)] text-[var(--color-primary)]"
-              : "bg-[rgba(203,213,225,0.7)] text-[rgba(255,255,255,0.9)]"
-          }`}
-          href={building.amapUrl ?? undefined}
-          rel="noreferrer"
-          target={building.amapUrl ? "_blank" : undefined}
-        >
-          <NavArrowIcon />
-          到这去
-        </a>
+        <div className="relative shrink-0">
+          <button
+            className={`inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold no-underline ${
+              building.navigationUrls
+                ? "bg-[var(--color-primary-soft)] text-[var(--color-primary)]"
+                : "bg-[rgba(203,213,225,0.7)] text-[rgba(255,255,255,0.9)]"
+            }`}
+            disabled={!building.navigationUrls}
+            onClick={() => setNavigationOpen((open) => !open)}
+            type="button"
+          >
+            <NavArrowIcon />
+            到这去
+          </button>
+          {navigationOpen && navigationOptions.length > 0 ? (
+            <div className="absolute right-0 top-10 z-50 w-[128px] overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-white shadow-[var(--shadow-floating)]">
+              {navigationOptions.map((option) => (
+                <a
+                  className="block px-4 py-2 text-[13px] font-semibold text-[var(--color-text)] no-underline hover:bg-[var(--color-surface-muted)]"
+                  href={option.url}
+                  key={option.label}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {option.label}
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       <div className="mb-3 h-px bg-[var(--color-border)]" />
@@ -338,31 +355,24 @@ function PoiDetail({
         <PoiImage
           alt={`${building.name} 图片 1`}
           className="h-[81px] rounded-[4px]"
-          src={building.detail.coverImageUrl}
+          src={getMediaUrl(building, "cover")}
         />
         <PoiImage
           alt={`${building.name} 图片 2`}
           className="h-[81px] rounded-[4px]"
-          src={building.detail.galleryImageUrl}
+          src={getMediaUrl(building, "gallery")}
         />
       </div>
+      {building.detail.description.trim() ? (
+        <p className="mt-4 text-[13px] leading-5 text-[var(--color-text)]">{building.detail.description}</p>
+      ) : null}
       <div className="mt-5 space-y-3 text-[13px]">
-        <p className="flex items-center justify-between gap-4 leading-none">
-          <span className="text-[var(--color-text-muted)]">所属单位</span>
-          <span className="font-medium text-[var(--color-text)]">{organization}</span>
-        </p>
-        <p className="flex items-center justify-between gap-4 leading-none">
-          <span className="text-[var(--color-text-muted)]">进入方式</span>
-          <span className="font-medium text-[var(--color-text)]">{accessMethod}</span>
-        </p>
-        <p className="flex items-center justify-between gap-4 leading-none">
-          <span className="text-[var(--color-text-muted)]">开放时间</span>
-          <span className="font-medium text-[var(--color-text)]">{openHours}</span>
-        </p>
-        <p className="flex items-center justify-between gap-4 leading-none">
-          <span className="text-[var(--color-text-muted)]">联系电话</span>
-          <span className="font-medium text-[var(--color-text)]">{phone}</span>
-        </p>
+        {facts.map((fact) => (
+          <p className="flex items-center justify-between gap-4 leading-none" key={`${fact.label}:${fact.value}`}>
+            <span className="text-[var(--color-text-muted)]">{fact.label}</span>
+            <span className="font-medium text-[var(--color-text)]">{getDisplayText(fact.value)}</span>
+          </p>
+        ))}
       </div>
     </div>
   );
@@ -380,7 +390,7 @@ function ResultsEmptyState({
   onClearQuery: () => void;
 }) {
   const hasQuery = Boolean(query.trim());
-  const actionLabel = activeFilter ? "清除筛选标签" : hasQuery ? "清空搜索词" : null;
+  const actionLabel = activeFilter ? "清除筛选条件" : hasQuery ? "清空搜索词" : null;
   const handleAction = activeFilter
     ? () => onClearFilter(activeFilter)
     : hasQuery
@@ -407,7 +417,7 @@ function SearchPromptState() {
   return (
     <div className="flex min-h-full flex-col items-center justify-center gap-2 px-6 pb-10 text-center">
       <p className="text-[14px] font-medium text-[var(--color-text-muted)]">
-        输入关键词或选择标签开始搜索
+        输入关键词或选择分类开始搜索
       </p>
     </div>
   );
@@ -433,6 +443,8 @@ export function MapBottomSheet({
   onClosePoi,
   onOpenFullResults,
   onDragPointerDown,
+  filterOpen,
+  onToggleFilterOpen,
   isCompact,
   isShort,
   isNarrow,
@@ -477,27 +489,60 @@ export function MapBottomSheet({
       {mode === "fullscreen_map" ? null : (
         <div className="flex h-full flex-col">
           {mode !== "poi_detail" ? (
-            <div className={isCompact ? "px-4 pb-3 pt-6" : "px-5 pb-4 pt-7"}>
-              <SearchBar
-                value={query}
-                showClose={mode === "partial_results" || mode === "full_results" || Boolean(query.trim())}
-                placeholder="搜索地点"
-                onChange={onQueryChange}
-                onFocus={onQueryFocus}
-                onClear={onClearQuery}
-                isCompact={isCompact}
-              />
-              <FilterPills
-                activeFilter={activeFilter}
-                filters={filters}
-                isCompact={isCompact}
-                isNarrow={isNarrow}
-                onToggle={onFilterToggle}
-              />
+            <div className={isCompact ? "px-4 pt-6" : "px-5 pt-7"}>
+              <div className="flex items-center gap-2.5">
+                <div className="min-w-0 flex-1">
+                  <SearchBar
+                    value={query}
+                    showClose={mode === "partial_results" || mode === "full_results" || Boolean(query.trim())}
+                    placeholder="搜索地点"
+                    onChange={onQueryChange}
+                    onFocus={onQueryFocus}
+                    onClear={onClearQuery}
+                    isCompact={isCompact}
+                  />
+                </div>
+                <button
+                  className={`shrink-0 grid place-items-center rounded-full border border-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] transition-colors ${
+                    isCompact ? "size-[38px]" : "size-[41px]"
+                  } ${
+                    activeFilter
+                      ? "bg-[var(--color-primary)] text-white border-[var(--color-primary)]"
+                      : "bg-[#edf0f4] text-[var(--color-text-muted)]"
+                  }`}
+                  onClick={onToggleFilterOpen}
+                  type="button"
+                >
+                  <FilterIcon />
+                </button>
+              </div>
             </div>
           ) : null}
+          {filterOpen && mode !== "poi_detail" ? (
+            <FilterPopup
+              activeFilter={activeFilter}
+              filters={filters}
+              isCompact={isCompact}
+              isNarrow={isNarrow}
+              onToggle={onFilterToggle}
+            />
+          ) : null}
 
-          {mode === "default_search" ? <div className="flex-1" /> : null}
+          {mode === "default_search" ? (
+            filterOpen ? (
+              <div className="flex-1" />
+            ) : (
+              <div className="flex-1 flex items-start pt-2">
+                <p className={`text-center w-full text-[var(--color-text-muted)] ${isCompact ? "text-[11px] leading-none" : "text-[12px] leading-none"}`}>
+                  点击
+                  <svg aria-hidden="true" className="size-[13px] inline-block mx-0.5 -translate-y-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                  </svg>
+                  按分类筛选地点
+                </p>
+              </div>
+            )
+          ) : null}
 
           {mode === "partial_results" ? (
             <div className={`flex-1 overflow-hidden border-t border-transparent ${isCompact ? "px-3.5 pb-3" : "px-4 pb-4"}`}>

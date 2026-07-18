@@ -6,8 +6,11 @@ import {
   type ScheduleItem,
   getCurrentDateBucket,
   getRemainingBuses,
-  getTodaySchedules,
+  fetchSchedules,
+  loadTransitStops,
 } from "../utils/shuttle";
+import type { TransitStop } from "../lib/api/types";
+import { ApiError } from "../lib/api/client";
 
 const ArrowDownIcon = () => (
   <svg width="12" height="8" viewBox="0 0 12 8" fill="none">
@@ -240,15 +243,6 @@ function ScheduleTimeItem({
   );
 }
 
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center justify-center py-8 text-center">
-      <p className="text-[#6F7C8E] text-base">今日无班次</p>
-      <p className="text-[#CBD5E1] text-sm mt-1">请尝试更换日期或线路</p>
-    </div>
-  );
-}
-
 // 判断是否是今天
 function isToday(date: Date): boolean {
   const today = new Date();
@@ -272,11 +266,22 @@ function getSafeDate(baseDate: Date, type: "month" | "day", value: number): Date
   return new Date(year, month, day);
 }
 
+type ScheduleState =
+  | { status: "loading" }
+  | { status: "ready"; schedules: ScheduleItem[] }
+  | { status: "empty" }
+  | { status: "error"; message: string };
+
+/** Stable empty reference so memos don't re-run while schedules load or are unavailable. */
+const EMPTY_SCHEDULES: ScheduleItem[] = [];
+
 export function ShuttlePage() {
   const [from, setFrom] = useState<Campus>("宝山校区");
   const [to, setTo] = useState<Campus>("嘉定校区");
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [stops, setStops] = useState<TransitStop[] | null>(null);
+  const [scheduleState, setScheduleState] = useState<ScheduleState>({ status: "loading" });
 
   // 每分钟更新当前时间
   useEffect(() => {
@@ -286,6 +291,42 @@ export function ShuttlePage() {
     return () => clearInterval(timer);
   }, []);
 
+  // 从当前发布版本加载校车站点（一次）。无发布版本时显式置空，不回退静态数据。
+  useEffect(() => {
+    const controller = new AbortController();
+    loadTransitStops(controller.signal)
+      .then((loaded) => setStops(loaded))
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.isReleaseUnavailable) {
+          setStops([]);
+          setScheduleState({ status: "empty" });
+          return;
+        }
+        setScheduleState({ status: "error", message: error instanceof Error ? error.message : "加载失败" });
+      });
+    return () => controller.abort();
+  }, []);
+
+  // 线路 / 日期变化时向 journeys 接口拉取当日班次，保留 trip 身份与预约策略。
+  // stops 为 [] 表示无已发布版本（effect1 已置 empty），此处不再发请求，避免覆盖空态。
+  useEffect(() => {
+    if (!stops || stops.length === 0) return;
+    const controller = new AbortController();
+    setScheduleState({ status: "loading" });
+    fetchSchedules(stops, from, to, selectedDate, controller.signal)
+      .then((schedules) => setScheduleState({ status: "ready", schedules }))
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.isReleaseUnavailable) {
+          setScheduleState({ status: "empty" });
+          return;
+        }
+        setScheduleState({ status: "error", message: error instanceof Error ? error.message : "加载失败" });
+      });
+    return () => controller.abort();
+  }, [stops, from, to, selectedDate]);
+
   const dateInfo = useMemo(() => formatDate(selectedDate), [selectedDate]);
   const dateBucket = useMemo(() => getCurrentDateBucket(selectedDate), [selectedDate]);
   const todayFlag = useMemo(() => isToday(selectedDate), [selectedDate]);
@@ -294,10 +335,11 @@ export function ShuttlePage() {
     [selectedDate],
   );
 
+  const daySchedules = scheduleState.status === "ready" ? scheduleState.schedules : EMPTY_SCHEDULES;
+
   // 计算显示的班次
   const { visibleSchedules, recentBuses } = useMemo(() => {
-    const allSchedules = getTodaySchedules(from, to, selectedDate);
-    const remainingSchedules = todayFlag ? getRemainingBuses(allSchedules, currentTime) : allSchedules;
+    const remainingSchedules = todayFlag ? getRemainingBuses(daySchedules, currentTime) : daySchedules;
     const visibleSchedules = mergeSchedulesByTime(remainingSchedules);
 
     if (!todayFlag) {
@@ -328,7 +370,7 @@ export function ShuttlePage() {
       visibleSchedules,
       recentBuses,
     };
-  }, [from, to, selectedDate, currentTime, todayFlag]);
+  }, [daySchedules, currentTime, todayFlag]);
 
   // 其他时刻（排除最近一班）
   const otherBuses = useMemo(() => {
@@ -456,8 +498,30 @@ export function ShuttlePage() {
           </div>
         </div>
 
+        {/* 数据状态：加载 / 未发布 / 出错 / 当日无班次 */}
+        {scheduleState.status === "loading" ? (
+          <div className="rounded-[20px] bg-white px-5 py-8 text-center text-[14px] text-[#6F7C8E]">
+            正在加载班次…
+          </div>
+        ) : scheduleState.status === "empty" ? (
+          <div className="rounded-[20px] bg-white px-5 py-8 text-center">
+            <p className="text-[14px] font-medium text-[#0F172A]">班次数据尚未发布</p>
+            <p className="mt-1.5 text-[13px] text-[#6F7C8E]">当前没有已发布的校车数据，请稍后再试或联系管理员发布。</p>
+          </div>
+        ) : scheduleState.status === "error" ? (
+          <div className="rounded-[20px] bg-white px-5 py-8 text-center">
+            <p className="text-[14px] font-medium text-[#0F172A]">班次数据加载失败</p>
+            <p className="mt-1.5 text-[13px] text-[#6F7C8E]">{scheduleState.message}</p>
+          </div>
+        ) : visibleSchedules.length === 0 ? (
+          <div className="rounded-[20px] bg-white px-5 py-8 text-center">
+            <p className="text-[14px] font-medium text-[#0F172A]">今日无班次</p>
+            <p className="mt-1.5 text-[13px] text-[#6F7C8E]">请尝试更换日期或线路</p>
+          </div>
+        ) : null}
+
         {/* Next Bus Section - 仅当天显示 */}
-        {todayFlag && recentBuses.length > 0 && (
+        {scheduleState.status === "ready" && todayFlag && recentBuses.length > 0 && (
           <div className="mb-5">
             <h2 className="text-xl font-semibold text-[#0F172A] mb-3">最近一班</h2>
             <div className="rounded-[20px] bg-white px-5 py-5">

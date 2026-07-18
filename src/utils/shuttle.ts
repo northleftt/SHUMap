@@ -1,27 +1,27 @@
+// Shuttle data helpers. Schedules are sourced from the v2 public transit API
+// (GET /api/public/transit/journeys) — NOT from bundled static JSON. Transit
+// stop identity is resolved from the active release's transit stops, so shuttle
+// data shares the same release-gated content source as the rest of the app.
+//
+// Trip identity (tripId), booking policy, canonical stops, and arrivalTime: null
+// semantics are preserved from the backend contract.
+
 import academicCalendarData from "../../data/academic-calendar.json";
-import shuttleData from "../../data/shuttle-schedule.json";
+import { publicApi } from "../lib/api";
+import type { Journey, TransitStop } from "../lib/api/types";
 
 export type DateBucket = "weekday" | "weekend" | "holiday" | "winterBreak" | "summerBreak";
 
 export interface ScheduleItem {
+  /** Stable trip identity from the backend. */
+  tripId: string;
   departureTime: string;
+  /** null when the source only carries departure times (current data). */
+  arrivalTime: string | null;
   isReservation: boolean;
-  viaCampus?: string;
-}
-
-export interface ShuttleRoute {
-  id: string;
-  from: string;
-  to: string;
-  sourcePage: number;
-  note?: string;
-  schedules: {
-    weekday: ScheduleItem[];
-    weekend: ScheduleItem[];
-    holiday: ScheduleItem[];
-    winterBreak: ScheduleItem[];
-    summerBreak: ScheduleItem[];
-  };
+  bookingPolicy: string;
+  bookingUrl: string | null;
+  routeName: string;
 }
 
 interface DateRange {
@@ -48,36 +48,12 @@ export function getCampuses(): Campus[] {
   return [...campuses];
 }
 
-export function getCampusId(campus: Campus): string {
-  const map: Record<Campus, string> = {
-    "宝山校区": "baoshan",
-    "嘉定校区": "jiading",
-    "延长校区": "yanchang",
-    "陈太公寓": "chentaigongyu",
-  };
-  return map[campus];
-}
+// ---------------------------------------------------------------------------
+// Date helpers (display + calendar-bucket label only; schedule resolution is
+// performed server-side by the journeys endpoint).
+// ---------------------------------------------------------------------------
 
-export function getCampusName(id: string): Campus | undefined {
-  const map: Record<string, Campus> = {
-    baoshan: "宝山校区",
-    jiading: "嘉定校区",
-    yanchang: "延长校区",
-    chentaigongyu: "陈太公寓",
-  };
-  return map[id];
-}
-
-export function getRouteId(from: Campus, to: Campus): string {
-  return `${getCampusId(from)}-to-${getCampusId(to)}`;
-}
-
-export function findRoute(from: Campus, to: Campus): ShuttleRoute | undefined {
-  const routeId = getRouteId(from, to);
-  return (shuttleData as { routes: ShuttleRoute[] }).routes.find((r) => r.id === routeId);
-}
-
-function toDateKey(date: Date): string {
+export function toDateKey(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
@@ -129,48 +105,67 @@ export function parseTime(timeStr: string): number {
 
 export function getNextBus(
   schedules: ScheduleItem[],
-  currentTime: Date = new Date()
+  currentTime: Date = new Date(),
 ): ScheduleItem | null {
   const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
-
   const upcoming = schedules
     .filter((s) => parseTime(s.departureTime) > currentMinutes)
     .sort((a, b) => parseTime(a.departureTime) - parseTime(b.departureTime));
-
   return upcoming[0] || null;
 }
 
 export function getRemainingBuses(
   schedules: ScheduleItem[],
-  currentTime: Date = new Date()
+  currentTime: Date = new Date(),
 ): ScheduleItem[] {
   const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
-
   return schedules
     .filter((s) => parseTime(s.departureTime) > currentMinutes)
     .sort((a, b) => parseTime(a.departureTime) - parseTime(b.departureTime));
 }
 
-export function getTodaySchedules(
-  from: Campus,
-  to: Campus,
-  date: Date = new Date()
-): ScheduleItem[] {
-  const route = findRoute(from, to);
-  if (!route) return [];
+// ---------------------------------------------------------------------------
+// Release-backed stop resolution + journey loading
+// ---------------------------------------------------------------------------
 
-  const bucket = getCurrentDateBucket(date);
-  return route.schedules[bucket] || [];
+/** Load the active release's transit stops. Throws ApiError (incl. release_unavailable). */
+export async function loadTransitStops(signal?: AbortSignal): Promise<TransitStop[]> {
+  const manifest = await publicApi.getCurrentRelease(signal);
+  return manifest.transit.stops;
 }
 
-export function getAllSchedules(
+/** Resolve a campus display name to its transit stop ID within the release stops. */
+export function resolveStopId(stops: TransitStop[], campus: Campus): string | null {
+  const match = stops.find((stop) => stop.name === campus);
+  return match ? match.id : null;
+}
+
+function journeyToScheduleItem(journey: Journey): ScheduleItem {
+  return {
+    tripId: journey.tripId,
+    departureTime: journey.departureTime,
+    arrivalTime: journey.arrivalTime, // preserved: null when source has no arrivals
+    isReservation: journey.bookingPolicy === "required",
+    bookingPolicy: journey.bookingPolicy,
+    bookingUrl: journey.bookingUrl,
+    routeName: journey.routeName,
+  };
+}
+
+/**
+ * Fetch the day's schedules between two campuses from the journeys endpoint.
+ * Returns [] when either stop is unresolved. Trip identity is preserved.
+ */
+export async function fetchSchedules(
+  stops: TransitStop[],
   from: Campus,
   to: Campus,
-  date: Date = new Date()
-): { nextBus: ScheduleItem | null; remaining: ScheduleItem[]; all: ScheduleItem[] } {
-  const all = getTodaySchedules(from, to, date);
-  const nextBus = getNextBus(all, date);
-  const remaining = getRemainingBuses(all, date);
-
-  return { nextBus, remaining, all };
+  date: Date,
+  signal?: AbortSignal,
+): Promise<ScheduleItem[]> {
+  const fromStopId = resolveStopId(stops, from);
+  const toStopId = resolveStopId(stops, to);
+  if (!fromStopId || !toStopId) return [];
+  const response = await publicApi.getJourneys({ fromStopId, toStopId, date: toDateKey(date) }, signal);
+  return response.journeys.map(journeyToScheduleItem);
 }

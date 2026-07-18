@@ -1,9 +1,12 @@
 import { useEffect } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { BottomTabBar } from "./components/BottomTabBar";
+import { AdminPage } from "./admin/AdminPage";
+import { AuthProvider } from "./admin/AuthContext";
 import { useViewportMetrics } from "./lib/layout";
 import { MapPage } from "./pages/MapPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { PoiCollectPage } from "./pages/PoiCollectPage";
 import { ShuttlePage } from "./pages/ShuttlePage";
 
 function AppLayout() {
@@ -85,6 +88,8 @@ function AppLayout() {
 export function App() {
   return (
     <Routes>
+      <Route path="/admin/*" element={<AuthProvider><AdminPage /></AuthProvider>} />
+      <Route path="/collect" element={<PoiCollectPage />} />
       <Route element={<AppLayout />}>
         <Route path="/" element={<Navigate to="/map" replace />} />
         <Route path="/map" element={<MapPage />} />

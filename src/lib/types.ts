@@ -19,36 +19,27 @@ export type MapSheetMode =
   | "poi_detail";
 
 export interface PoiDetailData {
-  typeLabel: string;
-  facilityNotes: string;
-  organization: string;
-  openHours: string;
-  phone: string;
-  accessMethod: string;
-  coverImageUrl: string;
-  galleryImageUrl: string;
-  hasPrinter: boolean | null;
-  hasElevator: boolean | null;
-  hasVendingMachine: boolean | null;
-  hasPowerBank: boolean | null;
-  hasParking: boolean | null;
+  summary: string;
+  description: string;
+  media: Array<{
+    id?: string;
+    role: "cover" | "gallery";
+    url: string;
+    alt?: string;
+    caption?: string;
+  }>;
+  facts: Array<{
+    id?: string;
+    label: string;
+    value: string;
+  }>;
 }
 
-export interface NavigationData {
-  coordSystem: string;
-  longitude: number;
-  latitude: number;
-  address?: string;
-  mapDisplayName?: string;
-}
-
-export interface RawBuilding {
-  svgElementId: string;
-  name: string;
-  campus: string;
-  category: string;
-  navigation?: NavigationData;
-  detail?: Partial<PoiDetailData>;
+export interface NavigationUrls {
+  amap: string;
+  tencent: string;
+  baidu: string;
+  system: string;
 }
 
 export interface CampusConfig {
@@ -63,13 +54,25 @@ export interface CampusConfig {
   selectionScaleMultiplier: number;
 }
 
-export interface MapBuilding extends Omit<RawBuilding, "detail"> {
-  detail: PoiDetailData;
-  campusKey: CampusKey;
+/**
+ * A release-derived building rendered on the campus map.
+ *
+ * - `id` / `poiKey`: the stable place ID — the sole business identity.
+ * - `svgElementId`: render-only selector for the campus SVG. Never a business ID.
+ */
+export interface MapBuilding {
+  id: string;
   poiKey: string;
+  svgElementId: string;
+  name: string;
+  campusKey: CampusKey;
   campusLabel: string;
+  category: string;
+  kindId: string;
   filterGroups: FilterKey[];
-  amapUrl: string | null;
+  tags: string[];
+  detail: PoiDetailData;
+  navigationUrls: NavigationUrls | null;
 }
 
 export interface MapViewport {
