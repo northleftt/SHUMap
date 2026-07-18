@@ -37,14 +37,14 @@
     {
       "binding": "DB",
       "database_name": "shumap-v2",
-      "database_id": "a8699187-41a9-4bb9-ae7b-18183095f83f",
+      "database_id": "61c93320-b731-44a0-a5a6-fc32177dba42",
       "migrations_dir": "migrations-v2"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "RELEASE_KV",
-      "id": "19ebd91019694b92a194b027b9e99553"
+      "id": "667ca2bb6d904bccbdaec95c782f8931"
     }
   ],
   "queues": {

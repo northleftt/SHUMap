@@ -152,7 +152,10 @@ function validatePassword(password: string): void {
 
 async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iterations = 310_000;
+  // Cloudflare edge runtime caps WebCrypto PBKDF2 at 100k iterations
+  // (higher values throw). Local workerd tolerates more, so keep this at
+  // the platform ceiling to stay deployable.
+  const iterations = 100_000;
   const derived = await pbkdf2(password, salt, iterations);
   return `pbkdf2-sha256$${iterations}$${toBase64(salt)}$${toBase64(derived)}`;
 }
