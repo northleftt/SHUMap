@@ -1,9 +1,69 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "shumap",
-  "compatibility_date": "2026-03-12",
+  "main": "./worker/index-v2.ts",
+  "compatibility_date": "2026-05-28",
   "assets": {
+    "binding": "ASSETS",
     "directory": "./dist",
-    "not_found_handling": "single-page-application"
-  }
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "observability": {
+    "enabled": true
+  },
+  "secrets": {
+    "required": [
+      "SESSION_PEPPER"
+    ]
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELEASE_COORDINATOR",
+        "class_name": "ReleaseCoordinator"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v2-release-coordinator",
+      "new_sqlite_classes": ["ReleaseCoordinator"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "shumap-v2",
+      "database_id": "a8699187-41a9-4bb9-ae7b-18183095f83f",
+      "migrations_dir": "migrations-v2"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "RELEASE_KV",
+      "id": "19ebd91019694b92a194b027b9e99553"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "IMPORT_QUEUE",
+        "queue": "shumap-import"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "shumap-import"
+      }
+    ]
+  },
+  "r2_buckets": [
+    {
+      "binding": "SHUMAP_BUCKET",
+      "bucket_name": "shumap-assets"
+    }
+  ]
 }
