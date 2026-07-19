@@ -16,6 +16,8 @@
   --color-warning-bg: #fef3e2;
   --color-error: #dc2626;
   --color-error-bg: #fdecec;
+  --color-chip: #f1f3f6;
+  --color-track: #eef1f4;
   --color-map-ground: #e7e9e4;
   --color-map-water: #c3dceb;
   --color-map-green: #d8e7c8;
@@ -62,21 +64,8 @@
   --shadow-sheet: 0 -2px 18px rgba(15, 23, 42, 0.14);
 }
 
-/* 旧变量别名 —— 管理后台等旧代码过渡期兼容，Phase 3 后随 grep 清剿删除 */
 :root {
   color-scheme: light;
-  --color-text: var(--color-ink);
-  --color-text-muted: #6f7c8e;
-  --color-border: var(--color-line);
-  --color-primary-dark: var(--color-primary-pressed);
-  --color-primary-soft: var(--color-primary-container);
-  --color-surface-muted: var(--color-page);
-  --color-success-soft: rgba(22, 163, 74, 0.18);
-  --color-warning-soft: rgba(245, 158, 11, 0.18);
-  --color-danger: var(--color-error);
-  --radius-search: 20.5px;
-  --radius-pill: 16px;
-  --radius-sheet: 28px;
 }
 
 html,

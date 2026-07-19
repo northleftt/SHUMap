@@ -21,7 +21,7 @@ export async function listFacilities(env: Env): Promise<Response> {
     env.DB,
     `select f.id,f.facility_type_id as facilityTypeId,t.name as facilityTypeName,f.host_place_id as hostPlaceId,
             f.floor_id as floorId,f.indoor_space_id as indoorSpaceId,f.lifecycle_status as lifecycleStatus,
-            f.operational_status as operationalStatus,f.quantity,r.display_name as displayName,r.editorial_status as editorialStatus,
+            f.operational_status as operationalStatus,f.quantity,f.current_revision_id as currentRevisionId,r.display_name as displayName,r.editorial_status as editorialStatus,
             f.last_verified_at as lastVerifiedAt,f.next_verification_due_at as nextVerificationDueAt
        from facility_instances f join facility_types t on t.id=f.facility_type_id
        left join facility_revisions r on r.id=f.current_revision_id order by coalesce(r.display_name,t.name)`,

@@ -10,7 +10,7 @@ export async function listMerchants(env: Env): Promise<Response> {
   const items = await all(
     env.DB,
     `select m.id,m.organization_id as organizationId,m.host_place_id as hostPlaceId,m.floor_id as floorId,m.indoor_space_id as indoorSpaceId,
-            m.lifecycle_status as lifecycleStatus,r.display_name as displayName,r.business_type as businessType,
+            m.lifecycle_status as lifecycleStatus,m.current_revision_id as currentRevisionId,r.display_name as displayName,r.business_type as businessType,
             r.editorial_status as editorialStatus,m.created_at as createdAt,m.updated_at as updatedAt
        from merchant_outlets m left join merchant_revisions r on r.id=m.current_revision_id order by coalesce(r.display_name,m.id)`,
   );
