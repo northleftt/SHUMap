@@ -7,15 +7,15 @@
 // The SVG element id (carried in place content as legacySvgElementId) is used
 // ONLY as a selector for the SVG renderer — never as a business/POI id.
 
-import baoshanSvg from "../../地图/宝山本部地图.svg?raw";
-import jiadingSvg from "../../地图/嘉定校区地图.svg?raw";
-import yanchangSvg from "../../地图/延长校区地图.svg?raw";
-import { getCurrentRelease } from "./api/public";
+import baoshanSvg from "../../../地图/宝山本部地图.svg?raw";
+import jiadingSvg from "../../../地图/嘉定校区地图.svg?raw";
+import yanchangSvg from "../../../地图/延长校区地图.svg?raw";
+import { getCurrentRelease } from "../api/public";
 import type {
   ReleaseLocation,
   ReleaseManifest,
   ReleasePlace,
-} from "./api/types";
+} from "../api/types";
 import type {
   CampusConfig,
   CampusKey,
@@ -23,7 +23,7 @@ import type {
   MapBuilding,
   NavigationUrls,
   PoiDetailData,
-} from "./types";
+} from "../types";
 
 export const campusConfigs: CampusConfig[] = [
   {

@@ -90,14 +90,19 @@ export async function publicPlace(env: Env, placeId: string): Promise<Response> 
        from places p join place_revisions r on r.id=? where p.id=?`,
     [membership.revision_id, placeId],
   );
-  const [names, locations, facilities] = await Promise.all([
+  const [names, locations, facilities, floors] = await Promise.all([
     all(env.DB, "select language,name,name_type as nameType from place_names where place_id=?", [placeId]),
     all(env.DB, `select el.role,el.is_primary as isPrimary,la.* from entity_locations el join location_anchors la on la.id=el.anchor_id where el.entity_type='place' and el.entity_id=? and el.valid_to is null`, [placeId]),
-    all(env.DB, `select f.id,t.code as typeCode,t.name as typeName,fr.display_name as displayName,f.operational_status as operationalStatus,f.floor_id as floorId
+    all<Record<string, unknown>>(env.DB, `select f.id,t.code as typeCode,t.name as typeName,fr.display_name as displayName,f.operational_status as operationalStatus,f.floor_id as floorId,fr.content_json as contentJson
        from facility_instances f join facility_types t on t.id=f.facility_type_id join release_items ri on ri.release_id=? and ri.entity_type='facility' and ri.entity_id=f.id
        join facility_revisions fr on fr.id=ri.revision_id where f.host_place_id=?`, [release.id, placeId]),
+    all(env.DB, "select id,level_code as levelCode,level_order as levelOrder,display_name as displayName from floors where building_place_id=? and is_public=1 order by level_order", [placeId]),
   ]);
-  return json({ releaseId: release.id, place: { ...place, content: parseJson(String(place?.contentJson ?? "{}"), {}), contentJson: undefined }, names, locations, facilities }, { headers: { "cache-control": "public, max-age=60" } });
+  const facilityItems = facilities.map(({ contentJson, ...facility }) => ({
+    ...facility,
+    content: parseJson(String(contentJson ?? "{}"), {}),
+  }));
+  return json({ releaseId: release.id, place: { ...place, content: parseJson(String(place?.contentJson ?? "{}"), {}), contentJson: undefined }, names, locations, facilities: facilityItems, floors }, { headers: { "cache-control": "public, max-age=60" } });
 }
 
 export async function listPublicPlaces(env: Env): Promise<Response> {

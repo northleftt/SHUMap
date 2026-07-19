@@ -1,0 +1,29 @@
+- generic [ref=f2e4]:
+  - main [ref=f2e5]:
+    - generic [ref=f2e6]:
+      - generic [ref=f2e7]:
+        - heading "校车时刻表" [level=1] [ref=f2e8]
+        - button "预约网站 ›" [ref=f2e9] [cursor=pointer]
+      - generic [ref=f2e10]:
+        - generic [ref=f2e12]:
+          - generic [ref=f2e13]:
+            - generic [ref=f2e14]: 从
+            - button "宝山校区" [ref=f2e17] [cursor=pointer]
+          - button "交换起终点" [ref=f2e21] [cursor=pointer]
+          - generic [ref=f2e25]:
+            - generic [ref=f2e26]: 到
+            - button "嘉定校区" [ref=f2e29] [cursor=pointer]
+          - button "今天 7/20 一" [ref=f2e35] [cursor=pointer]:
+            - generic [ref=f2e36]: 今天
+            - generic [ref=f2e37]: 7/20 一
+        - generic [ref=f2e38]: 正在加载班次…
+  - navigation [ref=f2e40]:
+    - generic [ref=f2e41]:
+      - link "地图" [ref=f2e42] [cursor=pointer]:
+        - /url: /map
+      - link "校车" [ref=f2e46] [cursor=pointer]:
+        - /url: /shuttle
+      - link "校外" [ref=f2e52] [cursor=pointer]:
+        - /url: /offcampus
+      - link "我的" [ref=f2e57] [cursor=pointer]:
+        - /url: /profile

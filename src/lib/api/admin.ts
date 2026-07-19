@@ -231,6 +231,13 @@ export function reviewOperation(id: string, body: { decision: "approve" | "rejec
   return apiFetch(`/api/admin/operations/${encodeURIComponent(id)}/review`, { method: "POST", body });
 }
 
+export function createOperationUpdate(
+  id: string,
+  body: { status: "progress" | "delayed" | "resolved"; message: string; expectedEndsAt?: string },
+): Promise<{ id: string; status: string }> {
+  return apiFetch<{ id: string; status: string }>(`/api/admin/operations/${encodeURIComponent(id)}/updates`, { method: "POST", body });
+}
+
 export function listAdminCampaigns<T = unknown>(signal?: AbortSignal): Promise<ListResponse<T>> {
   return apiFetch<ListResponse<T>>("/api/admin/campaigns", { signal });
 }

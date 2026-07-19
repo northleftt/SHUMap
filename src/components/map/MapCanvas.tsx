@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CampusConfig } from "../lib/types";
+import type { CampusConfig } from "../../lib/types";
 
 type Size = { width: number; height: number };
 type Point = { x: number; y: number };
@@ -168,6 +168,8 @@ function ZoomOutIcon() {
   );
 }
 
+export type MapViewWindow = ViewWindow;
+
 interface MapCanvasProps {
   campus: CampusConfig;
   currentBuildingIds: string[];
@@ -179,6 +181,14 @@ interface MapCanvasProps {
   };
   onSelectBuilding: (svgElementId: string) => void;
   onTapEmpty?: () => void;
+  /** M8 事件叠加层：渲染为手势层内 svgHost 的兄弟节点，与地图同一坐标系 */
+  overlay?: React.ReactNode;
+  /** 视口 viewBox 窗口变化回调（叠加层同步用） */
+  onViewWindowChange?: (window: MapViewWindow) => void;
+  /** 缩放控件位置：移动端右中，桌面端右下 */
+  zoomControlPosition?: "center-right" | "bottom-right";
+  /** 变化时将视野重置为校区初始视野（定位/回中按钮用） */
+  viewResetNonce?: number;
 }
 
 export function MapCanvas({
@@ -189,6 +199,10 @@ export function MapCanvas({
   selectionFocusBounds,
   onSelectBuilding,
   onTapEmpty,
+  overlay,
+  onViewWindowChange,
+  zoomControlPosition = "center-right",
+  viewResetNonce,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgHostRef = useRef<HTMLDivElement | null>(null);
@@ -204,6 +218,7 @@ export function MapCanvas({
   });
   const previousContainerRef = useRef<Size | null>(null);
   const previousCampusKeyRef = useRef(campus.key);
+  const lastResetNonceRef = useRef(viewResetNonce ?? 0);
   const viewBox = useMemo(() => parseViewBox(campus.svgRaw), [campus.svgRaw]);
   const [containerSize, setContainerSize] = useState<Size>(DEFAULT_CONTAINER_SIZE);
   const [viewWindow, setViewWindow] = useState<ViewWindow>({
@@ -240,7 +255,8 @@ export function MapCanvas({
 
   useEffect(() => {
     viewWindowRef.current = viewWindow;
-  }, [viewWindow]);
+    onViewWindowChange?.(viewWindow);
+  }, [viewWindow, onViewWindowChange]);
 
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -298,8 +314,10 @@ export function MapCanvas({
       !previousContainer ||
       previousContainer.width <= 0 ||
       previousContainer.height <= 0 ||
-      campusChanged
+      campusChanged ||
+      viewResetNonce !== lastResetNonceRef.current
     ) {
+      lastResetNonceRef.current = viewResetNonce ?? 0;
       setViewWindow(createInitialWindow(campus, viewBox, containerSize));
     } else if (
       previousContainer.width !== containerSize.width ||
@@ -344,7 +362,7 @@ export function MapCanvas({
 
     previousContainerRef.current = containerSize;
     previousCampusKeyRef.current = campus.key;
-  }, [campus, containerSize, viewBox]);
+  }, [campus, containerSize, viewBox, viewResetNonce]);
 
   useEffect(() => {
     if (!svgRef.current) return;
@@ -621,14 +639,7 @@ export function MapCanvas({
   }
 
   return (
-    <div ref={containerRef} className="absolute inset-0 overflow-hidden bg-[#f6f1e6]">
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(circle at top, rgba(215,232,243,0.18), transparent 32%), linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,251,242,0.16))",
-        }}
-      />
+    <div ref={containerRef} className="absolute inset-0 overflow-hidden bg-map-ground">
       <div
         className="absolute inset-0 touch-none"
         onPointerDown={handlePointerDown}
@@ -638,21 +649,26 @@ export function MapCanvas({
         onWheel={handleWheel}
       >
         <div ref={svgHostRef} className="absolute inset-0" />
+        {overlay}
       </div>
 
-      <div className="absolute right-4 top-1/2 z-20 -translate-y-1/2 overflow-hidden rounded-[18px] border border-white/80 bg-white/94 shadow-[var(--shadow-floating)] backdrop-blur-md">
+      <div
+        className={`absolute z-20 overflow-hidden rounded-2xl border border-line bg-surface/95 shadow-floating backdrop-blur-md ${
+          zoomControlPosition === "bottom-right" ? "right-4 bottom-4" : "right-4 top-1/2 -translate-y-1/2"
+        }`}
+      >
         <button
           aria-label="放大地图"
-          className="grid h-12 w-11 place-items-center text-[var(--color-text-muted)] transition-colors hover:bg-[rgba(241,245,249,0.8)]"
+          className="grid h-12 w-11 place-items-center text-sub transition-colors hover:bg-page"
           onClick={() => handleZoomButtonClick(ZOOM_BUTTON_SCALE_FACTOR)}
           type="button"
         >
           <ZoomInIcon />
         </button>
-        <div className="mx-2 h-px bg-[rgba(203,213,225,0.9)]" />
+        <div className="mx-2 h-px bg-line" />
         <button
           aria-label="缩小地图"
-          className="grid h-12 w-11 place-items-center text-[var(--color-text-muted)] transition-colors hover:bg-[rgba(241,245,249,0.8)]"
+          className="grid h-12 w-11 place-items-center text-sub transition-colors hover:bg-page"
           onClick={() => handleZoomButtonClick(1 / ZOOM_BUTTON_SCALE_FACTOR)}
           type="button"
         >

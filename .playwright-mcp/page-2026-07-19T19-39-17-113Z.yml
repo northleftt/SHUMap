@@ -1,0 +1,35 @@
+- generic [ref=f8e4]:
+  - main [ref=f8e5]:
+    - generic [ref=f8e780]:
+      - generic [ref=f8e781]:
+        - button "返回" [ref=f8e782] [cursor=pointer]
+        - heading "本部图书馆 · 数据采集" [level=1] [ref=f8e786]
+      - generic [ref=f8e787]:
+        - heading "基本信息" [level=2] [ref=f8e788]
+        - generic [ref=f8e789]:
+          - generic [ref=f8e790]:
+            - generic [ref=f8e791]: 联系电话
+            - textbox "选填" [ref=f8e792]
+          - generic [ref=f8e793]:
+            - generic [ref=f8e794]: 开放时间
+            - textbox "如 07:30 – 22:00" [ref=f8e795]
+          - generic [ref=f8e796]:
+            - generic [ref=f8e797]: 所属单位
+            - textbox "如 管理学院" [ref=f8e798]
+        - heading "楼层信息（0）" [level=2] [ref=f8e799]
+        - button "添加楼层" [ref=f8e801] [cursor=pointer]
+        - heading "现场照片（需要：大门照片）" [level=2] [ref=f8e803]
+        - generic [ref=f8e811]:
+          - button "保存草稿" [ref=f8e812] [cursor=pointer]
+          - button "提交采集" [ref=f8e813] [cursor=pointer]
+        - paragraph [ref=f8e814]: 提交即锁定该楼宇，可在「我的」查看审核进度
+  - navigation [ref=f8e758]:
+    - generic [ref=f8e759]:
+      - link "地图" [ref=f8e760] [cursor=pointer]:
+        - /url: /map
+      - link "校车" [ref=f8e764] [cursor=pointer]:
+        - /url: /shuttle
+      - link "校外" [ref=f8e770] [cursor=pointer]:
+        - /url: /offcampus
+      - link "我的" [ref=f8e775] [cursor=pointer]:
+        - /url: /profile

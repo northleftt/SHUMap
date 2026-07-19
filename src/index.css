@@ -1,26 +1,79 @@
 @import "tailwindcss";
 
-:root {
-  color-scheme: light;
-  font-family:
+@theme {
+  /* v2 设计令牌 · 配色 */
+  --color-primary: #1e80c1;
+  --color-primary-pressed: #125b8b;
+  --color-primary-container: #e8f1f8;
+  --color-page: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-ink: #0f172a;
+  --color-sub: #94a3b8;
+  --color-line: #e8ebef;
+  --color-success: #16a34a;
+  --color-success-bg: #e7f6ec;
+  --color-warning: #f59e0b;
+  --color-warning-bg: #fef3e2;
+  --color-error: #dc2626;
+  --color-error-bg: #fdecec;
+  --color-map-ground: #e7e9e4;
+  --color-map-water: #c3dceb;
+  --color-map-green: #d8e7c8;
+  /* M3 非预约车 hero 卡绿（设计稿 hero #77A988） */
+  --color-shuttle-free: #77a988;
+
+  --font-sans:
     "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei",
     sans-serif;
-  --color-primary: #1e80c1;
-  --color-primary-dark: #125b8b;
-  --color-primary-soft: #d7e8f3;
-  --color-page: #fffbf2;
-  --color-surface: #ffffff;
-  --color-surface-muted: #f1f5f9;
-  --color-text: #0f172a;
-  --color-text-muted: #6f7c8e;
-  --color-border: #cbd5e1;
-  --color-success: #16a34a;
-  --color-success-soft: rgba(22, 163, 74, 0.18);
-  --color-warning: #f59e0b;
-  --color-warning-soft: rgba(245, 158, 11, 0.18);
-  --color-danger: #dc2626;
+
+  /* v2 设计令牌 · 字号（PingFang SC） */
+  --text-label: 11px;
+  --text-label--line-height: 15px;
+  --text-label--font-weight: 500;
+  --text-aux: 12px;
+  --text-aux--line-height: 17px;
+  --text-body: 13px;
+  --text-body--line-height: 19px;
+  --text-emphasis: 15px;
+  --text-emphasis--line-height: 21px;
+  --text-emphasis--font-weight: 600;
+  --text-card: 17px;
+  --text-card--line-height: 24px;
+  --text-card--font-weight: 600;
+  --text-detail: 22px;
+  --text-detail--line-height: 30px;
+  --text-detail--font-weight: 600;
+  --text-title: 26px;
+  --text-title--line-height: 34px;
+  --text-title--font-weight: 600;
+
+  /* v2 设计令牌 · 圆角 */
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
+  --radius-4xl: 26px;
+
+  /* v2 设计令牌 · 阴影 */
+  --shadow-card: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-floating: 0 10px 26px rgba(15, 23, 42, 0.14);
   --shadow-sheet: 0 -2px 18px rgba(15, 23, 42, 0.14);
-  --shadow-floating: 0 6px 18px rgba(15, 23, 42, 0.14);
+}
+
+/* 旧变量别名 —— 管理后台等旧代码过渡期兼容，Phase 3 后随 grep 清剿删除 */
+:root {
+  color-scheme: light;
+  --color-text: var(--color-ink);
+  --color-text-muted: #6f7c8e;
+  --color-border: var(--color-line);
+  --color-primary-dark: var(--color-primary-pressed);
+  --color-primary-soft: var(--color-primary-container);
+  --color-surface-muted: var(--color-page);
+  --color-success-soft: rgba(22, 163, 74, 0.18);
+  --color-warning-soft: rgba(245, 158, 11, 0.18);
+  --color-danger: var(--color-error);
   --radius-search: 20.5px;
   --radius-pill: 16px;
   --radius-sheet: 28px;
@@ -33,9 +86,9 @@ body,
   width: 100%;
   height: 100%;
   overscroll-behavior: none;
-  background:
-    radial-gradient(circle at top left, rgba(215, 232, 243, 0.9), transparent 38%),
-    linear-gradient(180deg, #fffdf8 0%, var(--color-page) 100%);
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
 }
 
 html {
@@ -55,7 +108,9 @@ body {
 }
 
 button,
-input {
+input,
+textarea,
+select {
   font: inherit;
 }
 
@@ -77,4 +132,22 @@ button:disabled {
 
 .scrollbar-hidden::-webkit-scrollbar {
   display: none;
+}
+
+/* M8 事件点脉冲圈 */
+@keyframes event-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.9);
+    opacity: 0;
+  }
+}
+
+.event-pulse {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: event-pulse 1.8s ease-out infinite;
 }

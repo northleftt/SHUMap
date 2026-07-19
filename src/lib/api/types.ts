@@ -221,6 +221,15 @@ export interface PublicPlaceFacility {
   displayName: string;
   operationalStatus: string;
   floorId: string | null;
+  /** Parsed facility revision content_json — carries 位置描述 etc. */
+  content: Record<string, unknown>;
+}
+
+export interface PublicPlaceFloor {
+  id: string;
+  levelCode: string;
+  levelOrder: number;
+  displayName: string | null;
 }
 
 export interface PublicPlaceResponse {
@@ -238,6 +247,7 @@ export interface PublicPlaceResponse {
   names: PublicPlaceName[];
   locations: PublicPlaceLocation[];
   facilities: PublicPlaceFacility[];
+  floors: PublicPlaceFloor[];
 }
 
 export interface PublicPlaceListItem {
@@ -281,6 +291,19 @@ export interface JourneysResponse {
 // Operations & campaigns (GET /api/public/operations | /campaigns)
 // ---------------------------------------------------------------------------
 
+export interface OperationalEventTarget {
+  targetType: string;
+  targetId: string;
+  impactType: string;
+}
+
+export interface OperationalEventUpdate {
+  id: string;
+  status: string;
+  message: string;
+  createdAt: string;
+}
+
 export interface OperationalEvent {
   id: string;
   eventType: string;
@@ -292,9 +315,12 @@ export interface OperationalEvent {
   startsAt: string;
   expectedEndsAt: string | null;
   autoExpireAt: string | null;
+  resolvedAt?: string | null;
   lastVerifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  targets?: OperationalEventTarget[];
+  updates?: OperationalEventUpdate[];
 }
 
 export interface OperationalEventsResponse {

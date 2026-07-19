@@ -1,0 +1,39 @@
+- generic [ref=f6e4]:
+  - main [ref=f6e5]:
+    - generic [ref=f6e6]:
+      - heading "我的" [level=1] [ref=f6e7]
+      - generic [ref=f6e8]:
+        - generic [ref=f6e9]: 张
+        - generic [ref=f6e10]:
+          - generic [ref=f6e11]: 张同学
+          - generic [ref=f6e12]: 学号 21****32 · 已登录
+        - button "编辑 ›" [ref=f6e13] [cursor=pointer]
+      - generic [ref=f6e17]:
+        - generic [ref=f6e18]:
+          - heading "我的反馈" [level=2] [ref=f6e19]
+          - button "全部 ›" [ref=f6e20] [cursor=pointer]
+        - generic [ref=f6e22]:
+          - text: 还没有提交过反馈
+          - button "去反馈 ›" [ref=f6e23] [cursor=pointer]
+      - generic [ref=f6e24]:
+        - button "我的收藏" [ref=f6e25] [cursor=pointer]
+        - button "最近查看 1 条" [ref=f6e31] [cursor=pointer]:
+          - generic [ref=f6e35]: 最近查看
+          - generic [ref=f6e36]: 1 条
+        - button "志愿者数据采集" [ref=f6e39] [cursor=pointer]
+        - button "意见反馈" [ref=f6e46] [cursor=pointer]
+        - button "关于 SHUMap v2.0" [ref=f6e52] [cursor=pointer]:
+          - generic [ref=f6e55]: 关于 SHUMap
+          - generic [ref=f6e56]: v2.0
+        - button "设置" [ref=f6e59] [cursor=pointer]
+      - generic [ref=f6e66]: SHUMap v2.0 · 数据版本 v2026-07-18-initial
+  - navigation [ref=f6e67]:
+    - generic [ref=f6e68]:
+      - link "地图" [ref=f6e69] [cursor=pointer]:
+        - /url: /map
+      - link "校车" [ref=f6e73] [cursor=pointer]:
+        - /url: /shuttle
+      - link "校外" [ref=f6e79] [cursor=pointer]:
+        - /url: /offcampus
+      - link "我的" [ref=f6e84] [cursor=pointer]:
+        - /url: /profile

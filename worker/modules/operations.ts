@@ -7,18 +7,44 @@ import { audit } from "./audit";
 import { createLocation } from "./locations";
 
 export async function listOperationalEvents(env: Env, publicOnly = false): Promise<Response> {
-  const where = publicOnly
-    ? "where editorial_status='approved' and operational_status in ('scheduled','active') and starts_at<=? and (auto_expire_at is null or auto_expire_at>?)"
-    : "";
   const now = isoNow();
-  const items = await all(
+  const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  const where = publicOnly
+    ? `where editorial_status='approved' and (
+        (operational_status in ('scheduled','active') and starts_at<=? and (auto_expire_at is null or auto_expire_at>?))
+        or (operational_status in ('resolved','cancelled','expired') and coalesce(resolved_at,updated_at)>=?)
+      )`
+    : "";
+  const items = await all<Record<string, unknown>>(
     env.DB,
     `select id,event_type as eventType,severity,editorial_status as editorialStatus,operational_status as operationalStatus,
             title,description,starts_at as startsAt,expected_ends_at as expectedEndsAt,auto_expire_at as autoExpireAt,
-            last_verified_at as lastVerifiedAt,created_at as createdAt,updated_at as updatedAt
+            resolved_at as resolvedAt,last_verified_at as lastVerifiedAt,created_at as createdAt,updated_at as updatedAt
        from operational_events ${where} order by starts_at desc`,
-    publicOnly ? [now, now] : [],
+    publicOnly ? [now, now, weekAgo] : [],
   );
+  if (items.length > 0) {
+    const ids = items.map((item) => String(item.id));
+    const placeholders = ids.map(() => "?").join(",");
+    const [targets, updates] = await Promise.all([
+      all<Record<string, unknown>>(
+        env.DB,
+        `select event_id as eventId,target_type as targetType,target_id as targetId,impact_type as impactType
+           from operational_event_targets where event_id in (${placeholders})`,
+        ids,
+      ),
+      all<Record<string, unknown>>(
+        env.DB,
+        `select id,event_id as eventId,status,message,created_at as createdAt
+           from operational_event_updates where event_id in (${placeholders}) order by created_at desc`,
+        ids,
+      ),
+    ]);
+    for (const item of items) {
+      item.targets = targets.filter((target) => target.eventId === item.id).map(({ eventId: _eventId, ...target }) => target);
+      item.updates = updates.filter((update) => update.eventId === item.id).map(({ eventId: _eventId, ...update }) => update);
+    }
+  }
   return json({ items }, publicOnly ? { headers: { "cache-control": "public, max-age=30" } } : {});
 }
 
@@ -85,6 +111,34 @@ export async function decideOperationalEvent(
     .bind(next, principal.userId, isoNow(), eventId).run();
   await audit(env, principal, `operational_event.${decision}`, "operational_event", eventId, requestId, event, { ...event, editorial_status: next });
   return json({ id: eventId, editorialStatus: next });
+}
+
+export async function createOperationalEventUpdate(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  eventId: string,
+  requestId: string,
+): Promise<Response> {
+  const event = await first<Record<string, unknown>>(env.DB, "select id from operational_events where id=?", [eventId]);
+  if (!event) throw new HttpError(404, "not_found", "Event does not exist");
+  const body = await readJson<Record<string, unknown>>(request);
+  const status = requiredString(body.status, "status", 20);
+  if (!["progress", "delayed", "resolved"].includes(status)) throw new HttpError(400, "validation_error", "Invalid update status");
+  const message = requiredString(body.message, "message", 2000);
+  const expectedEndsAt = optionalString(body.expectedEndsAt, "expectedEndsAt", 50);
+  if (status === "delayed" && !expectedEndsAt) throw new HttpError(400, "validation_error", "expectedEndsAt is required for delayed updates");
+  const now = isoNow();
+  const id = makeId("upd");
+  await env.DB.prepare("insert into operational_event_updates(id,event_id,status,message,created_by,created_at) values(?,?,?,?,?,?)")
+    .bind(id, eventId, status, message, principal.userId, now).run();
+  if (status === "delayed") {
+    await env.DB.prepare("update operational_events set expected_ends_at=?,updated_at=? where id=?").bind(expectedEndsAt, now, eventId).run();
+  } else if (status === "resolved") {
+    await env.DB.prepare("update operational_events set operational_status='resolved',resolved_at=?,updated_at=? where id=?").bind(now, now, eventId).run();
+  }
+  await audit(env, principal, "operational_event.post_update", "operational_event", eventId, requestId, null, body);
+  return json({ id, status }, { status: 201 });
 }
 
 export async function listCampaigns(env: Env, publicOnly = false): Promise<Response> {

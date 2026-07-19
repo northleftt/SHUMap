@@ -7,7 +7,7 @@ import { processQueue } from "./modules/jobs";
 import { enqueueMapImport, createMapUploadIntent, listMapVersions, uploadMapContent } from "./modules/maps";
 import { getPublicMedia } from "./modules/media";
 import { createMerchant, createMerchantRevision, listMerchants } from "./modules/merchants";
-import { createCampaign, createOperationalEvent, decideOperationalEvent, listCampaigns, listOperationalEvents } from "./modules/operations";
+import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
 import { getCurrentRelease, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { reviewRevision, submitRevision } from "./modules/reviews";
@@ -194,6 +194,11 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && eventReview) {
     principal = await requireSession(request, env, "review:content");
     return decideOperationalEvent(request, env, principal, eventReview.id, requestId);
+  }
+  const eventUpdates = match(path, "/api/admin/operations/:id/updates");
+  if (method === "POST" && eventUpdates) {
+    principal = await requireSession(request, env, "write:content");
+    return createOperationalEventUpdate(request, env, principal, eventUpdates.id, requestId);
   }
   if (method === "GET" && path === "/api/admin/campaigns") {
     await requireSession(request, env, "read:admin");
