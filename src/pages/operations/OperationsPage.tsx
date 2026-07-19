@@ -92,9 +92,10 @@ export function OperationsPage() {
 
   return (
     <div className="flex h-full flex-col bg-page">
-      <PageHeader title="运营信息" subtitle={place ? place.displayName : undefined} />
+      <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
+        <PageHeader title="运营信息" subtitle={place ? place.displayName : undefined} />
 
-      <div className="flex-1 overflow-y-auto px-4 pb-6">
+        <div className="flex-1 overflow-y-auto px-4 pb-6">
         {status === "loading" ? (
           <LoadingState label="正在加载运营信息…" />
         ) : active.length === 0 && ended.length === 0 ? (
@@ -179,6 +180,7 @@ export function OperationsPage() {
             ) : null}
           </>
         )}
+        </div>
       </div>
     </div>
   );

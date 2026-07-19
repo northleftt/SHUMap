@@ -96,12 +96,13 @@ export function FloorsPage() {
 
   return (
     <div className="flex h-full flex-col bg-page">
-      <PageHeader
-        title={`${data.place.displayName} · 楼层设施`}
-        subtitle={floors.length > 0 ? `${kindLabel} · 共 ${floors.length} 层` : kindLabel}
-      />
+      <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
+        <PageHeader
+          title={`${data.place.displayName} · 楼层设施`}
+          subtitle={floors.length > 0 ? `${kindLabel} · 共 ${floors.length} 层` : kindLabel}
+        />
 
-      <div className="flex-1 overflow-y-auto pb-6">
+        <div className="flex-1 overflow-y-auto pb-6">
         {/* 楼层切换 pills */}
         {floors.length > 1 ? (
           <div className="scrollbar-hidden flex gap-2 overflow-x-auto px-4 pt-3">
@@ -179,6 +180,7 @@ export function FloorsPage() {
               </div>
             ))
           )}
+        </div>
         </div>
       </div>
     </div>

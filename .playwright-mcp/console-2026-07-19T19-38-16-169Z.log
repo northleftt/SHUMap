@@ -1,1 +1,7 @@
 [      81ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=0797c550:20100
+[  529286ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/src/pages/shuttle/ShuttlePage.tsx?t=1784490425435:0
+[  529287ms] [ERROR] [vite] Failed to reload /src/pages/shuttle/ShuttlePage.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://127.0.0.1:5173/@vite/client:808
+[  577804ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/src/pages/floors/FloorsPage.tsx?t=1784490473962:0
+[  577804ms] [ERROR] [vite] Failed to reload /src/pages/floors/FloorsPage.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://127.0.0.1:5173/@vite/client:808
+[  624850ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:5173/src/pages/operations/OperationsPage.tsx?t=1784490521006:0
+[  624850ms] [ERROR] [vite] Failed to reload /src/pages/operations/OperationsPage.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://127.0.0.1:5173/@vite/client:808

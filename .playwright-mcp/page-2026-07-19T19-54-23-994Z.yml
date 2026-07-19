@@ -1,0 +1,15 @@
+- generic [ref=f11e3]:
+  - complementary [ref=f11e4]:
+    - link "SHU" [ref=f11e5] [cursor=pointer]:
+      - /url: /map
+    - navigation [ref=f11e6]:
+      - link "地图" [ref=f11e7] [cursor=pointer]:
+        - /url: /map
+      - link "校车" [ref=f11e12] [cursor=pointer]:
+        - /url: /shuttle
+      - link "校外" [ref=f11e19] [cursor=pointer]:
+        - /url: /offcampus
+    - link "我的" [ref=f11e25] [cursor=pointer]:
+      - /url: /profile
+  - main [ref=f11e32]:
+    - generic [ref=f11e33]: 正在加载校车数据…

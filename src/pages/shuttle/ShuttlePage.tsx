@@ -5,6 +5,7 @@ import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SheetModal } from "../../components/ui/SheetModal";
 import type { TransitStop } from "../../lib/api/types";
+import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useNow } from "../../lib/hooks/useNow";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import {
@@ -188,14 +189,14 @@ function DatePicker({
   );
 }
 
-/** M7 班次路线预览。 */
-function TripPreviewSheet({
+/** M7 预览内容（移动端 SheetModal / 桌面端常驻侧卡共用）。 */
+function TripPreviewContent({
   schedule,
   fromStop,
   toStop,
   onClose,
 }: {
-  schedule: ScheduleItem | null;
+  schedule: ScheduleItem;
   fromStop: TransitStop | null;
   toStop: TransitStop | null;
   onClose: () => void;
@@ -204,7 +205,7 @@ function TripPreviewSheet({
   const { release } = useRelease();
 
   const preview = useMemo(
-    () => (schedule && release ? buildTripPreview(release.manifest, schedule) : null),
+    () => (release ? buildTripPreview(release.manifest, schedule) : null),
     [schedule, release],
   );
 
@@ -221,106 +222,123 @@ function TripPreviewSheet({
   const alightingStops = preview?.stops.filter((stop) => stop.role !== "boarding") ?? [];
 
   return (
-    <SheetModal open={schedule !== null} onClose={onClose} initialHeight={0.55}>
-      {schedule ? (
-        <div className="px-5 pb-8">
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-card">{schedule.departureTime} 班车</h2>
-              <p className="mt-1 text-aux text-sub">
-                {fromStop?.name} → {toStop?.name}
-                {"  "}
-                {schedule.isReservation ? "预约车" : "非预约车"}
-              </p>
-            </div>
-            <button
-              type="button"
-              aria-label="关闭"
-              className="grid h-8 w-8 place-items-center rounded-full bg-page text-sub"
-              onClick={onClose}
-            >
-              ✕
-            </button>
-          </div>
+    <div className="px-5 pb-8 pt-1">
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-card">{schedule.departureTime} 班车</h2>
+          <p className="mt-1 text-aux text-sub">
+            {fromStop?.name} → {toStop?.name}
+            {"  "}
+            {schedule.isReservation ? "预约车" : "非预约车"}
+          </p>
+        </div>
+        <button
+          type="button"
+          aria-label="关闭"
+          className="grid h-8 w-8 place-items-center rounded-full bg-page text-sub"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </div>
 
-          <div className="mt-5 flex gap-4">
-            {/* 时间线 */}
-            <div className="min-w-0 flex-1">
-              {boarding ? (
-                <div className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-primary" />
-                    <span className="w-px flex-1 bg-slate-300" />
-                  </div>
-                  <div className="pb-1">
-                    <div className="text-body font-medium text-ink">{boarding.stopName} · 上车</div>
-                    <div className="mt-0.5 text-label text-sub">
-                      {boarding.time ? `${boarding.time} 发车` : "时间未发布"}
-                    </div>
-                    {preview && preview.durationMinutes !== null ? (
-                      <div className="mt-2 text-label text-sub">约 {preview.durationMinutes} 分钟</div>
-                    ) : null}
-                  </div>
+      <div className="mt-5 flex gap-4">
+        {/* 时间线 */}
+        <div className="min-w-0 flex-1">
+          {boarding ? (
+            <div className="flex gap-3">
+              <div className="flex flex-col items-center">
+                <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-primary" />
+                <span className="w-px flex-1 bg-slate-300" />
+              </div>
+              <div className="pb-1">
+                <div className="text-body font-medium text-ink">{boarding.stopName} · 上车</div>
+                <div className="mt-0.5 text-label text-sub">
+                  {boarding.time ? `${boarding.time} 发车` : "时间未发布"}
                 </div>
-              ) : null}
-              <div className="flex gap-3">
-                <div className="flex flex-col items-center">
-                  <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-success" />
-                </div>
-                <div className="min-w-0">
-                  {alightingStops.map((stop, index) => (
-                    <div key={stop.stopId} className={index > 0 ? "mt-2.5" : ""}>
-                      <div className="text-body font-medium text-ink">
-                        {stop.stopName}
-                        {stop.role === "alighting" && alightingStops.length > 1 ? ` · 下车点${index + 1}` : " · 下车"}
-                      </div>
-                      {stop.time ? (
-                        <div className="mt-0.5 text-label text-sub">
-                          {stop.time} {stop.timeLabel ?? ""}
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                  {alightingStops.length === 0 ? (
-                    <div className="text-body text-sub">下车点信息未发布</div>
-                  ) : null}
-                </div>
+                {preview && preview.durationMinutes !== null ? (
+                  <div className="mt-2 text-label text-sub">约 {preview.durationMinutes} 分钟</div>
+                ) : null}
               </div>
             </div>
-
-            {/* 右侧操作 */}
-            <div className="flex w-[104px] shrink-0 flex-col gap-2.5">
-              <button
-                type="button"
-                className="flex items-center justify-center gap-1 rounded-full bg-primary py-2.5 text-aux font-medium text-white active:bg-primary-pressed disabled:opacity-40"
-                disabled={!fromStop}
-                onClick={() => goPoi(fromStop)}
-              >
-                <MapPin size={13} />
-                查看上车点
-              </button>
-              <button
-                type="button"
-                className="flex items-center justify-center gap-1 rounded-full bg-primary py-2.5 text-aux font-medium text-white active:bg-primary-pressed disabled:opacity-40"
-                disabled={!toStop}
-                onClick={() => goPoi(toStop)}
-              >
-                <MapPin size={13} />
-                查看下车点
-              </button>
+          ) : null}
+          <div className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-success" />
+            </div>
+            <div className="min-w-0">
+              {alightingStops.map((stop, index) => (
+                <div key={stop.stopId} className={index > 0 ? "mt-2.5" : ""}>
+                  <div className="text-body font-medium text-ink">
+                    {stop.stopName}
+                    {stop.role === "alighting" && alightingStops.length > 1 ? ` · 下车点${index + 1}` : " · 下车"}
+                  </div>
+                  {stop.time ? (
+                    <div className="mt-0.5 text-label text-sub">
+                      {stop.time} {stop.timeLabel ?? ""}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+              {alightingStops.length === 0 ? (
+                <div className="text-body text-sub">下车点信息未发布</div>
+              ) : null}
             </div>
           </div>
-
-          {schedule.isReservation ? (
-            <button
-              type="button"
-              className="mt-6 w-full rounded-full bg-primary py-3 text-body font-semibold text-white active:bg-primary-pressed"
-              onClick={() => window.open(schedule.bookingUrl ?? BOOKING_SITE_URL, "_blank")}
-            >
-              预约此班次
-            </button>
-          ) : null}
         </div>
+
+        {/* 右侧操作 */}
+        <div className="flex w-[104px] shrink-0 flex-col gap-2.5">
+          <button
+            type="button"
+            className="flex items-center justify-center gap-1 rounded-full bg-primary py-2.5 text-aux font-medium text-white active:bg-primary-pressed disabled:opacity-40"
+            disabled={!fromStop}
+            onClick={() => goPoi(fromStop)}
+          >
+            <MapPin size={13} />
+            查看上车点
+          </button>
+          <button
+            type="button"
+            className="flex items-center justify-center gap-1 rounded-full bg-primary py-2.5 text-aux font-medium text-white active:bg-primary-pressed disabled:opacity-40"
+            disabled={!toStop}
+            onClick={() => goPoi(toStop)}
+          >
+            <MapPin size={13} />
+            查看下车点
+          </button>
+        </div>
+      </div>
+
+      {schedule.isReservation ? (
+        <button
+          type="button"
+          className="mt-6 w-full rounded-full bg-primary py-3 text-body font-semibold text-white active:bg-primary-pressed"
+          onClick={() => window.open(schedule.bookingUrl ?? BOOKING_SITE_URL, "_blank")}
+        >
+          预约此班次
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** M7 班次路线预览（移动端底部弹卡）。 */
+function TripPreviewSheet({
+  schedule,
+  fromStop,
+  toStop,
+  onClose,
+}: {
+  schedule: ScheduleItem | null;
+  fromStop: TransitStop | null;
+  toStop: TransitStop | null;
+  onClose: () => void;
+}) {
+  return (
+    <SheetModal open={schedule !== null} onClose={onClose} initialHeight={0.55}>
+      {schedule ? (
+        <TripPreviewContent schedule={schedule} fromStop={fromStop} toStop={toStop} onClose={onClose} />
       ) : null}
     </SheetModal>
   );
@@ -330,6 +348,7 @@ function TripPreviewSheet({
 export function ShuttlePage() {
   const navigate = useNavigate();
   const { status: releaseStatus, release } = useRelease();
+  const isDesktop = useBreakpoint() === "desktop";
   const stops = useMemo(() => release?.manifest.transit.stops ?? [], [release]);
 
   const [fromStop, setFromStop] = useState<TransitStop | null>(null);
@@ -438,19 +457,20 @@ export function ShuttlePage() {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-page">
-      <header className="flex items-end justify-between px-5 pb-3 pt-6">
-        <h1 className="text-title">校车时刻表</h1>
-        <button
-          type="button"
-          className="pb-1 text-aux font-medium text-primary"
-          onClick={() => window.open(BOOKING_SITE_URL, "_blank")}
-        >
-          预约网站 ›
-        </button>
-      </header>
+    <div className="flex h-full justify-center gap-6 overflow-hidden bg-page">
+      <div className="flex h-full w-full max-w-[780px] flex-col overflow-hidden">
+        <header className="flex items-end justify-between px-5 pb-3 pt-6">
+          <h1 className="text-title">校车时刻表</h1>
+          <button
+            type="button"
+            className="pb-1 text-aux font-medium text-primary"
+            onClick={() => window.open(BOOKING_SITE_URL, "_blank")}
+          >
+            预约网站 ›
+          </button>
+        </header>
 
-      <div className="flex-1 overflow-y-auto px-5 pb-6">
+        <div className="flex-1 overflow-y-auto px-5 pb-6">
         {/* 线路卡 */}
         <div className="rounded-2xl bg-surface px-4 py-3.5 shadow-card">
           <div className="flex items-center">
@@ -564,14 +584,31 @@ export function ShuttlePage() {
             ) : null}
           </>
         )}
+        </div>
       </div>
 
-      <TripPreviewSheet
-        schedule={previewTrip}
-        fromStop={fromStop}
-        toStop={toStop}
-        onClose={() => setPreviewTrip(null)}
-      />
+      {/* D2 桌面端：常驻右侧预览卡（不用底部弹卡） */}
+      {isDesktop && previewTrip ? (
+        <aside className="w-[400px] shrink-0 overflow-y-auto py-6 pr-5">
+          <div className="rounded-3xl bg-surface pt-3 shadow-card">
+            <TripPreviewContent
+              schedule={previewTrip}
+              fromStop={fromStop}
+              toStop={toStop}
+              onClose={() => setPreviewTrip(null)}
+            />
+          </div>
+        </aside>
+      ) : null}
+
+      {!isDesktop ? (
+        <TripPreviewSheet
+          schedule={previewTrip}
+          fromStop={fromStop}
+          toStop={toStop}
+          onClose={() => setPreviewTrip(null)}
+        />
+      ) : null}
     </div>
   );
 }
