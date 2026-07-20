@@ -14,8 +14,11 @@ export default defineConfig(({ mode }) => {
     base: env.VITE_BASE_PATH || githubPagesBase,
     plugins: [react(), tailwindcss()],
     server: {
-      host: "127.0.0.1",
+      host: true,
       port: 5173,
+      // Lody 等本地预览工具经代理转发时 Host 头非 localhost，
+      // 默认的 DNS rebinding 检查会 403 → 预览白屏；仅 dev 生效
+      allowedHosts: true,
       proxy: {
         // 本地 HMR 预览直连线上 v2 API（仅 dev，构建产物不受影响）
         "/api": {
