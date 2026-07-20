@@ -367,3 +367,25 @@ export interface SubmissionResult {
   id: string;
   status: string;
 }
+
+// ---------------------------------------------------------------------------
+// Public collection tasks
+// ---------------------------------------------------------------------------
+
+export type CollectionTaskStatus = "collecting" | "submitted" | "accepted" | "needs_recollection";
+
+export interface CollectionTaskDto {
+  buildingId: string;
+  status: CollectionTaskStatus;
+  assignee: string | null;
+  owned: boolean;
+  payload?: Record<string, unknown>;
+  lockExpiresAt: string | null;
+  submissionId?: string | null;
+  updatedAt: string;
+  submittedAt: string | null;
+}
+
+export interface CollectionTasksResponse {
+  items: CollectionTaskDto[];
+}

@@ -5,7 +5,7 @@ import { Chip, ChipRow } from "../../components/ui/Chip";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { createSubmission } from "../../lib/api/public";
-import type { SubmissionTargetType } from "../../lib/api/types";
+import type { SubmissionTargetType, TransitStop } from "../../lib/api/types";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import { useIdentity } from "../../lib/storage/identity";
 import { useSubmissionsLog } from "../../lib/storage/submissionsLog";
@@ -37,16 +37,24 @@ export function FeedbackPage() {
   const [done, setDone] = useState(false);
 
   const buildings = useMemo(() => release?.buildings ?? [], [release]);
-  const targetName = targetId ? (buildings.find((b) => b.poiKey === targetId)?.name ?? null) : null;
+  const transitStops = useMemo(() => release?.manifest.transit.stops ?? [], [release]);
+  const targetName = targetId
+    ? type === "shuttle"
+      ? (transitStops.find((stop) => stop.id === targetId)?.name ?? null)
+      : (buildings.find((building) => building.poiKey === targetId)?.name ?? null)
+    : null;
 
   const pickerResults = useMemo(() => {
     const query = pickerQuery.trim();
-    if (!query) return buildings.slice(0, 20);
-    return buildings.filter((b) => b.name.includes(query)).slice(0, 20);
-  }, [buildings, pickerQuery]);
+    if (type === "shuttle") {
+      return (query ? transitStops.filter((stop) => stop.name.includes(query)) : transitStops).slice(0, 20);
+    }
+    return (query ? buildings.filter((building) => building.name.includes(query)) : buildings).slice(0, 20);
+  }, [buildings, pickerQuery, transitStops, type]);
 
   const typeConfig = FEEDBACK_TYPES.find((item) => item.key === type)!;
-  const canSubmit = content.trim().length >= 5 && !submitting;
+  const targetRequired = type !== "new_place";
+  const canSubmit = content.trim().length >= 5 && (!targetRequired || Boolean(targetId)) && !submitting;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -56,7 +64,7 @@ export function FeedbackPage() {
     try {
       const result = await createSubmission({
         targetType: typeConfig.targetType,
-        targetId: type === "correction" || type === "other" ? targetId : null,
+        targetId: targetRequired ? targetId : null,
         payload: {
           feedbackType: type,
           description: content.trim(),
@@ -88,7 +96,7 @@ export function FeedbackPage() {
           <div className="grid h-14 w-14 place-items-center rounded-full bg-success-bg text-success">✓</div>
           <div className="text-card">提交成功</div>
           <p className="text-aux leading-relaxed text-sub">
-            感谢反馈！处理进度可在「我的 - 我的反馈」查看。
+            感谢反馈！提交记录已保存在本机，可在「我的 - 我的反馈」查看。
           </p>
           <button
             type="button"
@@ -110,49 +118,65 @@ export function FeedbackPage() {
         <h2 className="mt-2 text-emphasis">反馈类型</h2>
         <ChipRow className="mt-2.5">
           {FEEDBACK_TYPES.map((item) => (
-            <Chip key={item.key} active={type === item.key} variant="outline" onClick={() => setType(item.key)}>
+            <Chip
+              key={item.key}
+              active={type === item.key}
+              variant="outline"
+              onClick={() => {
+                setType(item.key);
+                setTargetId(null);
+                setPickerOpen(false);
+                setPickerQuery("");
+              }}
+            >
               {item.label}
             </Chip>
           ))}
         </ChipRow>
 
         {/* 关联地点 */}
-        {type === "correction" || type === "other" ? (
+        {targetRequired ? (
           <>
-            <h2 className="mt-5 text-emphasis">关联地点（选填）</h2>
+            <h2 className="mt-5 text-emphasis">{type === "shuttle" ? "关联站点" : "关联地点"}</h2>
             <button
               type="button"
               className="mt-2.5 flex w-full items-center justify-between rounded-2xl bg-surface px-4 py-3.5 shadow-card"
               onClick={() => setPickerOpen((open) => !open)}
             >
               <span className={targetName ? "text-body text-ink" : "text-body text-sub"}>
-                {targetName ?? "选择地点"}
+                {targetName ?? (type === "shuttle" ? "选择站点" : "选择地点")}
               </span>
               <ChevronRight size={16} className={`text-sub transition-transform ${pickerOpen ? "rotate-90" : ""}`} />
             </button>
             {pickerOpen ? (
               <div className="mt-2 rounded-2xl bg-surface p-3 shadow-card">
-                <SearchInput value={pickerQuery} onChange={setPickerQuery} placeholder="搜索地点…" />
+                <SearchInput value={pickerQuery} onChange={setPickerQuery} placeholder={type === "shuttle" ? "搜索站点…" : "搜索地点…"} />
                 <div className="mt-2 max-h-56 overflow-y-auto">
-                  {pickerResults.map((building) => (
+                  {pickerResults.map((item) => {
+                    const isStop = type === "shuttle";
+                    const id = isStop ? (item as TransitStop).id : (item as (typeof buildings)[number]).poiKey;
+                    const name = item.name;
+                    const campusLabel = isStop ? null : (item as (typeof buildings)[number]).campusLabel;
+                    return (
                     <button
-                      key={building.poiKey}
+                      key={id}
                       type="button"
                       className={`block w-full rounded-lg px-3 py-2.5 text-left text-body active:bg-page ${
-                        building.poiKey === targetId ? "font-medium text-primary" : "text-ink"
+                        id === targetId ? "font-medium text-primary" : "text-ink"
                       }`}
                       onClick={() => {
-                        setTargetId(building.poiKey);
+                        setTargetId(id);
                         setPickerOpen(false);
                         setPickerQuery("");
                       }}
                     >
-                      {building.name}
-                      <span className="ml-1.5 text-aux text-sub">{building.campusLabel}</span>
+                      {name}
+                      {campusLabel ? <span className="ml-1.5 text-aux text-sub">{campusLabel}</span> : null}
                     </button>
-                  ))}
+                    );
+                  })}
                   {pickerResults.length === 0 ? (
-                    <div className="px-3 py-4 text-center text-aux text-sub">没有匹配的地点</div>
+                    <div className="px-3 py-4 text-center text-aux text-sub">没有匹配的{type === "shuttle" ? "站点" : "地点"}</div>
                   ) : null}
                 </div>
               </div>
@@ -207,7 +231,7 @@ export function FeedbackPage() {
         >
           {submitting ? "提交中…" : "提交反馈"}
         </button>
-        <p className="mt-3 text-center text-aux text-sub">提交后可在「我的 - 我的反馈」查看处理进度</p>
+        <p className="mt-3 text-center text-aux text-sub">提交后可在「我的 - 我的反馈」查看本机提交记录</p>
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ const STATUS_META: Record<CollectionStatus, { label: string; className: string }
   pending: { label: "未采集", className: "bg-page text-sub" },
   collecting: { label: "采集中", className: "bg-primary-container text-primary" },
   submitted: { label: "已提交", className: "bg-success-bg text-success" },
+  accepted: { label: "已采纳", className: "bg-success-bg text-success" },
   needs_recollection: { label: "需补采", className: "bg-warning-bg text-warning" },
 };
 
@@ -24,11 +25,11 @@ function syncLabel(lastSyncAt: string | null, now: number): string {
   return `最后更新 ${Math.floor(minutes / 60)} 小时前`;
 }
 
-/** M12 数据采集-列表。后端待写，本轮 localStorage 模拟。 */
+/** M12 数据采集列表：服务端锁定、草稿同步和提交状态。 */
 export function CollectionListPage() {
   const navigate = useNavigate();
   const { release } = useRelease();
-  const { tasks, startCollection, lastSyncAt, collectedCount } = useCollectionTasks();
+  const { tasks, startCollection, lastSyncAt, collectedCount, polling, error, reload } = useCollectionTasks();
   const [identity] = useIdentity();
   const [campus, setCampus] = useState<string | null>(null);
   const now = useNow(30_000);
@@ -43,8 +44,8 @@ export function CollectionListPage() {
     [buildings, campus],
   );
 
-  const handleStart = (buildingId: string) => {
-    if (startCollection(buildingId)) navigate(`/collect/${encodeURIComponent(buildingId)}`);
+  const handleStart = async (buildingId: string) => {
+    if (await startCollection(buildingId)) navigate(`/collect/${encodeURIComponent(buildingId)}`);
   };
 
   return (
@@ -53,13 +54,17 @@ export function CollectionListPage() {
 
       <div className="flex-1 overflow-y-auto px-4 pb-6">
         {/* 同步条 */}
-        <div className="mt-2 flex items-center justify-between rounded-2xl bg-success-bg px-4 py-3">
-          <div className="flex items-center gap-2 text-aux font-medium text-success">
+        <button
+          type="button"
+          className={`mt-2 flex w-full items-center justify-between rounded-2xl px-4 py-3 ${error ? "bg-error-bg" : "bg-success-bg"}`}
+          onClick={() => void reload()}
+        >
+          <div className={`flex items-center gap-2 text-aux font-medium ${error ? "text-error" : "text-success"}`}>
             <Check size={15} />
-            已同步 · {syncLabel(lastSyncAt, now)}
+            {error || `已同步 · ${syncLabel(lastSyncAt, now)}`}
           </div>
-          <RefreshCw size={16} className="text-success" />
-        </div>
+          <RefreshCw size={16} className={`${error ? "text-error" : "text-success"} ${polling ? "animate-spin" : ""}`} />
+        </button>
 
         {/* 进度卡 */}
         <div className="mt-3 rounded-2xl bg-surface p-4 shadow-card">
@@ -93,9 +98,10 @@ export function CollectionListPage() {
               const task = tasks[building.poiKey];
               const status = task?.status ?? "pending";
               const meta = STATUS_META[status];
+              const lockExpired = status === "collecting" && Boolean(task?.lockExpiresAt) && new Date(task!.lockExpiresAt!).getTime() <= now;
               const lockedByOther =
-                status === "collecting" && task?.assignee && task.assignee !== identity.name;
-              const mine = task?.assignee === identity.name;
+                status === "collecting" && task && !task.owned && !lockExpired;
+              const mine = Boolean(task?.owned);
 
               return (
                 <div
@@ -112,7 +118,7 @@ export function CollectionListPage() {
                   </span>
                   {lockedByOther ? (
                     <Lock size={16} className="shrink-0 text-sub" />
-                  ) : status === "submitted" ? (
+                  ) : status === "submitted" || status === "accepted" ? (
                     <button
                       type="button"
                       className="shrink-0 text-body font-medium text-sub"
@@ -124,9 +130,9 @@ export function CollectionListPage() {
                     <button
                       type="button"
                       className="shrink-0 text-body font-medium text-primary"
-                      onClick={() => handleStart(building.poiKey)}
+                      onClick={() => void handleStart(building.poiKey)}
                     >
-                      {status === "needs_recollection" ? "补采 ›" : mine ? "继续采集 ›" : "开始采集 ›"}
+                    {status === "needs_recollection" ? "补采 ›" : lockExpired ? "重新领取 ›" : mine ? "继续采集 ›" : "开始采集 ›"}
                     </button>
                   )}
                 </div>

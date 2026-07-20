@@ -5,6 +5,8 @@
 import { apiFetch } from "./client";
 import type {
   CampaignsResponse,
+  CollectionTaskDto,
+  CollectionTasksResponse,
   JourneysResponse,
   OperationalEventsResponse,
   PublicPlaceListResponse,
@@ -74,4 +76,41 @@ export function createSubmission(input: SubmissionInput, signal?: AbortSignal): 
     body: input,
     signal,
   });
+}
+
+export function listCollectionTasks(deviceId: string, signal?: AbortSignal): Promise<CollectionTasksResponse> {
+  return apiFetch<CollectionTasksResponse>("/api/public/collection-tasks", {
+    headers: { "x-shumap-device-id": deviceId },
+    signal,
+  });
+}
+
+export function claimCollectionTask(
+  buildingId: string,
+  body: { deviceId: string; assigneeName: string },
+): Promise<{ task: CollectionTaskDto }> {
+  return apiFetch<{ task: CollectionTaskDto }>(
+    `/api/public/collection-tasks/${encodeURIComponent(buildingId)}/claim`,
+    { method: "POST", body, headers: { "x-shumap-device-id": body.deviceId } },
+  );
+}
+
+export function saveCollectionTask(
+  buildingId: string,
+  body: { deviceId: string; payload: Record<string, unknown> },
+): Promise<{ task: CollectionTaskDto }> {
+  return apiFetch<{ task: CollectionTaskDto }>(
+    `/api/public/collection-tasks/${encodeURIComponent(buildingId)}`,
+    { method: "PUT", body, headers: { "x-shumap-device-id": body.deviceId } },
+  );
+}
+
+export function submitCollectionTask(
+  buildingId: string,
+  body: { deviceId: string; payload: Record<string, unknown> },
+): Promise<{ task: CollectionTaskDto; submissionId: string }> {
+  return apiFetch<{ task: CollectionTaskDto; submissionId: string }>(
+    `/api/public/collection-tasks/${encodeURIComponent(buildingId)}/submit`,
+    { method: "POST", body, headers: { "x-shumap-device-id": body.deviceId } },
+  );
 }

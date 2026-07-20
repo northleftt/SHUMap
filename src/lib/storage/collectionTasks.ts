@@ -1,21 +1,20 @@
-import { useEffect, useState } from "react";
-import { useIdentity } from "./identity";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  claimCollectionTask,
+  listCollectionTasks,
+  saveCollectionTask as saveCollectionTaskApi,
+  submitCollectionTask as submitCollectionTaskApi,
+} from "../api/public";
+import type { CollectionTaskDto } from "../api/types";
+import { collectionDeviceId, useIdentity } from "./identity";
 import { useLocalStore } from "./localStore";
 
 const KEY = "shumap.collection-tasks";
 const SYNC_KEY = "shumap.collection-last-sync";
 const POLL_INTERVAL_MS = 30_000;
+const SAVE_DELAY_MS = 500;
 
-/**
- * 志愿者数据采集——后端待写，本轮纯 localStorage 模拟。
- * 类型按未来 API 形状设计（building + assignee + status 状态机 +
- * floors/facilities 草稿），接后端时只需替换本模块实现。
- */
-export type CollectionStatus =
-  | "pending" // 未采集
-  | "collecting" // 采集中（已锁定）
-  | "submitted" // 已提交
-  | "needs_recollection"; // 需补采
+export type CollectionStatus = "pending" | "collecting" | "submitted" | "accepted" | "needs_recollection";
 
 export interface CollectedFacility {
   id: string;
@@ -34,29 +33,60 @@ export interface CollectedFloor {
 export interface CollectionTask {
   buildingId: string;
   status: CollectionStatus;
-  /** 锁定人昵称；他人看到「采集中 · XX」只读 */
   assignee: string | null;
+  owned: boolean;
   openHours: string;
   phone: string;
   organization: string;
   floors: CollectedFloor[];
+  lockExpiresAt: string | null;
   updatedAt: string | null;
   submittedAt: string | null;
 }
 
 export type CollectionTaskMap = Record<string, CollectionTask>;
 
+type DraftPatch = Partial<Pick<CollectionTask, "openHours" | "phone" | "organization" | "floors">>;
+
 function emptyTask(buildingId: string, assignee: string): CollectionTask {
   return {
     buildingId,
     status: "collecting",
     assignee,
+    owned: true,
     openHours: "",
     phone: "",
     organization: "",
     floors: [],
+    lockExpiresAt: null,
     updatedAt: new Date().toISOString(),
     submittedAt: null,
+  };
+}
+
+function payloadOf(task: CollectionTask): Record<string, unknown> {
+  return {
+    openHours: task.openHours,
+    phone: task.phone,
+    organization: task.organization,
+    floors: task.floors,
+  };
+}
+
+function fromDto(dto: CollectionTaskDto, cached?: CollectionTask): CollectionTask {
+  const payload = dto.payload ?? {};
+  return {
+    buildingId: dto.buildingId,
+    status: dto.status,
+    assignee: dto.assignee,
+    owned: dto.owned,
+    openHours: typeof payload.openHours === "string" ? payload.openHours : (cached?.openHours ?? ""),
+    phone: typeof payload.phone === "string" ? payload.phone : (cached?.phone ?? ""),
+    organization: typeof payload.organization === "string" ? payload.organization : (cached?.organization ?? ""),
+    floors: Array.isArray(payload.floors) ? (payload.floors as CollectedFloor[]) : (cached?.floors ?? []),
+    lockExpiresAt: dto.lockExpiresAt,
+    updatedAt: dto.updatedAt,
+    submittedAt: dto.submittedAt,
   };
 }
 
@@ -65,48 +95,99 @@ export function useCollectionTasks() {
   const [lastSyncAt, setLastSyncAt] = useLocalStore<string | null>(SYNC_KEY, null);
   const [identity] = useIdentity();
   const [polling, setPolling] = useState(false);
+  const [error, setError] = useState("");
+  const saveTimers = useRef(new Map<string, number>());
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const deviceId = collectionDeviceId();
 
-  // 模拟 30s 轮询同步（接后端后改为真实拉取）
+  const reload = useCallback(async (signal?: AbortSignal, clearError = true) => {
+    setPolling(true);
+    try {
+      const response = await listCollectionTasks(deviceId, signal);
+      setTasks((current) => {
+        const next: CollectionTaskMap = {};
+        for (const dto of response.items) next[dto.buildingId] = fromDto(dto, current[dto.buildingId]);
+        return next;
+      });
+      setLastSyncAt(new Date().toISOString());
+      if (clearError) setError("");
+    } catch (err) {
+      if (signal?.aborted) return;
+      setError(err instanceof Error ? err.message : "采集任务同步失败");
+    } finally {
+      if (!signal?.aborted) setPolling(false);
+    }
+  }, [deviceId, setLastSyncAt, setTasks]);
+
   useEffect(() => {
-    const tick = () => {
-      setPolling(true);
-      window.setTimeout(() => {
-        setLastSyncAt(new Date().toISOString());
-        setPolling(false);
-      }, 400);
+    const controller = new AbortController();
+    void reload(controller.signal);
+    const timer = window.setInterval(() => void reload(), POLL_INTERVAL_MS);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      for (const saveTimer of saveTimers.current.values()) window.clearTimeout(saveTimer);
     };
-    const timer = window.setInterval(tick, POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [reload]);
 
   const getTask = (buildingId: string): CollectionTask | null => tasks[buildingId] ?? null;
 
-  /** 开始采集 = 锁定楼宇；已被他人（模拟）锁定时返回 false */
-  const startCollection = (buildingId: string): boolean => {
-    const existing = tasks[buildingId];
-    if (existing && existing.status !== "pending" && existing.status !== "needs_recollection" && existing.assignee !== identity.name) {
+  const startCollection = async (buildingId: string): Promise<boolean> => {
+    try {
+      const response = await claimCollectionTask(buildingId, { deviceId, assigneeName: identity.name });
+      setTasks((current) => ({
+        ...current,
+        [buildingId]: fromDto(response.task, current[buildingId] ?? emptyTask(buildingId, identity.name)),
+      }));
+      setLastSyncAt(new Date().toISOString());
+      setError("");
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "无法锁定该楼宇");
+      await reload(undefined, false);
       return false;
     }
-    setTasks((prev) => ({ ...prev, [buildingId]: existing ?? emptyTask(buildingId, identity.name) }));
-    return true;
   };
 
-  const saveDraft = (buildingId: string, patch: Partial<Omit<CollectionTask, "buildingId">>) => {
-    setTasks((prev) => {
-      const current = prev[buildingId];
-      if (!current) return prev;
-      return { ...prev, [buildingId]: { ...current, ...patch, updatedAt: new Date().toISOString() } };
-    });
+  const persistDraft = (buildingId: string) => {
+    const current = tasksRef.current[buildingId];
+    if (!current?.owned || current.status !== "collecting") return;
+    void saveCollectionTaskApi(buildingId, { deviceId, payload: payloadOf(current) })
+      .then(({ task }) => {
+        setTasks((all) => ({ ...all, [buildingId]: fromDto(task, all[buildingId]) }));
+        setLastSyncAt(new Date().toISOString());
+        setError("");
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "草稿同步失败"));
   };
 
-  const submitCollection = (buildingId: string) => {
-    setTasks((prev) => {
-      const current = prev[buildingId];
-      if (!current) return prev;
-      const now = new Date().toISOString();
-      return { ...prev, [buildingId]: { ...current, status: "submitted", updatedAt: now, submittedAt: now } };
+  const saveDraft = (buildingId: string, patch: DraftPatch) => {
+    setTasks((current) => {
+      const task = current[buildingId];
+      if (!task?.owned || task.status !== "collecting") return current;
+      return { ...current, [buildingId]: { ...task, ...patch, updatedAt: new Date().toISOString() } };
     });
+    const existing = saveTimers.current.get(buildingId);
+    if (existing) window.clearTimeout(existing);
+    saveTimers.current.set(buildingId, window.setTimeout(() => persistDraft(buildingId), SAVE_DELAY_MS));
+  };
+
+  const submitCollection = async (buildingId: string): Promise<boolean> => {
+    const current = tasksRef.current[buildingId];
+    if (!current?.owned || current.status !== "collecting") return false;
+    const timer = saveTimers.current.get(buildingId);
+    if (timer) window.clearTimeout(timer);
+    try {
+      const response = await submitCollectionTaskApi(buildingId, { deviceId, payload: payloadOf(current) });
+      setTasks((all) => ({ ...all, [buildingId]: fromDto(response.task, all[buildingId]) }));
+      setLastSyncAt(new Date().toISOString());
+      setError("");
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "提交采集失败");
+      return false;
+    }
   };
 
   return {
@@ -115,8 +196,10 @@ export function useCollectionTasks() {
     startCollection,
     saveDraft,
     submitCollection,
+    reload,
     lastSyncAt,
     polling,
-    collectedCount: Object.values(tasks).filter((task) => task.status === "submitted").length,
+    error,
+    collectedCount: Object.values(tasks).filter((task) => task.status === "submitted" || task.status === "accepted").length,
   };
 }

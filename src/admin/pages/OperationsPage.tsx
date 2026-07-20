@@ -2,6 +2,7 @@ import { CalendarDays, CircleAlert, Plus, Wrench } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
+import { useAuth } from "../AuthContext";
 import type { CampaignRow, OperationalEventRow } from "../adminTypes";
 import {
   Chip,
@@ -47,6 +48,8 @@ const SEVERITY_BAR: Record<string, string> = {
 };
 
 export function OperationsPage() {
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission("write:content");
   const [filter, setFilter] = useState<string>("all");
   const events = useAsyncData((signal) => admin.listAdminOperations<OperationalEventRow>(signal), []);
   const campaigns = useAsyncData((signal) => admin.listAdminCampaigns<CampaignRow>(signal), []);
@@ -65,11 +68,13 @@ export function OperationsPage() {
           </Chip>
         ))}
         <div className="flex-1" />
-        <Link to="/admin/operations/new">
-          <PrimaryButton>
-            <Plus size={15} /> 新建运营事件
-          </PrimaryButton>
-        </Link>
+        {canWrite ? (
+          <Link to="/admin/operations/new">
+            <PrimaryButton>
+              <Plus size={15} /> 新建运营事件
+            </PrimaryButton>
+          </Link>
+        ) : null}
       </div>
 
       <div className="space-y-3">

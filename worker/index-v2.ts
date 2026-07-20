@@ -2,15 +2,17 @@ import type { Env, ExecutionContext, MessageBatch } from "./types/cloudflare";
 import type { QueueJobMessage, SessionPrincipal } from "./domain/types";
 import { asErrorResponse, HttpError, json } from "./lib/http";
 import { handleBootstrap, handleLogin, handleLogout, handleSession, requireSession } from "./modules/auth";
-import { createFacilityHandler, createFacilityRevisionHandler, listFacilities } from "./modules/facilities";
+import { recordAnalyticsEvent } from "./modules/analytics";
+import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCollectionTask } from "./modules/collections";
+import { createFacilityHandler, createFacilityRevisionHandler, getFacility, listFacilities } from "./modules/facilities";
 import { processQueue } from "./modules/jobs";
 import { enqueueMapImport, createMapUploadIntent, listMapVersions, uploadMapContent } from "./modules/maps";
 import { getPublicMedia } from "./modules/media";
-import { createMerchant, createMerchantRevision, listMerchants } from "./modules/merchants";
+import { createMerchant, createMerchantRevision, getMerchant, listMerchants } from "./modules/merchants";
 import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
 import { getCurrentRelease, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
-import { reviewRevision, submitRevision } from "./modules/reviews";
+import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
 import { createDataSource, createFloor, createOrganization, createSpace, listCampusesAndSpaces, listReferenceData } from "./modules/spaces";
 import { createCalendar, createPattern, createRoute, createStop, createTrip, listTransit, publicJourneys } from "./modules/transit";
@@ -50,6 +52,7 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   const path = normalizePath(url.pathname);
 
   if (method === "GET" && path === "/api/health") return publicHealth();
+  if (method === "POST" && path === "/api/analytics/events") return recordAnalyticsEvent(request, env);
   if (method === "POST" && path === "/api/auth/bootstrap") return handleBootstrap(request, env);
   if (method === "POST" && path === "/api/auth/login") return handleLogin(request, env);
   if (method === "POST" && path === "/api/auth/logout") return handleLogout(request, env);
@@ -66,6 +69,13 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "GET" && path === "/api/public/campaigns") return listCampaigns(env, true);
   if (method === "GET" && path === "/api/public/transit/journeys") return publicJourneys(request, env);
   if (method === "POST" && path === "/api/public/submissions") return createSubmission(request, env);
+  if (method === "GET" && path === "/api/public/collection-tasks") return listCollectionTasks(request, env);
+  const collectionClaim = match(path, "/api/public/collection-tasks/:id/claim");
+  if (method === "POST" && collectionClaim) return claimCollectionTask(request, env, collectionClaim.id);
+  const collectionSubmit = match(path, "/api/public/collection-tasks/:id/submit");
+  if (method === "POST" && collectionSubmit) return submitCollectionTask(request, env, collectionSubmit.id);
+  const collectionTask = match(path, "/api/public/collection-tasks/:id");
+  if (method === "PUT" && collectionTask) return saveCollectionTask(request, env, collectionTask.id);
   const media = match(path, "/api/public/media/:id");
   if (method === "GET" && media) return getPublicMedia(env, media.id);
 
@@ -133,6 +143,11 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     principal = await requireSession(request, env, "write:content");
     return createFacilityHandler(request, env, principal, requestId);
   }
+  const facility = match(path, "/api/admin/facilities/:id");
+  if (method === "GET" && facility) {
+    await requireSession(request, env, "read:admin");
+    return getFacility(env, facility.id);
+  }
   const facilityRevision = match(path, "/api/admin/facilities/:id/revisions");
   if (method === "POST" && facilityRevision) {
     principal = await requireSession(request, env, "write:content");
@@ -147,6 +162,11 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     principal = await requireSession(request, env, "write:content");
     return createMerchant(request, env, principal, requestId);
   }
+  const merchant = match(path, "/api/admin/merchants/:id");
+  if (method === "GET" && merchant) {
+    await requireSession(request, env, "read:admin");
+    return getMerchant(env, merchant.id);
+  }
   const merchantRevision = match(path, "/api/admin/merchants/:id/revisions");
   if (method === "POST" && merchantRevision) {
     principal = await requireSession(request, env, "write:content");
@@ -157,6 +177,10 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && revisionSubmit) {
     principal = await requireSession(request, env, "write:content");
     return submitRevision(request, env, principal, revisionType(revisionSubmit.type), revisionSubmit.id, requestId);
+  }
+  if (method === "GET" && path === "/api/admin/revisions/pending") {
+    await requireSession(request, env, "review:content");
+    return listPendingRevisions(env);
   }
   const revisionReview = match(path, "/api/admin/revisions/:type/:id/review");
   if (method === "POST" && revisionReview) {
@@ -241,7 +265,7 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   const submissionReview = match(path, "/api/admin/submissions/:id/review");
   if (method === "POST" && submissionReview) {
     principal = await requireSession(request, env, "review:content");
-    return reviewSubmission(request, env, principal.userId, submissionReview.id);
+    return reviewSubmission(request, env, principal, submissionReview.id);
   }
 
   if (method === "POST" && path === "/api/admin/releases") {

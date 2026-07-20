@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 
 const STORE_EVENT = "shumap:local-store";
 
@@ -41,9 +41,11 @@ export function useLocalStore<T>(key: string, fallback: T): [T, (next: T | ((pre
     () => localStorage.getItem(key),
   );
   const value = raw === null ? fallback : readStore(key, fallback);
-  const setValue = (next: T | ((prev: T) => T)) => {
-    const resolved = typeof next === "function" ? (next as (prev: T) => T)(value) : next;
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const setValue = useCallback((next: T | ((prev: T) => T)) => {
+    const resolved = typeof next === "function" ? (next as (prev: T) => T)(valueRef.current) : next;
     writeStore(key, resolved);
-  };
+  }, [key]);
   return [value, setValue];
 }

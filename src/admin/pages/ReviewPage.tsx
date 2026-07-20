@@ -2,11 +2,8 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import type {
-  FacilityListItem,
-  MerchantListItem,
   OperationalEventRow,
   PlaceDetailResponse,
-  PlaceListItem,
   SubmissionRow,
 } from "../adminTypes";
 import {
@@ -66,23 +63,19 @@ export function ReviewPage() {
   const [error, setError] = useState("");
 
   const queue = useAsyncData(async (signal) => {
-    const [places, facilities, merchants, operations, submissions] = await Promise.all([
-      admin.listAdminPlaces<PlaceListItem>(signal),
-      admin.listFacilities<FacilityListItem>(signal),
-      admin.listMerchants<MerchantListItem>(signal),
+    const [revisions, operations, submissions] = await Promise.all([
+      admin.listPendingRevisions(signal),
       admin.listAdminOperations<OperationalEventRow>(signal).catch(() => ({ items: [] as OperationalEventRow[] })),
       admin.listSubmissions(signal),
     ]);
     const items: QueueItem[] = [
-      ...places.items
-        .filter((p) => p.editorialStatus === "in_review")
-        .map((p): QueueItem => ({ kind: "place", id: p.id, revisionId: p.currentRevisionId, title: p.displayName ?? p.id, at: p.updatedAt })),
-      ...facilities.items
-        .filter((f) => f.editorialStatus === "in_review")
-        .map((f): QueueItem => ({ kind: "facility", id: f.id, revisionId: f.currentRevisionId ? String(f.currentRevisionId) : null, title: String(f.displayName ?? f.id), at: String(f.lastVerifiedAt ?? "") })),
-      ...merchants.items
-        .filter((m) => m.editorialStatus === "in_review")
-        .map((m): QueueItem => ({ kind: "merchant", id: m.id, revisionId: m.currentRevisionId ? String(m.currentRevisionId) : null, title: String(m.displayName ?? m.id), at: String(m.updatedAt ?? "") })),
+      ...revisions.items.map((revision): QueueItem => ({
+        kind: revision.type,
+        id: revision.entityId,
+        revisionId: revision.revisionId,
+        title: revision.title,
+        at: revision.submittedAt,
+      })),
       ...operations.items
         .filter((e) => e.editorialStatus === "draft" || e.editorialStatus === "in_review")
         .map((e): QueueItem => ({ kind: "operation", id: e.id, title: e.title, at: e.createdAt, severity: e.severity })),
@@ -105,7 +98,7 @@ export function ReviewPage() {
   if (queue.state.status === "loading") return <LoadingState label="加载审核队列…" />;
   if (queue.state.status === "error") return <ErrorBanner message={queue.state.message ?? "加载失败"} />;
   const items = queue.state.data!;
-  const filters = ["全部", "地点", "设施", "运营事件", "用户提交"];
+  const filters = ["全部", "地点", "设施", "商户", "运营事件", "用户提交"];
   const countOf = (f: string) => (f === "全部" ? items.length : items.filter((i) => KIND_META[i.kind].filter === f).length);
   const visible = filter === "全部" ? items : items.filter((i) => KIND_META[i.kind].filter === filter);
 
@@ -114,7 +107,7 @@ export function ReviewPage() {
   let revisionMeta = "";
   if (selected?.kind === "place" && placeDetail.state.status === "ready" && placeDetail.state.data) {
     const revisions = placeDetail.state.data.revisions as Array<Record<string, unknown>>;
-    const current = revisions.find((r) => r.editorial_status === "in_review") ?? revisions[0];
+    const current = revisions.find((r) => r.id === selected.revisionId);
     const baseline = revisions.find((r) => r.editorial_status === "approved");
     if (current) {
       revisionMeta = `修订 #${current.revision_no} · 提交于 ${fmtDateTime(String(current.created_at ?? ""))}`;
@@ -166,10 +159,14 @@ export function ReviewPage() {
         <Panel padded={false}>
           <div className="divide-y divide-line">
             {visible.map((item) => {
-              const active = selected?.kind === item.kind && selected.id === item.id;
+              const itemRevisionId = "revisionId" in item ? item.revisionId : null;
+              const selectedRevisionId = selected && "revisionId" in selected ? selected.revisionId : null;
+              const active = selected?.kind === item.kind
+                && selected.id === item.id
+                && itemRevisionId === selectedRevisionId;
               return (
                 <button
-                  key={`${item.kind}:${item.id}`}
+                  key={`${item.kind}:${item.id}:${itemRevisionId ?? "entity"}`}
                   className={`flex w-full items-start gap-3 px-5 py-3.5 text-left transition-colors ${active ? "bg-primary-container/60" : "hover:bg-page"}`}
                   onClick={() => { setSelected(item); setNote(""); setError(""); }}
                   type="button"

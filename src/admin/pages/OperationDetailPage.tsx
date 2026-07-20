@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
+import { useAuth } from "../AuthContext";
 import type { OperationalEventRow } from "../adminTypes";
 import {
   Chip,
@@ -44,6 +45,8 @@ const UPDATE_STATUS_META: Record<string, { label: string; tone: "info" | "warnin
 export function OperationDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission("write:content");
 
   const { state, reload } = useAsyncData(async (signal) => {
     const list = await admin.listAdminOperations<OperationalEventRow & { targets?: Array<{ targetType: string; targetId: string }>; updates?: EventUpdate[] }>(signal);
@@ -114,7 +117,7 @@ export function OperationDetailPage() {
             <Pill tone={OPERATIONAL_STATUS_TONE[event.operationalStatus] ?? "neutral"} className="h-6 px-2.5">
               {OPERATIONAL_STATUS_LABELS[event.operationalStatus] ?? event.operationalStatus}
             </Pill>
-            {!ended ? (
+            {canWrite && !ended ? (
               <GhostButton
                 onClick={() => {
                   setStatus("resolved");
@@ -129,9 +132,9 @@ export function OperationDetailPage() {
         </div>
       </Panel>
 
-      <div className="grid grid-cols-2 items-start gap-4">
+      <div className={`grid items-start gap-4 ${canWrite ? "grid-cols-2" : "grid-cols-1"}`}>
         {/* 发布新进展 */}
-        <Panel title="发布新进展">
+        {canWrite ? <Panel title="发布新进展">
           <div className="space-y-4">
             <TextArea
               label=""
@@ -167,7 +170,7 @@ export function OperationDetailPage() {
               进展随事件公开：移动端 M6 详情与 M8 摘要卡展示最新一条；「恢复」类型进展会自动建议结束事件。
             </InfoNote>
           </div>
-        </Panel>
+        </Panel> : null}
 
         {/* 进展时间线 */}
         <Panel title="进展时间线" padded={false}>

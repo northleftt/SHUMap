@@ -3,6 +3,7 @@ import { useState } from "react";
 import * as admin from "../../lib/api/admin";
 import { getCurrentRelease } from "../../lib/api/public";
 import type { ReleaseManifest } from "../../lib/api/types";
+import { useAuth } from "../AuthContext";
 import {
   EmptyState,
   ErrorBanner,
@@ -22,7 +23,9 @@ import {
 // A5 发布中心（当前版本 + 发布表单 + A13 校验报告 + 回滚）
 // ---------------------------------------------------------------------------
 
-export function ReleasesPage({ canRollback = true }: { canRollback?: boolean }) {
+export function ReleasesPage() {
+  const { hasPermission } = useAuth();
+  const canRollback = hasPermission("rollback:release");
   const { state, reload } = useAsyncData(async (signal) => {
     const [maps, release] = await Promise.all([
       admin.listMapVersions(signal),

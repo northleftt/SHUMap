@@ -11,3 +11,7 @@ __pycache__/
 *.env.local
 .dev.vars
 .dev.vars.*
+.playwright-mcp/
+m1-check.png
+map-check.png
+admin-login.png

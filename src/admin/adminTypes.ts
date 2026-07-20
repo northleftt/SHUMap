@@ -140,6 +140,18 @@ export interface PlaceDetailResponse {
   floors: Array<Record<string, unknown>>;
 }
 
+export interface FacilityDetailResponse {
+  facility: Record<string, unknown>;
+  revisions: Array<Record<string, unknown>>;
+  locations: Array<Record<string, unknown>>;
+}
+
+export interface MerchantDetailResponse {
+  merchant: Record<string, unknown>;
+  revisions: Array<Record<string, unknown>>;
+  locations: Array<Record<string, unknown>>;
+}
+
 // ---------------------------------------------------------------------------
 // Facilities + merchants
 // ---------------------------------------------------------------------------

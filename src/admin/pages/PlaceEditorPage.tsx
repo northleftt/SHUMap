@@ -56,6 +56,8 @@ export function PlaceEditorPage() {
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
   const [aliases, setAliases] = useState("");
+  const [baseContent, setBaseContent] = useState<Record<string, unknown>>({});
+  const [sourceId, setSourceId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -69,6 +71,12 @@ export function PlaceEditorPage() {
     setStableCode(place.stable_code ? String(place.stable_code) : "");
     setSummary(place.summary ? String(place.summary) : "");
     setDescription(place.description ? String(place.description) : "");
+    try {
+      setBaseContent(JSON.parse(String(place.content_json ?? "{}")) as Record<string, unknown>);
+    } catch {
+      setBaseContent({});
+    }
+    setSourceId(place.source_id ? String(place.source_id) : "");
     const names = detail.state.data.names as Array<Record<string, unknown>>;
     setAliases(names.filter((n) => n.name_type === "alias").map((n) => String(n.name)).join("、"));
   }, [detail.state]);
@@ -80,7 +88,9 @@ export function PlaceEditorPage() {
   const campuses = meta.state.status === "ready" ? meta.state.data!.spaces.campuses : [];
   const data = detail.state.status === "ready" ? detail.state.data : null;
   const revisions = ((data?.revisions ?? []) as RevisionRow[]).slice(0, 8);
-  const currentRevision = revisions.find((r) => r.editorial_status === "draft" || r.editorial_status === "in_review");
+  const currentRevision = revisions.find((r) => r.editorial_status === "in_review")
+    ?? revisions.find((r) => r.editorial_status === "draft");
+  const reviewLocked = currentRevision?.editorial_status === "in_review";
   const locations = (data?.locations ?? []) as Array<Record<string, unknown>>;
   const floors = (data?.floors ?? []) as Array<Record<string, unknown>>;
 
@@ -100,6 +110,8 @@ export function PlaceEditorPage() {
           displayName: name.trim(),
           summary: summary.trim() || undefined,
           description: description.trim() || undefined,
+          content: baseContent,
+          sourceId: sourceId || undefined,
           aliases: aliases.split(/[、,，]/).map((a) => a.trim()).filter(Boolean),
         });
         placeId = created.id;
@@ -109,6 +121,8 @@ export function PlaceEditorPage() {
           displayName: name.trim(),
           summary: summary.trim() || undefined,
           description: description.trim() || undefined,
+          content: baseContent,
+          sourceId: sourceId || undefined,
         });
         revisionId = created.id;
       }
@@ -140,6 +154,7 @@ export function PlaceEditorPage() {
             <div className="grid grid-cols-2 gap-3">
               <SelectField
                 label="类型"
+                disabled={!isNew}
                 onChange={setKindId}
                 options={kinds.map((k) => ({ value: k.id, label: k.name }))}
                 placeholder="选择类型"
@@ -147,21 +162,31 @@ export function PlaceEditorPage() {
               />
               <SelectField
                 label="校区"
+                disabled={!isNew}
                 onChange={setCampusId}
                 options={campuses.map((c) => ({ value: c.id, label: c.name }))}
                 placeholder="选择校区"
                 value={campusId}
               />
-              <Field label="楼栋代码" onChange={setStableCode} placeholder="如 LIB-01" value={stableCode} />
-              <Field label="别名（、分隔）" onChange={setAliases} placeholder="如 图书馆、上图" value={aliases} />
+              <Field disabled={!isNew} label="楼栋代码" onChange={setStableCode} placeholder="如 LIB-01" value={stableCode} />
+              <Field disabled={!isNew} label="别名（、分隔）" onChange={setAliases} placeholder="如 图书馆、上图" value={aliases} />
             </div>
           </div>
           <TextArea label="简介" onChange={setSummary} placeholder="一句话介绍" rows={2} value={summary} />
           <TextArea label="详细描述" onChange={setDescription} placeholder="开放时间、注意事项等" rows={4} value={description} />
+          <SelectField
+            label="数据来源"
+            onChange={setSourceId}
+            options={(meta.state.status === "ready" ? meta.state.data!.ref.sources : []).map((source) => ({ value: source.id, label: source.title }))}
+            placeholder="不指定"
+            value={sourceId}
+          />
+          {!isNew ? <InfoNote tone="info">类型、校区、楼栋代码和别名属于实体结构字段，当前页面仅支持在新建地点时设置。</InfoNote> : null}
+          {reviewLocked ? <InfoNote tone="warning">当前修订正在审核，处理完成后才能继续编辑。</InfoNote> : null}
           <ErrorBanner message={error} />
           <div className="flex gap-3">
-            <GhostButton className="flex-1" disabled={busy} onClick={() => save(false)}>保存草稿</GhostButton>
-            <PrimaryButton className="flex-[2]" disabled={busy} onClick={() => save(true)}>
+            <GhostButton className="flex-1" disabled={busy || reviewLocked} onClick={() => save(false)}>保存草稿</GhostButton>
+            <PrimaryButton className="flex-[2]" disabled={busy || reviewLocked} onClick={() => save(true)}>
               {busy ? "处理中…" : "提交审核 →"}
             </PrimaryButton>
           </div>

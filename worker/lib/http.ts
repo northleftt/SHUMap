@@ -35,6 +35,26 @@ export async function readJson<T>(request: Request): Promise<T> {
   }
 }
 
+export async function readJsonLimited<T>(request: Request, maximumBytes: number): Promise<T> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new HttpError(415, "unsupported_media_type", "Expected application/json");
+  }
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maximumBytes) {
+    throw new HttpError(413, "payload_too_large", `Request body must be at most ${maximumBytes} bytes`);
+  }
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength > maximumBytes) {
+    throw new HttpError(413, "payload_too_large", `Request body must be at most ${maximumBytes} bytes`);
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  } catch {
+    throw new HttpError(400, "invalid_json", "Request body is not valid JSON");
+  }
+}
+
 export class HttpError extends Error {
   constructor(
     public readonly status: number,

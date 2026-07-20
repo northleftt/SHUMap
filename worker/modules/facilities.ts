@@ -21,12 +21,42 @@ export async function listFacilities(env: Env): Promise<Response> {
     env.DB,
     `select f.id,f.facility_type_id as facilityTypeId,t.name as facilityTypeName,f.host_place_id as hostPlaceId,
             f.floor_id as floorId,f.indoor_space_id as indoorSpaceId,f.lifecycle_status as lifecycleStatus,
-            f.operational_status as operationalStatus,f.quantity,f.current_revision_id as currentRevisionId,r.display_name as displayName,r.editorial_status as editorialStatus,
+            f.operational_status as operationalStatus,f.quantity,r.id as currentRevisionId,r.display_name as displayName,r.editorial_status as editorialStatus,
             f.last_verified_at as lastVerifiedAt,f.next_verification_due_at as nextVerificationDueAt
        from facility_instances f join facility_types t on t.id=f.facility_type_id
-       left join facility_revisions r on r.id=f.current_revision_id order by coalesce(r.display_name,t.name)`,
+       left join facility_revisions r on r.id=coalesce(
+         (select pending.id from facility_revisions pending
+           where pending.facility_id=f.id and pending.editorial_status in ('draft','in_review')
+           order by case pending.editorial_status when 'in_review' then 0 else 1 end,pending.revision_no desc limit 1),
+         f.current_revision_id
+       ) order by coalesce(r.display_name,t.name)`,
   );
   return json({ items });
+}
+
+export async function getFacility(env: Env, id: string): Promise<Response> {
+  const facility = await first<Record<string, unknown>>(
+    env.DB,
+    `select f.*,r.display_name,r.service_hours_json,r.content_json,r.source_id,r.editorial_status
+       from facility_instances f left join facility_revisions r on r.id=coalesce(
+         (select pending.id from facility_revisions pending
+           where pending.facility_id=f.id and pending.editorial_status in ('draft','in_review')
+           order by case pending.editorial_status when 'in_review' then 0 else 1 end,pending.revision_no desc limit 1),
+         f.current_revision_id
+       ) where f.id=?`,
+    [id],
+  );
+  if (!facility) throw new HttpError(404, "not_found", "Facility does not exist");
+  const [revisions, locations] = await Promise.all([
+    all(env.DB, "select * from facility_revisions where facility_id=? order by revision_no desc", [id]),
+    all(
+      env.DB,
+      `select el.id as bindingId,el.role,el.is_primary as isPrimary,la.* from entity_locations el
+       join location_anchors la on la.id=el.anchor_id where el.entity_type='facility' and el.entity_id=? and el.valid_to is null`,
+      [id],
+    ),
+  ]);
+  return json({ facility, revisions, locations });
 }
 
 export async function createFacilityHandler(
@@ -90,24 +120,39 @@ export async function createFacilityRevisionHandler(
 ): Promise<Response> {
   const facility = await first<{ id: string; current_revision_id: string | null }>(env.DB, "select id,current_revision_id from facility_instances where id=?", [facilityId]);
   if (!facility) throw new HttpError(404, "not_found", "Facility does not exist");
+  const pending = await first<{ id: string; editorial_status: string; revision_no: number }>(
+    env.DB,
+    `select id,editorial_status,revision_no from facility_revisions
+      where facility_id=? and editorial_status in ('draft','in_review')
+      order by case editorial_status when 'in_review' then 0 else 1 end,revision_no desc limit 1`,
+    [facilityId],
+  );
+  if (pending?.editorial_status === "in_review") {
+    throw new HttpError(409, "revision_in_review", "This facility already has a revision in review");
+  }
   const body = await readJson<FacilityRevisionInput>(request);
   const revision = normalizeRevision(body);
   await assertExists(env.DB, "data_sources", revision.sourceId, "Data source");
   const next = await first<{ next_no: number }>(env.DB, "select coalesce(max(revision_no),0)+1 as next_no from facility_revisions where facility_id=?", [facilityId]);
-  const revisionId = makeId("frev");
+  const revisionId = pending?.id ?? makeId("frev");
   const now = isoNow();
   const contentJson = jsonString(revision.content);
   const serviceHoursJson = revision.serviceHours === undefined ? null : jsonString(revision.serviceHours);
   const hash = await sha256(`${revision.displayName}\n${serviceHoursJson ?? ""}\n${contentJson}`);
   await env.DB.batch([
-    env.DB.prepare(
-      `insert into facility_revisions(id,facility_id,revision_no,editorial_status,display_name,service_hours_json,content_json,source_id,based_on_revision_id,content_hash,created_by,created_at)
-       values(?,?,?,'draft',?,?,?,?,?,?,?,?)`,
-    ).bind(revisionId, facilityId, next?.next_no ?? 1, revision.displayName, serviceHoursJson, contentJson, revision.sourceId ?? null, facility.current_revision_id, hash, principal.userId, now),
+    pending
+      ? env.DB.prepare(
+        `update facility_revisions set display_name=?,service_hours_json=?,content_json=?,source_id=?,content_hash=?,created_by=?,created_at=?
+          where id=? and editorial_status='draft'`,
+      ).bind(revision.displayName, serviceHoursJson, contentJson, revision.sourceId ?? null, hash, principal.userId, now, revisionId)
+      : env.DB.prepare(
+        `insert into facility_revisions(id,facility_id,revision_no,editorial_status,display_name,service_hours_json,content_json,source_id,based_on_revision_id,content_hash,created_by,created_at)
+         values(?,?,?,'draft',?,?,?,?,?,?,?,?)`,
+      ).bind(revisionId, facilityId, next?.next_no ?? 1, revision.displayName, serviceHoursJson, contentJson, revision.sourceId ?? null, facility.current_revision_id, hash, principal.userId, now),
     env.DB.prepare("update facility_instances set updated_at=? where id=?").bind(now, facilityId),
   ]);
   await audit(env, principal, "facility.revision.create", "facility_revision", revisionId, requestId, null, revision);
-  return json({ id: revisionId, facilityId, revisionNo: next?.next_no ?? 1, editorialStatus: "draft" }, { status: 201 });
+  return json({ id: revisionId, facilityId, revisionNo: pending?.revision_no ?? next?.next_no ?? 1, editorialStatus: "draft" }, { status: pending ? 200 : 201 });
 }
 
 function normalizeRevision(input: FacilityRevisionInput) {

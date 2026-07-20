@@ -3,6 +3,7 @@ import {
   FileText,
   Inbox,
   LayoutGrid,
+  LogOut,
   Map as MapIcon,
   Megaphone,
   Rocket,
@@ -37,7 +38,7 @@ const NAV = [
   { to: "/admin/content", end: false, label: "内容管理", icon: FileText },
   { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
   { to: "/admin/operations", end: false, label: "运营信息", icon: Megaphone },
-  { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus },
+  { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus, permission: "write:transit" },
   { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
   { to: "/admin/submissions", end: false, label: "用户提交", icon: Inbox, permission: "review:content" },
   { to: "/admin/releases", end: false, label: "发布中心", icon: Rocket, permission: "publish:release" },
@@ -165,6 +166,7 @@ function Sidebar({ displayName, email }: { displayName: string; email: string })
 function Topbar({ displayName }: { displayName: string }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const title = titleFor(location.pathname);
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-surface px-6">
@@ -190,6 +192,15 @@ function Topbar({ displayName }: { displayName: string }) {
       <span className="grid h-8 w-8 place-items-center rounded-full bg-primary text-body font-semibold text-white">
         {displayName.slice(0, 1)}
       </span>
+      <button
+        type="button"
+        aria-label="退出登录"
+        title="退出登录"
+        className="grid h-8 w-8 place-items-center rounded-lg text-sub hover:bg-page hover:text-error"
+        onClick={() => void logout()}
+      >
+        <LogOut size={16} />
+      </button>
     </header>
   );
 }
@@ -199,28 +210,28 @@ function Topbar({ displayName }: { displayName: string }) {
 // ---------------------------------------------------------------------------
 
 export function AdminPage() {
-  const { auth, loading } = useAuth();
+  const { auth, loading, hasPermission } = useAuth();
 
   const routes = useMemo(
     () => (
       <Routes>
         <Route index element={<OverviewPage />} />
         <Route path="content" element={<ContentPage />} />
-        <Route path="content/places/:id" element={<PlaceEditorPage />} />
-        <Route path="content/facilities/:id" element={<FacilityEditorPage />} />
-        <Route path="content/merchants/:id" element={<MerchantEditorPage />} />
-        <Route path="review" element={<ReviewPage />} />
+        <Route path="content/places/:id" element={hasPermission("write:content") ? <PlaceEditorPage /> : <Navigate to="/admin/content" replace />} />
+        <Route path="content/facilities/:id" element={hasPermission("write:content") ? <FacilityEditorPage /> : <Navigate to="/admin/content" replace />} />
+        <Route path="content/merchants/:id" element={hasPermission("write:content") ? <MerchantEditorPage /> : <Navigate to="/admin/content" replace />} />
+        <Route path="review" element={hasPermission("review:content") ? <ReviewPage /> : <Navigate to="/admin" replace />} />
         <Route path="operations" element={<OperationsPage />} />
-        <Route path="operations/new" element={<OperationCreatePage />} />
+        <Route path="operations/new" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />
         <Route path="operations/:id" element={<OperationDetailPage />} />
-        <Route path="transit" element={<TransitPage />} />
-        <Route path="maps" element={<MapsPage />} />
-        <Route path="submissions" element={<SubmissionsPage />} />
-        <Route path="releases" element={<ReleasesPage />} />
+        <Route path="transit" element={hasPermission("write:transit") ? <TransitPage /> : <Navigate to="/admin" replace />} />
+        <Route path="maps" element={hasPermission("write:maps") ? <MapsPage /> : <Navigate to="/admin" replace />} />
+        <Route path="submissions" element={hasPermission("review:content") ? <SubmissionsPage /> : <Navigate to="/admin" replace />} />
+        <Route path="releases" element={hasPermission("publish:release") ? <ReleasesPage /> : <Navigate to="/admin" replace />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
     ),
-    [],
+    [hasPermission],
   );
 
   if (loading) {

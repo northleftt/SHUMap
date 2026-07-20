@@ -1,8 +1,8 @@
 import type { SessionPrincipal } from "../domain/types";
 import type { Env } from "../types/cloudflare";
-import { first } from "../lib/db";
+import { all, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, optionalString, requiredString } from "../lib/values";
+import { isoNow, jsonString, makeId, optionalString, parseJson, requiredString, sha256 } from "../lib/values";
 import { audit } from "./audit";
 
 const REVISION_CONFIG = {
@@ -12,6 +12,22 @@ const REVISION_CONFIG = {
 } as const;
 
 type RevisionType = keyof typeof REVISION_CONFIG;
+
+export async function listPendingRevisions(env: Env): Promise<Response> {
+  const items = await all(
+    env.DB,
+    `select 'place' as type,r.id as revisionId,r.place_id as entityId,r.display_name as title,r.revision_no as revisionNo,r.submitted_at as submittedAt
+       from place_revisions r where r.editorial_status='in_review'
+     union all
+     select 'facility',r.id,r.facility_id,r.display_name,r.revision_no,r.submitted_at
+       from facility_revisions r where r.editorial_status='in_review'
+     union all
+     select 'merchant',r.id,r.outlet_id,r.display_name,r.revision_no,r.submitted_at
+       from merchant_revisions r where r.editorial_status='in_review'
+     order by submittedAt desc`,
+  );
+  return json({ items });
+}
 
 export async function submitRevision(
   request: Request,
@@ -65,6 +81,10 @@ export async function reviewRevision(
   ];
   if (decision === "approve") {
     statements.push(
+      env.DB.prepare(`update ${config.table} set editorial_status='superseded' where ${config.parentColumn}=? and editorial_status='draft' and id<>?`)
+        .bind(row.parent_id as string, revisionId),
+    );
+    statements.push(
       env.DB.prepare(`update ${config.table} set editorial_status='superseded' where ${config.parentColumn}=? and editorial_status='approved' and id<>?`)
         .bind(row.parent_id as string, revisionId),
     );
@@ -72,8 +92,117 @@ export async function reviewRevision(
       env.DB.prepare(`update ${config.parentTable} set current_revision_id=?,updated_at=? where id=?`)
         .bind(revisionId, now, row.parent_id as string),
     );
+    if (type === "place") {
+      statements.push(...await materializeCollectedFloors(env, revisionId, row.parent_id as string, principal.userId, now));
+    }
+  }
+  if (type === "place") {
+    const taskStatus = decision === "approve" ? "accepted" : "needs_recollection";
+    statements.push(
+      env.DB.prepare(
+        `update collection_tasks set status=?,reviewed_at=?,updated_at=?
+          where submission_id in (
+            select sr.submission_id from submission_reviews sr
+              join content_submissions cs on cs.id=sr.submission_id
+             where sr.produced_revision_type='place' and sr.produced_revision_id=?
+               and (?='needs_recollection' or cs.status='accepted')
+          )`,
+      ).bind(taskStatus, now, now, revisionId, taskStatus),
+    );
   }
   await env.DB.batch(statements);
   await audit(env, principal, `${type}.revision.${decision}`, `${type}_revision`, revisionId, requestId, row, { ...row, editorial_status: nextStatus }, note);
   return json({ id: revisionId, editorialStatus: nextStatus });
+}
+
+interface CollectedFacility {
+  typeCode?: unknown;
+  name?: unknown;
+  locationText?: unknown;
+}
+
+interface CollectedFloor {
+  levelCode?: unknown;
+  note?: unknown;
+  facilities?: unknown;
+}
+
+async function materializeCollectedFloors(
+  env: Env,
+  revisionId: string,
+  placeId: string,
+  reviewerId: string,
+  now: string,
+) {
+  const revision = await first<{ contentJson: string }>(
+    env.DB,
+    "select content_json as contentJson from place_revisions where id=?",
+    [revisionId],
+  );
+  const content = parseJson<Record<string, unknown>>(revision?.contentJson, {});
+  if (!Array.isArray(content.collectionFloors)) return [];
+  if (typeof content.collectionSubmissionId !== "string") return [];
+  const source = await first<{ id: string }>(
+    env.DB,
+    `select id from submission_reviews
+      where submission_id=? and produced_revision_type='place' and produced_revision_id=?`,
+    [content.collectionSubmissionId, revisionId],
+  );
+  if (!source) return [];
+
+  const typeRows = await all<{ id: string; code: string; name: string }>(env.DB, "select id,code,name from facility_types");
+  const facilityTypes = new Map(typeRows.map((type) => [type.code, type]));
+  const statements = [];
+  for (const [floorIndex, rawFloor] of content.collectionFloors.entries()) {
+    if (!rawFloor || typeof rawFloor !== "object" || Array.isArray(rawFloor)) continue;
+    const floor = rawFloor as CollectedFloor;
+    if (typeof floor.levelCode !== "string" || !floor.levelCode.trim()) continue;
+    const levelCode = floor.levelCode.trim();
+    const existing = await first<{ id: string }>(env.DB, "select id from floors where building_place_id=? and level_code=?", [placeId, levelCode]);
+    const floorId = existing?.id ?? makeId("floor");
+    if (!existing) {
+      statements.push(
+        env.DB.prepare(
+          `insert into floors(id,building_place_id,level_code,level_order,display_name,is_public,lifecycle_status,created_at,updated_at)
+           values(?,?,?,?,?,1,'active',?,?)`,
+        ).bind(floorId, placeId, levelCode, floorIndex, levelCode, now, now),
+      );
+    }
+    if (!Array.isArray(floor.facilities)) continue;
+    for (const rawFacility of floor.facilities) {
+      if (!rawFacility || typeof rawFacility !== "object" || Array.isArray(rawFacility)) continue;
+      const facility = rawFacility as CollectedFacility;
+      if (typeof facility.typeCode !== "string") continue;
+      const facilityType = facilityTypes.get(facility.typeCode);
+      if (!facilityType) continue;
+      const facilityId = makeId("facility");
+      const facilityRevisionId = makeId("frev");
+      const displayName = typeof facility.name === "string" && facility.name.trim() ? facility.name.trim() : facilityType.name;
+      const locationDescription = typeof facility.locationText === "string" ? facility.locationText.trim() : "";
+      const facilityContent = locationDescription ? { locationDescription } : {};
+      const contentJson = jsonString(facilityContent);
+      const duplicate = await first<{ id: string }>(
+        env.DB,
+        `select f.id from facility_instances f
+          join facility_revisions r on r.id=f.current_revision_id
+         where f.host_place_id=? and f.floor_id=? and f.facility_type_id=?
+           and r.display_name=? and coalesce(json_extract(r.content_json,'$.locationDescription'),'')=?
+         limit 1`,
+        [placeId, floorId, facilityType.id, displayName, locationDescription],
+      );
+      if (duplicate) continue;
+      const contentHash = await sha256(`${displayName}\n\n${contentJson}`);
+      statements.push(
+        env.DB.prepare(
+          `insert into facility_instances(id,facility_type_id,host_place_id,floor_id,lifecycle_status,operational_status,quantity,current_revision_id,created_at,updated_at)
+           values(?,?,?,?,'active','unknown',1,?,?,?)`,
+        ).bind(facilityId, facilityType.id, placeId, floorId, facilityRevisionId, now, now),
+        env.DB.prepare(
+          `insert into facility_revisions(id,facility_id,revision_no,editorial_status,display_name,content_json,content_hash,created_by,created_at,submitted_at,reviewed_by,reviewed_at)
+           values(?,?,1,'approved',?,?,?,?,?,?,?,?)`,
+        ).bind(facilityRevisionId, facilityId, displayName, contentJson, contentHash, reviewerId, now, now, reviewerId, now),
+      );
+    }
+  }
+  return statements;
 }

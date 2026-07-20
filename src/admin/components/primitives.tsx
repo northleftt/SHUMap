@@ -137,17 +137,19 @@ export function Field({
   onChange,
   placeholder,
   type = "text",
+  disabled = false,
 }: {
   label?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   type?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="block">
       {label ? <span className="mb-1.5 block text-label text-sub">{label}</span> : null}
-      <input className={inputClass} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} type={type} value={value} />
+      <input className={`${inputClass} disabled:cursor-not-allowed disabled:bg-page disabled:text-sub`} disabled={disabled} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} type={type} value={value} />
     </label>
   );
 }
@@ -158,17 +160,19 @@ export function SelectField({
   onChange,
   options,
   placeholder,
+  disabled = false,
 }: {
   label?: string;
   value: string;
   onChange: (value: string) => void;
   options: Array<{ value: string; label: string }>;
   placeholder?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="block">
       {label ? <span className="mb-1.5 block text-label text-sub">{label}</span> : null}
-      <select className={inputClass} onChange={(e) => onChange(e.target.value)} value={value}>
+      <select className={`${inputClass} disabled:cursor-not-allowed disabled:bg-page disabled:text-sub`} disabled={disabled} onChange={(e) => onChange(e.target.value)} value={value}>
         {placeholder ? <option value="">{placeholder}</option> : null}
         {options.map((option) => (
           <option key={option.value} value={option.value}>{option.label}</option>

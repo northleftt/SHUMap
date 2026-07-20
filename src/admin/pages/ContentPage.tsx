@@ -2,6 +2,7 @@ import { Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
+import { useAuth } from "../AuthContext";
 import type { FacilityListItem, MerchantListItem, PlaceListItem, SpacesResponse } from "../adminTypes";
 import {
   Chip,
@@ -33,6 +34,8 @@ const STATUS_FILTERS = [
 ] as const;
 
 export function ContentPage() {
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission("write:content");
   const [params, setParams] = useSearchParams();
   const tab = (params.get("tab") as Tab) || "places";
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -138,11 +141,13 @@ export function ContentPage() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <Link to={tab === "places" ? "/admin/content/places/new" : tab === "facilities" ? "/admin/content/facilities/new" : "/admin/content/merchants/new"}>
-          <PrimaryButton>
-            <Plus size={15} /> 新建{TAB_LABELS[tab]}
-          </PrimaryButton>
-        </Link>
+        {canWrite ? (
+          <Link to={tab === "places" ? "/admin/content/places/new" : tab === "facilities" ? "/admin/content/facilities/new" : "/admin/content/merchants/new"}>
+            <PrimaryButton>
+              <Plus size={15} /> 新建{TAB_LABELS[tab]}
+            </PrimaryButton>
+          </Link>
+        ) : null}
       </div>
 
       {/* 表格 */}
@@ -167,8 +172,8 @@ export function ContentPage() {
                 <td className="px-5 py-3.5"><EditorialPill status={row.status} /></td>
                 <td className="px-5 py-3.5 text-sub">{row.updatedAt ? fmtDateTime(row.updatedAt) : "—"}</td>
                 <td className="px-5 py-3.5 text-right">
-                  <Link className="text-aux font-medium text-primary" to={row.to}>
-                    {row.status === "in_review" ? "查看 ›" : "编辑 ›"}
+                  <Link className="text-aux font-medium text-primary" to={canWrite ? row.to : `/admin/content?tab=${tab}`}>
+                    {canWrite && row.status !== "in_review" ? "编辑 ›" : "查看 ›"}
                   </Link>
                 </td>
               </tr>

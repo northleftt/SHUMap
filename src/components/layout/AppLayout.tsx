@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { BottomTabBar, TAB_BAR_HEIGHT } from "./BottomTabBar";
 import { DesktopRail } from "./DesktopRail";
@@ -11,6 +11,8 @@ import { DesktopRail } from "./DesktopRail";
 export function AppLayout() {
   const breakpoint = useBreakpoint();
   const isMobile = breakpoint === "mobile";
+  const location = useLocation();
+  const mapOwnsBottomInset = location.pathname === "/map";
 
   // iOS 键盘弹起压缩 visualViewport 时保持布局钉住（仅移动端）
   useEffect(() => {
@@ -57,7 +59,14 @@ export function AppLayout() {
     >
       {!isMobile && <DesktopRail />}
       <div className="relative min-w-0 flex-1">
-        <main className="h-full w-full">
+        <main
+          className="h-full w-full"
+          style={{
+            paddingBottom: isMobile && !mapOwnsBottomInset
+              ? `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))`
+              : undefined,
+          }}
+        >
           <Outlet />
         </main>
         {isMobile && <BottomTabBar />}

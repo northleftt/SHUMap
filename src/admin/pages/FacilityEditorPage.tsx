@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
-import type { FacilityListItem, PlaceListItem, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
+import type { FacilityDetailResponse, FacilityListItem, PlaceListItem, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   EditorialPill,
   ErrorBanner,
@@ -27,13 +27,14 @@ export function FacilityEditorPage() {
   const navigate = useNavigate();
 
   const { state } = useAsyncData(async (signal) => {
-    const [ref, spaces, places, facilities] = await Promise.all([
+    const [ref, spaces, places, facilities, detail] = await Promise.all([
       admin.listReferenceData<ReferenceDataResponse>(signal),
       admin.listSpaces<SpacesResponse>(signal),
       admin.listAdminPlaces<PlaceListItem>(signal),
       isNew ? Promise.resolve({ items: [] as FacilityListItem[] }) : admin.listFacilities<FacilityListItem>(signal),
+      isNew ? Promise.resolve(null) : admin.getFacility<FacilityDetailResponse>(id, signal),
     ]);
-    return { ref, spaces, places: places.items, facilities: facilities.items };
+    return { ref, spaces, places: places.items, facilities: facilities.items, detail };
   }, [id, isNew]);
 
   const [name, setName] = useState("");
@@ -45,23 +46,44 @@ export function FacilityEditorPage() {
   const [locationText, setLocationText] = useState("");
   const [note, setNote] = useState("");
   const [sourceId, setSourceId] = useState("");
+  const [baseContent, setBaseContent] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (state.status !== "ready" || isNew) return;
     const item = state.data!.facilities.find((f) => f.id === id);
+    const detail = state.data!.detail?.facility;
     if (!item) return;
     setName(String(item.displayName ?? ""));
     setTypeId(String(item.facilityTypeId ?? ""));
     setHostPlaceId(item.hostPlaceId ? String(item.hostPlaceId) : "");
     setFloorId(item.floorId ? String(item.floorId) : "");
+    if (!detail) return;
+    try {
+      const serviceHours = JSON.parse(String(detail.service_hours_json ?? "null")) as { text?: unknown } | null;
+      setHours(typeof serviceHours?.text === "string" ? serviceHours.text : "");
+    } catch {
+      setHours("");
+    }
+    let content: Record<string, unknown> = {};
+    try {
+      content = JSON.parse(String(detail.content_json ?? "{}")) as Record<string, unknown>;
+    } catch {
+      content = {};
+    }
+    setBaseContent(content);
+    setFee(typeof content.fee === "string" ? content.fee : "");
+    setLocationText(typeof content.locationDescription === "string" ? content.locationDescription : "");
+    setNote(typeof content.note === "string" ? content.note : "");
+    setSourceId(detail.source_id ? String(detail.source_id) : "");
   }, [state, id, isNew]);
 
   if (state.status === "loading") return <LoadingState label="加载设施…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
   const data = state.data!;
   const item = isNew ? null : data.facilities.find((f) => f.id === id) ?? null;
+  const reviewLocked = item?.editorialStatus === "in_review";
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
 
   async function save(thenSubmit: boolean) {
@@ -69,11 +91,11 @@ export function FacilityEditorPage() {
     if (isNew && !typeId) { setError("请选择设施类型"); return; }
     setBusy(true);
     setError("");
-    const content = {
-      ...(fee.trim() ? { fee: fee.trim() } : {}),
-      ...(locationText.trim() ? { locationDescription: locationText.trim() } : {}),
-      ...(note.trim() ? { note: note.trim() } : {}),
-    };
+    const content = { ...baseContent };
+    for (const [key, value] of [["fee", fee], ["locationDescription", locationText], ["note", note]] as const) {
+      if (value.trim()) content[key] = value.trim();
+      else delete content[key];
+    }
     try {
       let revisionId = "";
       if (isNew) {
@@ -86,13 +108,7 @@ export function FacilityEditorPage() {
           content,
           sourceId: sourceId || undefined,
         });
-        revisionId = created.id;
-        // createFacility 返回实例 id；草稿修订需经列表取 currentRevisionId 提交
-        if (thenSubmit) {
-          const list = await admin.listFacilities<FacilityListItem>();
-          const created2 = list.items.find((f) => f.id === created.id);
-          revisionId = String(created2?.currentRevisionId ?? "");
-        }
+        revisionId = created.revisionId;
       } else {
         const created = await admin.createFacilityRevision(id, {
           displayName: name.trim(),
@@ -129,6 +145,7 @@ export function FacilityEditorPage() {
             <div className="grid grid-cols-2 gap-3">
               <SelectField
                 label="设施类型"
+                disabled={!isNew}
                 onChange={setTypeId}
                 options={data.ref.facilityTypes.map((t) => ({ value: t.id, label: t.name }))}
                 placeholder="选择类型"
@@ -136,6 +153,7 @@ export function FacilityEditorPage() {
               />
               <SelectField
                 label="所属楼宇"
+                disabled={!isNew}
                 onChange={(v) => { setHostPlaceId(v); setFloorId(""); }}
                 options={data.places.map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
                 placeholder="选择楼宇"
@@ -143,6 +161,7 @@ export function FacilityEditorPage() {
               />
               <SelectField
                 label="楼层"
+                disabled={!isNew}
                 onChange={setFloorId}
                 options={floors.map((f) => ({ value: f.id, label: f.displayName }))}
                 placeholder={hostPlaceId ? "选择楼层" : "先选楼宇"}
@@ -166,10 +185,12 @@ export function FacilityEditorPage() {
             placeholder="不指定"
             value={sourceId}
           />
+          {!isNew ? <InfoNote tone="info">设施类型、所属楼宇和楼层属于实例结构字段，当前页面仅支持在新建设施时设置。</InfoNote> : null}
+          {reviewLocked ? <InfoNote tone="warning">当前修订正在审核，处理完成后才能继续编辑。</InfoNote> : null}
           <ErrorBanner message={error} />
           <div className="flex gap-3">
-            <GhostButton className="flex-1" disabled={busy} onClick={() => save(false)}>保存草稿</GhostButton>
-            <PrimaryButton className="flex-[2]" disabled={busy} onClick={() => save(true)}>
+            <GhostButton className="flex-1" disabled={busy || reviewLocked} onClick={() => save(false)}>保存草稿</GhostButton>
+            <PrimaryButton className="flex-[2]" disabled={busy || reviewLocked} onClick={() => save(true)}>
               {busy ? "处理中…" : "提交审核 →"}
             </PrimaryButton>
           </div>
@@ -183,9 +204,7 @@ export function FacilityEditorPage() {
           </InfoNote>
         </Panel>
         <Panel title="修订历史">
-          <InfoNote tone="warning">
-            设施详情接口暂未提供修订列表；保存草稿 / 提交审核后可在审核中心处理。
-          </InfoNote>
+          <InfoNote tone="info">保存时会保留当前修订中未在表单展示的扩展字段。</InfoNote>
         </Panel>
       </div>
     </div>

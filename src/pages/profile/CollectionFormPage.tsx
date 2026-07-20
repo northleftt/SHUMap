@@ -182,7 +182,7 @@ export function CollectionFormPage() {
   const { buildingId = "" } = useParams();
   const navigate = useNavigate();
   const { release } = useRelease();
-  const { getTask, saveDraft, submitCollection } = useCollectionTasks();
+  const { getTask, saveDraft, submitCollection, error } = useCollectionTasks();
 
   const building = useMemo(
     () => release?.buildings.find((b) => b.poiKey === buildingId) ?? null,
@@ -191,6 +191,7 @@ export function CollectionFormPage() {
   const task = getTask(buildingId);
   const [editingFloor, setEditingFloor] = useState<CollectedFloor | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   if (!task) {
     return (
@@ -213,7 +214,10 @@ export function CollectionFormPage() {
     );
   }
 
-  const readOnly = task.status === "submitted";
+  const lockExpired = task.status === "collecting"
+    && Boolean(task.lockExpiresAt)
+    && new Date(task.lockExpiresAt!).getTime() <= Date.now();
+  const readOnly = task.status !== "collecting" || !task.owned || lockExpired;
 
   const field = (
     label: string,
@@ -256,10 +260,11 @@ export function CollectionFormPage() {
             <button
               key={floor.id}
               type="button"
+              disabled={readOnly}
               className={`flex w-full items-center gap-3 px-4 py-3.5 text-left active:bg-page ${
                 index > 0 ? "border-t border-line" : ""
-              }`}
-              onClick={() => setEditingFloor(floor)}
+              } ${readOnly ? "cursor-default" : ""}`}
+              onClick={() => { if (!readOnly) setEditingFloor(floor); }}
             >
               <div className="min-w-0 flex-1">
                 <div className="text-body font-semibold text-ink">{floor.levelCode}</div>
@@ -309,7 +314,11 @@ export function CollectionFormPage() {
         {/* 操作 */}
         {readOnly ? (
           <p className="mt-6 text-center text-aux text-sub">
-            已于 {task.submittedAt ? new Date(task.submittedAt).toLocaleDateString("zh-CN") : "—"} 提交，审核进度可在「我的」查看
+            {lockExpired
+              ? "采集锁已过期，请返回列表重新领取"
+              : task.status === "needs_recollection"
+                ? "审核要求补充采集，请返回列表领取任务"
+                : `已于 ${task.submittedAt ? new Date(task.submittedAt).toLocaleDateString("zh-CN") : "—"} 提交，状态：${task.status === "accepted" ? "已采纳" : "待审核"}`}
           </p>
         ) : (
           <>
@@ -325,15 +334,23 @@ export function CollectionFormPage() {
                 type="button"
                 className="flex-1 rounded-full bg-primary py-3.5 text-body font-semibold text-white active:bg-primary-pressed"
                 onClick={() => {
-                  submitCollection(buildingId);
-                  setSubmitted(true);
-                  window.setTimeout(() => navigate("/collect"), 900);
+                  if (submitting) return;
+                  setSubmitting(true);
+                  void submitCollection(buildingId)
+                    .then((ok) => {
+                      if (!ok) return;
+                      setSubmitted(true);
+                      window.setTimeout(() => navigate("/collect"), 900);
+                    })
+                    .finally(() => setSubmitting(false));
                 }}
+                disabled={submitting}
               >
-                {submitted ? "已提交 ✓" : "提交采集"}
+                {submitted ? "已提交 ✓" : submitting ? "提交中…" : "提交采集"}
               </button>
             </div>
-            <p className="mt-3 text-center text-aux text-sub">提交即锁定该楼宇，可在「我的」查看审核进度</p>
+            <p className="mt-3 text-center text-aux text-sub">提交后数据会进入管理后台审核队列</p>
+            {error ? <p className="mt-2 text-center text-aux text-error">{error}</p> : null}
           </>
         )}
       </div>

@@ -111,8 +111,12 @@ export function listFacilities<T = unknown>(signal?: AbortSignal): Promise<ListR
   return apiFetch<ListResponse<T>>("/api/admin/facilities", { signal });
 }
 
-export function createFacility(body: Record<string, unknown>): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/api/admin/facilities", { method: "POST", body });
+export function getFacility<T = unknown>(id: string, signal?: AbortSignal): Promise<T> {
+  return apiFetch<T>(`/api/admin/facilities/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createFacility(body: Record<string, unknown>): Promise<{ id: string; revisionId: string }> {
+  return apiFetch<{ id: string; revisionId: string }>("/api/admin/facilities", { method: "POST", body });
 }
 
 export function createFacilityRevision(id: string, body: Record<string, unknown>): Promise<{ id: string }> {
@@ -126,8 +130,12 @@ export function listMerchants<T = unknown>(signal?: AbortSignal): Promise<ListRe
   return apiFetch<ListResponse<T>>("/api/admin/merchants", { signal });
 }
 
-export function createMerchant(body: Record<string, unknown>): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/api/admin/merchants", { method: "POST", body });
+export function getMerchant<T = unknown>(id: string, signal?: AbortSignal): Promise<T> {
+  return apiFetch<T>(`/api/admin/merchants/${encodeURIComponent(id)}`, { signal });
+}
+
+export function createMerchant(body: Record<string, unknown>): Promise<{ id: string; revisionId: string }> {
+  return apiFetch<{ id: string; revisionId: string }>("/api/admin/merchants", { method: "POST", body });
 }
 
 export function createMerchantRevision(id: string, body: Record<string, unknown>): Promise<{ id: string }> {
@@ -153,6 +161,19 @@ export function reviewRevision(
   body: { decision: string; note?: string },
 ): Promise<unknown> {
   return apiFetch(`/api/admin/revisions/${type}/${encodeURIComponent(id)}/review`, { method: "POST", body });
+}
+
+export interface PendingRevisionRow {
+  type: "place" | "facility" | "merchant";
+  revisionId: string;
+  entityId: string;
+  title: string;
+  revisionNo: number;
+  submittedAt: string;
+}
+
+export function listPendingRevisions(signal?: AbortSignal): Promise<ListResponse<PendingRevisionRow>> {
+  return apiFetch<ListResponse<PendingRevisionRow>>("/api/admin/revisions/pending", { signal });
 }
 
 // ---------------------------------------------------------------------------
@@ -298,8 +319,8 @@ export function listSubmissions(signal?: AbortSignal): Promise<ListResponse<Admi
 export function reviewSubmission(
   id: string,
   body: { decision: "accept" | "partial" | "reject"; note?: string; fieldDecisions?: Record<string, unknown> },
-): Promise<{ id: string; submissionId: string; status: string }> {
-  return apiFetch<{ id: string; submissionId: string; status: string }>(
+): Promise<{ id: string; submissionId: string; status: string; producedRevisionType: string | null; producedRevisionId: string | null }> {
+  return apiFetch<{ id: string; submissionId: string; status: string; producedRevisionType: string | null; producedRevisionId: string | null }>(
     `/api/admin/submissions/${encodeURIComponent(id)}/review`,
     { method: "POST", body },
   );

@@ -20,9 +20,14 @@ export async function listPlaces(env: Env): Promise<Response> {
   const rows = await all<Record<string, unknown>>(
     env.DB,
     `select p.id,p.kind_id as kindId,p.campus_id as campusId,p.parent_place_id as parentPlaceId,p.stable_code as stableCode,
-            p.lifecycle_status as lifecycleStatus,p.current_revision_id as currentRevisionId,
+            p.lifecycle_status as lifecycleStatus,r.id as currentRevisionId,
             r.display_name as displayName,r.summary,r.editorial_status as editorialStatus,p.updated_at as updatedAt
-       from places p left join place_revisions r on r.id=p.current_revision_id
+       from places p left join place_revisions r on r.id=coalesce(
+         (select pending.id from place_revisions pending
+           where pending.place_id=p.id and pending.editorial_status in ('draft','in_review')
+           order by case pending.editorial_status when 'in_review' then 0 else 1 end,pending.revision_no desc limit 1),
+         p.current_revision_id
+       )
       order by coalesce(r.display_name,p.id)`,
   );
   return json({ items: rows });
@@ -31,8 +36,13 @@ export async function listPlaces(env: Env): Promise<Response> {
 export async function getPlace(env: Env, id: string): Promise<Response> {
   const place = await first<Record<string, unknown>>(
     env.DB,
-    `select p.*,r.display_name,r.summary,r.description,r.content_json,r.editorial_status
-       from places p left join place_revisions r on r.id=p.current_revision_id where p.id=?`,
+    `select p.*,r.display_name,r.summary,r.description,r.content_json,r.source_id,r.editorial_status
+       from places p left join place_revisions r on r.id=coalesce(
+         (select pending.id from place_revisions pending
+           where pending.place_id=p.id and pending.editorial_status in ('draft','in_review')
+           order by case pending.editorial_status when 'in_review' then 0 else 1 end,pending.revision_no desc limit 1),
+         p.current_revision_id
+       ) where p.id=?`,
     [id],
   );
   if (!place) throw new HttpError(404, "not_found", "Place does not exist");
@@ -122,22 +132,37 @@ export async function createPlaceRevisionHandler(
 ): Promise<Response> {
   const place = await first<{ id: string; current_revision_id: string | null }>(env.DB, "select id,current_revision_id from places where id=?", [placeId]);
   if (!place) throw new HttpError(404, "not_found", "Place does not exist");
+  const pending = await first<{ id: string; editorial_status: string; revision_no: number }>(
+    env.DB,
+    `select id,editorial_status,revision_no from place_revisions
+      where place_id=? and editorial_status in ('draft','in_review')
+      order by case editorial_status when 'in_review' then 0 else 1 end,revision_no desc limit 1`,
+    [placeId],
+  );
+  if (pending?.editorial_status === "in_review") {
+    throw new HttpError(409, "revision_in_review", "This place already has a revision in review");
+  }
   const body = await readJson<PlaceRevisionInput>(request);
   const input = normalizeRevision(body);
   const number = await first<{ next_no: number }>(env.DB, "select coalesce(max(revision_no),0)+1 as next_no from place_revisions where place_id=?", [placeId]);
-  const revisionId = makeId("prev");
+  const revisionId = pending?.id ?? makeId("prev");
   const now = isoNow();
   const contentJson = jsonString(input.content);
   const contentHash = await sha256(`${input.displayName}\n${input.summary ?? ""}\n${input.description ?? ""}\n${contentJson}`);
   await env.DB.batch([
-    env.DB.prepare(
-      `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,summary,description,content_json,source_id,based_on_revision_id,content_hash,created_by,created_at)
-       values(?,?,?,'draft',?,?,?,?,?,?,?,?,?)`,
-    ).bind(revisionId, placeId, number?.next_no ?? 1, input.displayName, input.summary ?? null, input.description ?? null, contentJson, input.sourceId ?? null, place.current_revision_id, contentHash, principal.userId, now),
+    pending
+      ? env.DB.prepare(
+        `update place_revisions set display_name=?,summary=?,description=?,content_json=?,source_id=?,content_hash=?,created_by=?,created_at=?
+          where id=? and editorial_status='draft'`,
+      ).bind(input.displayName, input.summary ?? null, input.description ?? null, contentJson, input.sourceId ?? null, contentHash, principal.userId, now, revisionId)
+      : env.DB.prepare(
+        `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,summary,description,content_json,source_id,based_on_revision_id,content_hash,created_by,created_at)
+         values(?,?,?,'draft',?,?,?,?,?,?,?,?,?)`,
+      ).bind(revisionId, placeId, number?.next_no ?? 1, input.displayName, input.summary ?? null, input.description ?? null, contentJson, input.sourceId ?? null, place.current_revision_id, contentHash, principal.userId, now),
     env.DB.prepare("update places set updated_at=? where id=?").bind(now, placeId),
   ]);
   await audit(env, principal, "place.revision.create", "place_revision", revisionId, requestId, null, input);
-  return json({ id: revisionId, placeId, revisionNo: number?.next_no ?? 1, editorialStatus: "draft" }, { status: 201 });
+  return json({ id: revisionId, placeId, revisionNo: pending?.revision_no ?? number?.next_no ?? 1, editorialStatus: "draft" }, { status: pending ? 200 : 201 });
 }
 
 function normalizeRevision(input: PlaceRevisionInput): Required<Pick<PlaceRevisionInput, "displayName">> & Omit<PlaceRevisionInput, "displayName"> {

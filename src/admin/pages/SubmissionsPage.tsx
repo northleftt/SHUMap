@@ -25,14 +25,14 @@ const STATUS_META: Record<string, { label: string; tone: "warning" | "ok" | "inf
   pending: { label: "待处理", tone: "warning" },
   in_review: { label: "待处理", tone: "warning" },
   accepted: { label: "已采纳", tone: "ok" },
-  partial: { label: "部分采纳", tone: "info" },
+  partially_accepted: { label: "部分采纳", tone: "info" },
   rejected: { label: "已驳回", tone: "error" },
 };
 
 const FILTERS = [
   { key: "todo", label: "待处理" },
   { key: "accepted", label: "已采纳" },
-  { key: "partial", label: "部分采纳" },
+  { key: "partially_accepted", label: "部分采纳" },
   { key: "rejected", label: "已驳回" },
   { key: "all", label: "全部" },
 ] as const;
@@ -40,7 +40,7 @@ const FILTERS = [
 const TARGET_TYPE_LABELS: Record<string, string> = {
   place: "地点",
   facility: "设施",
-  merchant: "商户",
+  merchant_outlet: "商户",
   transit_stop: "校车",
   new_place: "新地点",
 };
@@ -60,11 +60,19 @@ function payloadFields(payload: Record<string, unknown>): Array<{ key: string; l
   const description = payload.description ?? detail?.description;
   const summary = payload.summary ?? detail?.summary;
   const feedbackType = payload.feedbackType;
+  const collection = payload.collection as Record<string, unknown> | undefined;
   if (typeof feedbackType === "string" && feedbackType) fields.push({ key: "feedbackType", label: "反馈类型", value: feedbackType });
   if (typeof summary === "string" && summary) fields.push({ key: "summary", label: "摘要", value: summary });
   if (typeof description === "string" && description) fields.push({ key: "description", label: "问题描述", value: description });
+  if (collection && typeof collection === "object") {
+    for (const [key, label] of [["openHours", "开放时间"], ["phone", "联系电话"], ["organization", "所属单位"]] as const) {
+      const value = collection[key];
+      if (typeof value === "string" && value) fields.push({ key: `collection.${key}`, label, value });
+    }
+    if (Array.isArray(collection.floors)) fields.push({ key: "collection.floors", label: "楼层采集", value: `${collection.floors.length} 层` });
+  }
   for (const [key, value] of Object.entries(payload)) {
-    if (["detail", "description", "summary", "feedbackType", "photos"].includes(key)) continue;
+    if (["detail", "collection", "description", "summary", "feedbackType", "photos"].includes(key)) continue;
     if (typeof value === "string" && value) fields.push({ key, label: key, value });
   }
   return fields;
@@ -100,6 +108,9 @@ export function SubmissionsPage() {
   const fields = selected ? payloadFields(selectedPayload) : [];
   const selectedMeta = selected ? (STATUS_META[selected.status] ?? STATUS_META.pending) : null;
   const selectedPending = selected ? selected.status === "pending" || selected.status === "in_review" : false;
+  const canGenerateRevision = selected?.targetType === "place" && (
+    selectedPayload.collection !== undefined || selectedPayload.detail !== undefined || selectedPayload.changes !== undefined
+  );
 
   function select(submission: SubmissionRow) {
     setSelectedId(submission.id);
@@ -228,11 +239,13 @@ export function SubmissionsPage() {
                     <GhostButton danger disabled={busy} onClick={() => decide("reject")}>驳回</GhostButton>
                     <GhostButton disabled={busy} onClick={() => decide("partial")}>部分采纳</GhostButton>
                     <PrimaryButton disabled={busy} onClick={() => decide("accept")}>
-                      {busy ? "处理中…" : "全部采纳并生成修订"}
+                      {busy ? "处理中…" : canGenerateRevision ? "全部采纳并生成修订" : "全部采纳"}
                     </PrimaryButton>
                   </div>
                   <p className="text-label leading-relaxed text-sub">
-                    勾选结果写入 field_decisions_json；采纳后按 targetType 生成对应修订草稿并回填 produced_revision_id；decision = accept / partial / reject
+                    {canGenerateRevision
+                      ? "采纳后会基于当前线上内容生成保留原字段的地点修订草稿。"
+                      : "处理结果会写入审核记录；当前反馈缺少可直接应用的结构化字段。"}
                   </p>
                 </>
               ) : (

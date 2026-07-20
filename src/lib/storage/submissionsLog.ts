@@ -2,7 +2,7 @@ import { useLocalStore } from "./localStore";
 
 const KEY = "shumap.submissions-log";
 
-export type LocalSubmissionStatus = "pending" | "accepted" | "partial" | "rejected";
+export type LocalSubmissionStatus = "pending" | "accepted" | "partially_accepted" | "rejected";
 
 /**
  * 我的反馈——本地提交记录。公共端没有「我的提交」查询接口，

@@ -13,7 +13,7 @@ import { useSubmissionsLog, type LocalSubmissionStatus } from "../../lib/storage
 const SUBMISSION_STATUS: Record<LocalSubmissionStatus, { label: string; tone: StatusTone }> = {
   pending: { label: "已提交", tone: "warning" },
   accepted: { label: "已采纳", tone: "success" },
-  partial: { label: "部分采纳", tone: "success" },
+  partially_accepted: { label: "部分采纳", tone: "success" },
   rejected: { label: "未采纳", tone: "error" },
 };
 
