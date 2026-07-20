@@ -22,9 +22,4 @@ create table analytics_events (
 create index idx_analytics_events_created on analytics_events(created_at desc);
 create index idx_analytics_events_type on analytics_events(event_type, created_at desc);
 
-create trigger prevent_duplicate_submission_reviews
-before insert on submission_reviews
-when exists (select 1 from submission_reviews where submission_id=new.submission_id)
-begin
-  select raise(abort, 'submission already reviewed');
-end;
+create unique index idx_submission_reviews_one_decision on submission_reviews(submission_id);
