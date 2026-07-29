@@ -1,6 +1,7 @@
 import { CheckCircle2, CircleAlert, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import * as admin from "../../lib/api/admin";
+import { ApiError } from "../../lib/api/client";
 import { getCurrentRelease } from "../../lib/api/public";
 import type { ReleaseManifest } from "../../lib/api/types";
 import { useAuth } from "../AuthContext";
@@ -66,7 +67,11 @@ export function ReleasesPage() {
         reload();
       }
     } catch (err) {
-      setError(errorMessage(err, "发布失败"));
+      // 校验失败时协调器用 422 + { id, status, validation } 应答（不是 { error } 信封），
+      // ApiError.body 保留原始 payload，这里还原成校验报告渲染明细。
+      const report = validationFailure(err);
+      if (report) setResult(report);
+      else setError(errorMessage(err, "发布失败"));
     } finally {
       setBusy(false);
     }
@@ -242,4 +247,17 @@ export function ReleasesPage() {
       </InfoNote>
     </div>
   );
+}
+
+/**
+ * 校验失败（422）不是 { error } 信封，而是 { id, status:'validation_failed', validation }。
+ * 从 ApiError.body 里取回来，供上方校验报告分支渲染；不是这个形状则返回 null 走通用错误。
+ */
+function validationFailure(err: unknown): admin.PublishReleaseResult | null {
+  if (!(err instanceof ApiError) || err.status !== 422) return null;
+  const body = err.body as admin.PublishReleaseResult | undefined;
+  if (!body || typeof body !== "object" || body.status !== "validation_failed") return null;
+  const validation = body.validation;
+  if (!validation || !Array.isArray(validation.errors)) return null;
+  return body;
 }

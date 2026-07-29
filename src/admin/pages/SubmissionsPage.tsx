@@ -244,7 +244,7 @@ export function SubmissionsPage() {
                   </div>
                   <p className="text-label leading-relaxed text-sub">
                     {canGenerateRevision
-                      ? "采纳后会基于当前线上内容生成保留原字段的地点修订草稿。"
+                      ? "采纳后会基于当前线上内容生成保留原字段的地点修订，并直接进入审核队列。"
                       : "处理结果会写入审核记录；当前反馈缺少可直接应用的结构化字段。"}
                   </p>
                 </>

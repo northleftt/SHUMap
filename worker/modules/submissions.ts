@@ -172,12 +172,14 @@ async function buildProducedRevision(
   return {
     type: "place",
     id: revisionId,
+    // 采纳提交直接以 in_review 入库并带上 submitted_at，这样修订会立刻出现在审核队列
+    // （reviews.ts 的 listPendingRevisions 只收 in_review），不需要额外的「提交这条修订」动作。
     statement: env.DB.prepare(
-      `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,summary,description,content_json,source_id,based_on_revision_id,content_hash,created_by,created_at)
-       values(?,?,?,'draft',?,?,?,?,?,?,?,?,?)`,
+      `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,summary,description,content_json,source_id,based_on_revision_id,content_hash,created_by,created_at,submitted_at)
+       values(?,?,?,'in_review',?,?,?,?,?,?,?,?,?,?)`,
     ).bind(
       revisionId, submission.target_id as string, next?.nextNo ?? 1, displayName, summary ?? null, description ?? null,
-      contentJson, (current.source_id as string | null) ?? null, current.current_revision_id as string, contentHash, reviewer.userId, createdAt,
+      contentJson, (current.source_id as string | null) ?? null, current.current_revision_id as string, contentHash, reviewer.userId, createdAt, createdAt,
     ),
   };
 }
