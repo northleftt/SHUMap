@@ -1,12 +1,14 @@
 import { Check, Hexagon, MapPin, Route, Trash2, Undo2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import { campusConfigs } from "../../lib/release/mapData";
-import type { PlaceListItem, SpacesResponse } from "../adminTypes";
+import type { CampusKey } from "../../lib/types";
+import type { OperationalEventRow, PlaceListItem, SpacesResponse } from "../adminTypes";
 import {
   Chip,
   ErrorBanner,
+  EVENT_TYPE_LABELS,
   Field,
   GhostButton,
   InfoNote,
@@ -14,14 +16,22 @@ import {
   Panel,
   Pill,
   PrimaryButton,
+  SEVERITY_LABELS,
   SelectField,
   TextArea,
   errorMessage,
+  fmtDay,
   useAsyncData,
 } from "../components/primitives";
 
 // ---------------------------------------------------------------------------
-// A6 新建运营事件 · 地图编辑器（点 / 区域 / 路径三种几何绘制，写 svg_viewbox）
+// A6 运营事件 · 地图编辑器（点 / 区域 / 路径三种几何绘制，写 svg_viewbox）
+//
+// 两种模式共用同一画布：
+//   create — /admin/operations/new：事件主体 + 几何一次性 POST
+//   edit   — /admin/operations/:id/edit：只改几何，经
+//            PUT /api/admin/operations/:id/locations（replace-all）保存；
+//            事件主体在本页只读，改文案仍走详情页。
 // ---------------------------------------------------------------------------
 
 const EVENT_TYPES = [
@@ -77,17 +87,55 @@ function pathLength(vertices: Vert[]): number {
   return sum;
 }
 
+/**
+ * campuses[].code is the canonical key ("baoshan"); ids are "campus_baoshan".
+ * Both forms are accepted so the lookup never silently misses — a failed match
+ * blocks the save instead of writing a campus-less (all-campus) event.
+ */
+function campusKeyOfRow(row: { code: string; id: string }): string {
+  return (row.code || row.id.replace(/^campus_/, "")).trim().toLowerCase();
+}
+
+function isVert(value: unknown): value is Vert {
+  return Array.isArray(value) && value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number";
+}
+
+function vertsOf(value: unknown): Vert[] {
+  return Array.isArray(value) ? value.filter(isVert).map(([x, y]) => [x, y] as Vert) : [];
+}
+
+/** Drops the duplicated closing vertex a GeoJSON ring carries. */
+function openRing(ring: Vert[]): Vert[] {
+  if (ring.length >= 2) {
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) return ring.slice(0, -1);
+  }
+  return ring;
+}
+
+type EventWithLocations = OperationalEventRow & {
+  targets?: Array<{ targetType: string; targetId: string }>;
+  locations?: admin.OperationLocationRow[];
+};
+
 export function OperationCreatePage() {
   const navigate = useNavigate();
+  const { id: routeId } = useParams();
+  const editing = Boolean(routeId);
   const mapRef = useRef<HTMLDivElement | null>(null);
 
   const { state } = useAsyncData(async (signal) => {
-    const [spaces, places] = await Promise.all([
+    const [spaces, places, maps, operations] = await Promise.all([
       admin.listSpaces<SpacesResponse>(signal),
       admin.listAdminPlaces<PlaceListItem>(signal),
+      admin.listMapVersions(signal),
+      routeId ? admin.listAdminOperations<EventWithLocations>(signal) : Promise.resolve(null),
     ]);
-    return { spaces, places: places.items };
-  }, []);
+    const event = routeId ? operations?.items.find((item) => item.id === routeId) : undefined;
+    if (routeId && !event) throw new Error("事件不存在");
+    return { spaces, places: places.items, maps: maps.items, event };
+  }, [routeId]);
 
   const [eventType, setEventType] = useState<(typeof EVENT_TYPES)[number]["key"]>("maintenance");
   const [title, setTitle] = useState("");
@@ -106,6 +154,7 @@ export function OperationCreatePage() {
   const [path, setPath] = useState<PlacedShape | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [hydrated, setHydrated] = useState(false);
 
   const campus = campusConfigs.find((c) => c.key === campusKey) ?? campusConfigs[0];
   const vb = useMemo(() => viewBoxOf(campus.svgRaw), [campus]);
@@ -116,6 +165,40 @@ export function OperationCreatePage() {
   const drafting = mode === "area" || mode === "path";
   const minVertices = mode === "area" ? 3 : 2;
   const draftReady = draft.length >= minVertices;
+
+  const loadedEvent = state.status === "ready" ? state.data!.event : undefined;
+  const campusRows = state.status === "ready" ? state.data!.spaces.campuses : [];
+
+  // 编辑模式：把已存的 svg_viewbox 几何回显到画布（只做一次，避免覆盖用户改动）
+  useEffect(() => {
+    if (!editing || hydrated || !loadedEvent) return;
+    const locations = loadedEvent.locations ?? [];
+    const anchorCampusId = locations.find((location) => location.campusId)?.campusId ?? null;
+    const row = anchorCampusId ? campusRows.find((candidate) => candidate.id === anchorCampusId) : undefined;
+    const key = row ? campusKeyOfRow(row) : null;
+    const restoredKey = key && campusConfigs.some((config) => config.key === key) ? (key as CampusKey) : campusKey;
+
+    for (const location of locations) {
+      if (location.crs !== "svg_viewbox" || !location.geometryJson) continue;
+      let geometry: { type?: string; coordinates?: unknown };
+      try {
+        geometry = JSON.parse(location.geometryJson) as { type?: string; coordinates?: unknown };
+      } catch {
+        continue;
+      }
+      if (location.role === "event_location" && geometry.type === "Point" && isVert(geometry.coordinates)) {
+        setPoint({ campusKey: restoredKey, x: geometry.coordinates[0], y: geometry.coordinates[1] });
+      } else if (location.role === "impact_area" && geometry.type === "Polygon") {
+        const ring = Array.isArray(geometry.coordinates) ? openRing(vertsOf(geometry.coordinates[0])) : [];
+        if (ring.length >= 3) setArea({ campusKey: restoredKey, vertices: ring });
+      } else if (location.role === "route_shape" && geometry.type === "LineString") {
+        const vertices = vertsOf(geometry.coordinates);
+        if (vertices.length >= 2) setPath({ campusKey: restoredKey, vertices });
+      }
+    }
+    setCampusKey(restoredKey);
+    setHydrated(true);
+  }, [editing, hydrated, loadedEvent, campusRows, campusKey]);
 
   function toViewBox(event: React.MouseEvent<HTMLDivElement>): Vert | null {
     const rect = mapRef.current?.getBoundingClientRect();
@@ -129,11 +212,11 @@ export function OperationCreatePage() {
     return [round1(x), round1(y)];
   }
 
-  function clearDrawing() {
+  const clearDrawing = useCallback(() => {
     setMode(null);
     setDraft([]);
     setCursor(null);
-  }
+  }, []);
 
   function clearAllGeometry() {
     setPoint(null);
@@ -151,12 +234,12 @@ export function OperationCreatePage() {
     setMode(next);
   }
 
-  function commitDraft() {
+  const commitDraft = useCallback(() => {
     if (!draftReady) return;
     if (mode === "area") setArea({ campusKey, vertices: draft });
     if (mode === "path") setPath({ campusKey, vertices: draft });
     clearDrawing();
-  }
+  }, [draftReady, mode, campusKey, draft, clearDrawing]);
 
   function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
     const at = toViewBox(event);
@@ -204,52 +287,80 @@ export function OperationCreatePage() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  });
+  }, [mode, drafting, clearDrawing, commitDraft]);
 
-  if (state.status === "loading") return <LoadingState label="加载…" />;
+  if (state.status === "loading") return <LoadingState label={editing ? "加载事件与几何…" : "加载…"} />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
   const places = state.data!.places;
+  const event = state.data!.event;
 
   const typeMeta = EVENT_TYPES.find((t) => t.key === eventType) ?? EVENT_TYPES[0];
 
+  // 该校区当前可用的地图版本（ready / published）。带上它，发布校验才能把
+  // 事件几何和 release 里的地图版本对上（releases.ts 的 map-version warning）。
+  const campusRow = campusRows.find((row) => campusKeyOfRow(row) === campusKey);
+  const mapVersion = campusRow
+    ? state.data!.maps.find((version) => version.campusId === campusRow.id && version.lifecycleStatus === "published")
+      ?? state.data!.maps.find((version) => version.campusId === campusRow.id && version.lifecycleStatus === "ready")
+    : undefined;
+
+  /** 三种 role 的几何 → locations 载荷；点在最前，成为 primary binding。 */
+  function buildLocations(): admin.OperationLocationInput[] {
+    if (!campusRow) return [];
+    const base = { campusId: campusRow.id, mapVersionId: mapVersion?.id ?? null, crs: "svg_viewbox" as const };
+    const locations: admin.OperationLocationInput[] = [];
+    if (point && point.campusKey === campusKey) {
+      locations.push({
+        ...base,
+        role: "event_location",
+        geometryType: "Point",
+        geometry: { type: "Point", coordinates: [point.x, point.y] },
+      });
+    }
+    if (area && area.campusKey === campusKey) {
+      locations.push({
+        ...base,
+        role: "impact_area",
+        geometryType: "Polygon",
+        geometry: { type: "Polygon", coordinates: [[...area.vertices, area.vertices[0]]] },
+      });
+    }
+    if (path && path.campusKey === campusKey) {
+      locations.push({
+        ...base,
+        role: "route_shape",
+        geometryType: "LineString",
+        geometry: { type: "LineString", coordinates: path.vertices },
+      });
+    }
+    return locations;
+  }
+
+  const hasGeometry = Boolean(
+    (point && point.campusKey === campusKey) ||
+    (area && area.campusKey === campusKey) ||
+    (path && path.campusKey === campusKey),
+  );
+
   async function save() {
-    if (!title.trim()) { setError("请填写标题"); return; }
-    if (!startsAt) { setError("请选择开始时间"); return; }
     if (draft.length > 0) { setError("请先完成（Enter）或取消（Esc）正在绘制的图形"); return; }
+    // 校区必须显式解析成 campuses 行，否则事件会泛化到所有校区
+    if (hasGeometry && !campusRow) {
+      setError(`未能在后端找到校区「${campus.label}」（code=${campusKey}），无法保存几何；请先在校区管理中确认该校区存在`);
+      return;
+    }
+    if (!editing) {
+      if (!title.trim()) { setError("请填写标题"); return; }
+      if (!startsAt) { setError("请选择开始时间"); return; }
+    }
     setBusy(true);
     setError("");
     try {
-      const campusRow = state.data!.spaces.campuses.find(
-        (c) => c.code === campusKey || c.name.includes(campus.label.replace("校区", "")),
-      );
-      const locations: Record<string, unknown>[] = [];
-      if (point && point.campusKey === campusKey) {
-        locations.push({
-          role: "event_location",
-          campusId: campusRow?.id,
-          geometryType: "Point",
-          geometry: { type: "Point", coordinates: [point.x, point.y] },
-          crs: "svg_viewbox",
-        });
-      }
-      if (area && area.campusKey === campusKey) {
-        const ring = [...area.vertices, area.vertices[0]];
-        locations.push({
-          role: "impact_area",
-          campusId: campusRow?.id,
-          geometryType: "Polygon",
-          geometry: { type: "Polygon", coordinates: [ring] },
-          crs: "svg_viewbox",
-        });
-      }
-      if (path && path.campusKey === campusKey) {
-        locations.push({
-          role: "route_shape",
-          campusId: campusRow?.id,
-          geometryType: "LineString",
-          geometry: { type: "LineString", coordinates: path.vertices },
-          crs: "svg_viewbox",
-        });
+      if (editing && routeId) {
+        // replace-all：这里提交的就是该事件几何的全集，空数组即清空
+        await admin.replaceOperationLocations(routeId, buildLocations());
+        navigate(`/admin/operations/${routeId}`);
+        return;
       }
       await admin.createOperation({
         eventType,
@@ -259,7 +370,7 @@ export function OperationCreatePage() {
         startsAt: new Date(startsAt).toISOString(),
         expectedEndsAt: expectedEndsAt ? new Date(expectedEndsAt).toISOString() : undefined,
         targets: targetIds.map((id) => ({ type: "place", id })),
-        locations,
+        locations: buildLocations(),
       });
       navigate("/admin/operations");
     } catch (err) {
@@ -301,62 +412,80 @@ export function OperationCreatePage() {
       <Panel padded={false}>
         <div className="space-y-4 p-5">
           <div>
-            <p className="text-card">新建运营事件</p>
-            <p className="mt-0.5 text-aux text-sub">第 2 步 · 在地图上标注位置</p>
+            <p className="text-card">{editing ? "编辑事件几何" : "新建运营事件"}</p>
+            <p className="mt-0.5 text-aux text-sub">
+              {editing ? "只改地图几何 · 事件文案与进展在详情页维护" : "第 2 步 · 在地图上标注位置"}
+            </p>
           </div>
-          <div>
-            <p className="mb-2 text-label text-sub">类型</p>
-            <div className="flex gap-2">
-              {EVENT_TYPES.map((t) => (
-                <Chip key={t.key} active={eventType === t.key} onClick={() => setEventType(t.key)}>
-                  {t.label}
-                </Chip>
-              ))}
-            </div>
-          </div>
-          <Field label="标题" onChange={setTitle} placeholder="如 东区食堂燃气检修" value={title} />
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="mb-1.5 block text-label text-sub">开始时间</span>
-              <input className="h-9 w-full rounded-lg border border-line px-3 text-body outline-none focus:border-primary" onChange={(e) => setStartsAt(e.target.value)} type="datetime-local" value={startsAt} />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-label text-sub">预计恢复（选填）</span>
-              <input className="h-9 w-full rounded-lg border border-line bg-surface px-3 text-body outline-none focus:border-primary" onChange={(e) => setExpectedEndsAt(e.target.value)} type="datetime-local" value={expectedEndsAt} />
-            </label>
-          </div>
-          <TextArea label="描述（选填）" onChange={setDescription} rows={3} value={description} />
 
-          <div>
-            <p className="mb-2 text-label text-sub">关联对象（楼宇 / 地点）</p>
-            <div className="flex gap-2">
-              <div className="flex-1">
-                <SelectField
-                  onChange={setTargetPick}
-                  options={places.filter((p) => !targetIds.includes(p.id)).map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
-                  placeholder="选择地点"
-                  value={targetPick}
-                />
-              </div>
-              <GhostButton
-                className="h-9"
-                disabled={!targetPick}
-                onClick={() => { setTargetIds((cur) => [...cur, targetPick]); setTargetPick(""); }}
-              >
-                添加
-              </GhostButton>
+          {editing ? (
+            /* 编辑模式：事件主体只读，明确与几何编辑隔开 */
+            <div className="rounded-lg bg-page px-3.5 py-3">
+              <p className="text-body font-medium text-ink">{event?.title}</p>
+              <p className="mt-1 text-label text-sub">
+                {event ? EVENT_TYPE_LABELS[event.eventType] ?? event.eventType : ""}
+                {event?.severity ? ` · ${SEVERITY_LABELS[event.severity] ?? event.severity}` : ""}
+                {event?.startsAt ? ` · ${fmtDay(event.startsAt)} 起` : ""}
+              </p>
+              <p className="mt-1.5 text-label text-sub">本页仅保存几何；标题 / 时间 / 关联对象请在事件详情页修改。</p>
             </div>
-            {targetIds.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {targetIds.map((id) => (
-                  <Pill key={id} tone="info">
-                    {places.find((p) => p.id === id)?.displayName ?? id}
-                    <button className="ml-1" onClick={() => setTargetIds((cur) => cur.filter((t) => t !== id))} type="button">×</button>
-                  </Pill>
-                ))}
+          ) : (
+            <>
+              <div>
+                <p className="mb-2 text-label text-sub">类型</p>
+                <div className="flex gap-2">
+                  {EVENT_TYPES.map((t) => (
+                    <Chip key={t.key} active={eventType === t.key} onClick={() => setEventType(t.key)}>
+                      {t.label}
+                    </Chip>
+                  ))}
+                </div>
               </div>
-            ) : null}
-          </div>
+              <Field label="标题" onChange={setTitle} placeholder="如 东区食堂燃气检修" value={title} />
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="mb-1.5 block text-label text-sub">开始时间</span>
+                  <input className="h-9 w-full rounded-lg border border-line px-3 text-body outline-none focus:border-primary" onChange={(e) => setStartsAt(e.target.value)} type="datetime-local" value={startsAt} />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-label text-sub">预计恢复（选填）</span>
+                  <input className="h-9 w-full rounded-lg border border-line bg-surface px-3 text-body outline-none focus:border-primary" onChange={(e) => setExpectedEndsAt(e.target.value)} type="datetime-local" value={expectedEndsAt} />
+                </label>
+              </div>
+              <TextArea label="描述（选填）" onChange={setDescription} rows={3} value={description} />
+
+              <div>
+                <p className="mb-2 text-label text-sub">关联对象（楼宇 / 地点）</p>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <SelectField
+                      onChange={setTargetPick}
+                      options={places.filter((p) => !targetIds.includes(p.id)).map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
+                      placeholder="选择地点"
+                      value={targetPick}
+                    />
+                  </div>
+                  <GhostButton
+                    className="h-9"
+                    disabled={!targetPick}
+                    onClick={() => { setTargetIds((cur) => [...cur, targetPick]); setTargetPick(""); }}
+                  >
+                    添加
+                  </GhostButton>
+                </div>
+                {targetIds.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {targetIds.map((id) => (
+                      <Pill key={id} tone="info">
+                        {places.find((p) => p.id === id)?.displayName ?? id}
+                        <button className="ml-1" onClick={() => setTargetIds((cur) => cur.filter((t) => t !== id))} type="button">×</button>
+                      </Pill>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </>
+          )}
 
           <div>
             <p className="mb-2 text-label text-sub">位置与影响范围</p>
@@ -460,14 +589,38 @@ export function OperationCreatePage() {
 
             <p className="mt-2 text-label leading-relaxed text-sub">
               位置随事件保存，发布后移动端可见；坐标存 svg_viewbox。事件位置（Point）、影响区域（Polygon）、绕行路径（LineString）各一份，重画自动替换。
+              {editing ? "保存即整体替换该事件的几何：画布上留下的就是最终结果，全部删除则清空几何。" : null}
             </p>
+
+            {/* 校区必须显式命中后端 campuses 行，匹配不到就阻断保存 */}
+            <div className="mt-3 rounded-lg bg-page px-3.5 py-2.5">
+              <div className="flex items-center justify-between gap-2 text-label">
+                <span className="text-sub">校区绑定</span>
+                {campusRow ? (
+                  <span className="text-ink">{campusRow.name}<span className="text-sub"> · {campusRow.id}</span></span>
+                ) : (
+                  <span className="text-error">未匹配到「{campus.label}」</span>
+                )}
+              </div>
+              <div className="mt-1.5 flex items-center justify-between gap-2 text-label">
+                <span className="text-sub">地图版本</span>
+                {mapVersion ? (
+                  <span className="text-ink">{mapVersion.versionLabel}<span className="text-sub"> · {mapVersion.lifecycleStatus}</span></span>
+                ) : (
+                  <span className="text-sub">该校区暂无 ready / published 版本</span>
+                )}
+              </div>
+            </div>
+
           </div>
 
           <ErrorBanner message={error} />
           <div className="flex gap-3">
-            <GhostButton className="flex-1" onClick={() => navigate("/admin/operations")}>取消</GhostButton>
+            <GhostButton className="flex-1" onClick={() => navigate(editing && routeId ? `/admin/operations/${routeId}` : "/admin/operations")}>
+              取消
+            </GhostButton>
             <PrimaryButton className="flex-[2]" disabled={busy} onClick={save}>
-              {busy ? "保存中…" : "保存草稿"}
+              {busy ? "保存中…" : editing ? "保存几何" : "保存草稿"}
             </PrimaryButton>
           </div>
         </div>

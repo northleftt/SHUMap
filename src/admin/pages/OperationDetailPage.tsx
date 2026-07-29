@@ -1,8 +1,9 @@
+import { Hexagon, MapPin, Route } from "lucide-react";
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import { useAuth } from "../AuthContext";
-import type { OperationalEventRow } from "../adminTypes";
+import type { OperationalEventRow, SpacesResponse } from "../adminTypes";
 import {
   Chip,
   ErrorBanner,
@@ -42,6 +43,35 @@ const UPDATE_STATUS_META: Record<string, { label: string; tone: "info" | "warnin
   resolved: { label: "恢复", tone: "ok" },
 };
 
+const GEOMETRY_ROLE_META: Record<string, { label: string; icon: typeof MapPin }> = {
+  event_location: { label: "事件位置", icon: MapPin },
+  impact_area: { label: "影响区域", icon: Hexagon },
+  route_shape: { label: "绕行路径", icon: Route },
+};
+
+/** "12 顶点" / "x 431 · y 208" 之类的尺寸摘要，用于几何概要行。 */
+function geometrySummary(raw: string | null): string {
+  if (!raw) return "";
+  try {
+    const geometry = JSON.parse(raw) as { type?: string; coordinates?: unknown };
+    if (geometry.type === "Point" && Array.isArray(geometry.coordinates)) {
+      const [x, y] = geometry.coordinates as number[];
+      return `x ${x} · y ${y}`;
+    }
+    if (geometry.type === "LineString" && Array.isArray(geometry.coordinates)) {
+      return `${geometry.coordinates.length} 顶点`;
+    }
+    if (geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
+      const ring = (geometry.coordinates as unknown[])[0];
+      // GeoJSON 环首尾重复，顶点数减一
+      if (Array.isArray(ring)) return `${Math.max(ring.length - 1, 0)} 顶点`;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 export function OperationDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -49,10 +79,17 @@ export function OperationDetailPage() {
   const canWrite = hasPermission("write:content");
 
   const { state, reload } = useAsyncData(async (signal) => {
-    const list = await admin.listAdminOperations<OperationalEventRow & { targets?: Array<{ targetType: string; targetId: string }>; updates?: EventUpdate[] }>(signal);
+    const [list, spaces] = await Promise.all([
+      admin.listAdminOperations<OperationalEventRow & {
+        targets?: Array<{ targetType: string; targetId: string }>;
+        updates?: EventUpdate[];
+        locations?: admin.OperationLocationRow[];
+      }>(signal),
+      admin.listSpaces<SpacesResponse>(signal),
+    ]);
     const event = list.items.find((e) => e.id === id);
     if (!event) throw new Error("事件不存在");
-    return event;
+    return { event, campuses: spaces.campuses };
   }, [id]);
 
   const [message, setMessage] = useState("");
@@ -63,7 +100,9 @@ export function OperationDetailPage() {
 
   if (state.status === "loading") return <LoadingState label="加载事件…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
-  const event = state.data!;
+  const event = state.data!.event;
+  const campuses = state.data!.campuses;
+  const locations = event.locations ?? [];
   const updates = (event.updates ?? []).slice().sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
   const ended = event.operationalStatus === "resolved" || event.operationalStatus === "expired" || event.operationalStatus === "cancelled";
 
@@ -127,8 +166,51 @@ export function OperationDetailPage() {
                 提前结束
               </GhostButton>
             ) : null}
+            {canWrite ? (
+              <GhostButton onClick={() => navigate(`/admin/operations/${id}/edit`)}>
+                <MapPin size={14} /> 编辑几何
+              </GhostButton>
+            ) : null}
             <GhostButton onClick={() => navigate("/admin/operations")}>返回列表</GhostButton>
           </div>
+        </div>
+      </Panel>
+
+      {/* 地图几何概要（live anchors，审核通过即上图，无需发版） */}
+      <Panel
+        title="地图几何"
+        action={canWrite ? <Link className="text-aux font-medium text-primary" to={`/admin/operations/${id}/edit`}>编辑几何 ›</Link> : undefined}
+        padded={false}
+      >
+        <div className="space-y-2 p-5">
+          {locations.length === 0 ? (
+            <InfoNote>该事件尚未标注地图几何{canWrite ? "，可通过「编辑几何」在地图上绘制位置 / 影响区域 / 绕行路径。" : "。"}</InfoNote>
+          ) : (
+            locations.map((location) => {
+              const meta = GEOMETRY_ROLE_META[location.role] ?? { label: location.role, icon: MapPin };
+              const Icon = meta.icon;
+              const campus = campuses.find((row) => row.id === location.campusId);
+              return (
+                <div key={location.id} className="flex items-center justify-between gap-3 rounded-lg bg-page px-3.5 py-2.5">
+                  <div className="flex min-w-0 items-center gap-2 text-body">
+                    <Icon size={15} className="shrink-0 text-primary" />
+                    <span className="font-medium">{meta.label}</span>
+                    <span className="truncate text-sub">
+                      {location.geometryType}
+                      {(() => {
+                        const size = geometrySummary(location.geometryJson);
+                        return size ? ` · ${size}` : "";
+                      })()}
+                    </span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Pill>{campus?.name ?? (location.campusId ? location.campusId : "未绑定校区")}</Pill>
+                    <Pill tone={location.crs === "svg_viewbox" ? "info" : "warning"}>{location.crs ?? "无 CRS"}</Pill>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </Panel>
 

@@ -1,10 +1,10 @@
-import type { SessionPrincipal } from "../domain/types";
-import type { Env } from "../types/cloudflare";
+import type { LocationInput, SessionPrincipal } from "../domain/types";
+import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, assertExists, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
 import { isoNow, jsonString, makeId, objectValue, optionalString, requiredString } from "../lib/values";
 import { audit } from "./audit";
-import { createLocation } from "./locations";
+import { createLocation, planLocation } from "./locations";
 
 export async function listOperationalEvents(env: Env, publicOnly = false): Promise<Response> {
   const now = isoNow();
@@ -190,4 +190,79 @@ export async function createCampaign(request: Request, env: Env, principal: Sess
   }
   await audit(env, principal, "campaign.create", "campaign", id, requestId, null, body);
   return json({ id, editorialStatus: "draft" }, { status: 201 });
+}
+
+// ---------------------------------------------------------------------------
+// Geometry re-editing: PUT /api/admin/operations/:id/locations
+// ---------------------------------------------------------------------------
+
+const MAX_EVENT_LOCATIONS = 10;
+
+/**
+ * Replace-all update of an event's locations. Old bindings and their anchors are
+ * dropped and the submitted set is inserted in one `DB.batch` transaction, so a
+ * rejected input can never leave the event half-edited. The first entry becomes
+ * the primary binding (same rule as create), which keeps the partial unique
+ * index `idx_entity_locations_one_primary` satisfiable.
+ */
+export async function replaceOperationalEventLocations(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  eventId: string,
+  requestId: string,
+): Promise<Response> {
+  const event = await first<Record<string, unknown>>(env.DB, "select id from operational_events where id=?", [eventId]);
+  if (!event) throw new HttpError(404, "not_found", "Event does not exist");
+
+  const body = await readJson<Record<string, unknown>>(request);
+  if (!Array.isArray(body.locations)) throw new HttpError(400, "validation_error", "locations must be an array");
+  const inputs = body.locations.map((raw, index) => objectValue(raw, `locations[${index}]`) as unknown as LocationInput);
+  if (inputs.length > MAX_EVENT_LOCATIONS) {
+    throw new HttpError(400, "validation_error", `An event supports at most ${MAX_EVENT_LOCATIONS} locations`);
+  }
+
+  const previous = await all<{ bindingId: string; anchorId: string; role: string }>(
+    env.DB,
+    `select el.id as bindingId,el.anchor_id as anchorId,el.role
+       from entity_locations el where el.entity_type='operational_event' and el.entity_id=?`,
+    [eventId],
+  );
+
+  // Validate every input (roles, crs/map version, spatial hierarchy) before any
+  // statement runs, so validation failures never delete the existing geometry.
+  const now = isoNow();
+  const planned = [];
+  for (const [index, input] of inputs.entries()) {
+    planned.push(await planLocation(env, "operational_event", eventId, input, principal, index === 0, now));
+  }
+
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("delete from entity_locations where entity_type='operational_event' and entity_id=?").bind(eventId),
+  ];
+  if (previous.length > 0) {
+    const anchorIds = previous.map((row) => row.anchorId);
+    statements.push(
+      env.DB.prepare(`delete from location_anchors where id in (${anchorIds.map(() => "?").join(",")})`).bind(...anchorIds),
+    );
+  }
+  for (const plan of planned) statements.push(...plan.statements);
+  statements.push(env.DB.prepare("update operational_events set updated_at=? where id=?").bind(now, eventId));
+  await env.DB.batch(statements);
+
+  await audit(
+    env,
+    principal,
+    "operational_event.locations.replace",
+    "operational_event",
+    eventId,
+    requestId,
+    { locations: previous },
+    { locations: inputs.map((input) => ({ role: input.role, geometryType: input.geometryType, crs: input.crs, campusId: input.campusId, mapVersionId: input.mapVersionId })) },
+  );
+  return json({
+    id: eventId,
+    removed: previous.length,
+    locations: planned.map((plan, index) => ({ id: plan.anchorId, role: inputs[index].role, isPrimary: index === 0 })),
+  });
 }
