@@ -26,7 +26,7 @@ export async function listOperationalEvents(env: Env, publicOnly = false): Promi
   if (items.length > 0) {
     const ids = items.map((item) => String(item.id));
     const placeholders = ids.map(() => "?").join(",");
-    const [targets, updates] = await Promise.all([
+    const [targets, updates, locations] = await Promise.all([
       all<Record<string, unknown>>(
         env.DB,
         `select event_id as eventId,target_type as targetType,target_id as targetId,impact_type as impactType
@@ -39,10 +39,21 @@ export async function listOperationalEvents(env: Env, publicOnly = false): Promi
            from operational_event_updates where event_id in (${placeholders}) order by created_at desc`,
         ids,
       ),
+      // 事件位置走 live 表随接口下发（不进 release manifest），审核通过即可上图，无需发版
+      all<Record<string, unknown>>(
+        env.DB,
+        `select el.entity_id as eventId,la.id,la.role,la.geometry_type as geometryType,
+                la.geometry_json as geometryJson,la.crs,la.campus_id as campusId
+           from entity_locations el join location_anchors la on la.id=el.anchor_id
+          where el.entity_type='operational_event' and el.entity_id in (${placeholders})
+            and el.valid_to is null and (la.valid_to is null or la.valid_to>?)`,
+        [...ids, now],
+      ),
     ]);
     for (const item of items) {
       item.targets = targets.filter((target) => target.eventId === item.id).map(({ eventId: _eventId, ...target }) => target);
       item.updates = updates.filter((update) => update.eventId === item.id).map(({ eventId: _eventId, ...update }) => update);
+      item.locations = locations.filter((location) => location.eventId === item.id).map(({ eventId: _eventId, ...location }) => location);
     }
   }
   return json({ items }, publicOnly ? { headers: { "cache-control": "public, max-age=30" } } : {});

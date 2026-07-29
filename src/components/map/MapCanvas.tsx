@@ -142,15 +142,6 @@ function findBuildingId(target: Element | null, validIds: string[]) {
   return null;
 }
 
-function findBuildingIdAtPoint(
-  clientX: number,
-  clientY: number,
-  validIds: string[],
-) {
-  const target = document.elementFromPoint(clientX, clientY);
-  return findBuildingId(target, validIds);
-}
-
 function ZoomInIcon() {
   return (
     <svg aria-hidden="true" className="size-[18px]" viewBox="0 0 18 18" fill="none">
@@ -183,6 +174,8 @@ interface MapCanvasProps {
   onTapEmpty?: () => void;
   /** M8 事件叠加层：渲染为手势层内 svgHost 的兄弟节点，与地图同一坐标系 */
   overlay?: React.ReactNode;
+  /** 点中叠加层事件图形（data-overlay-event-id）时回调；图形自身 click 会被指针捕获吞掉 */
+  onTapOverlayEvent?: (eventId: string) => void;
   /** 视口 viewBox 窗口变化回调（叠加层同步用） */
   onViewWindowChange?: (window: MapViewWindow) => void;
   /** 缩放控件位置：移动端右中，桌面端右下 */
@@ -200,6 +193,7 @@ export function MapCanvas({
   onSelectBuilding,
   onTapEmpty,
   overlay,
+  onTapOverlayEvent,
   onViewWindowChange,
   zoomControlPosition = "center-right",
   viewResetNonce,
@@ -210,6 +204,7 @@ export function MapCanvas({
   const buildingIdsRef = useRef<string[]>(currentBuildingIds);
   const onSelectBuildingRef = useRef(onSelectBuilding);
   const onTapEmptyRef = useRef(onTapEmpty);
+  const onTapOverlayEventRef = useRef(onTapOverlayEvent);
   const viewWindowRef = useRef<ViewWindow>({
     x: 0,
     y: 0,
@@ -252,6 +247,10 @@ export function MapCanvas({
   useEffect(() => {
     onTapEmptyRef.current = onTapEmpty;
   }, [onTapEmpty]);
+
+  useEffect(() => {
+    onTapOverlayEventRef.current = onTapOverlayEvent;
+  }, [onTapOverlayEvent]);
 
   useEffect(() => {
     viewWindowRef.current = viewWindow;
@@ -612,11 +611,17 @@ export function MapCanvas({
     }
 
     if (shouldSelect) {
-      const svgElementId = findBuildingIdAtPoint(
-        event.clientX,
-        event.clientY,
-        buildingIdsRef.current,
-      );
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      // 先认叠加层事件图形（pointer capture 会吞掉图形自身的 click）
+      const overlayEventId = hit
+        ?.closest?.("[data-overlay-event-id]")
+        ?.getAttribute("data-overlay-event-id");
+      if (overlayEventId) {
+        onTapOverlayEventRef.current?.(overlayEventId);
+        gestureRef.current.dragged = false;
+        return;
+      }
+      const svgElementId = findBuildingId(hit, buildingIdsRef.current);
       if (svgElementId) {
         onSelectBuildingRef.current(svgElementId);
       } else {

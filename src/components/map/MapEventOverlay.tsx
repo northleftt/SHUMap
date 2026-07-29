@@ -1,10 +1,11 @@
-import type { OperationalEvent, ReleaseLocation } from "../../lib/api/types";
+import type { OperationalEvent } from "../../lib/api/types";
 import type { MapViewWindow } from "./MapCanvas";
 
 /** 叠加图层项：事件 + 其 svg_viewbox 坐标。 */
 export interface EventOverlayItem {
   event: OperationalEvent;
-  location: ReleaseLocation;
+  locationId: string;
+  campusId: string | null;
   geometry: GeoGeometry;
 }
 
@@ -35,23 +36,18 @@ function severityColor(severity: string): string {
 }
 
 /**
- * Join manifest locations (entityType=operational_event, crs=svg_viewbox) with
- * live events. geographic CRS 本轮跳过（无 geo→SVG 变换）。
+ * 事件位置由 /api/public/operations 随事件 live 下发（crs=svg_viewbox），
+ * 审核通过即可上图，不依赖发布新 release。geographic CRS 本轮跳过（无 geo→SVG 变换）。
  */
-export function buildEventOverlayItems(
-  locations: ReleaseLocation[],
-  events: OperationalEvent[],
-): EventOverlayItem[] {
-  const eventById = new Map(events.map((event) => [event.id, event]));
+export function buildEventOverlayItems(events: OperationalEvent[]): EventOverlayItem[] {
   const items: EventOverlayItem[] = [];
-  for (const location of locations) {
-    if (location.entityType !== "operational_event") continue;
-    if (location.crs !== "svg_viewbox") continue;
-    const event = eventById.get(location.entityId);
-    if (!event) continue;
-    const geometry = parseGeometry(location.geometry_json);
-    if (!geometry) continue;
-    items.push({ event, location, geometry });
+  for (const event of events) {
+    for (const location of event.locations ?? []) {
+      if (location.crs !== "svg_viewbox") continue;
+      const geometry = parseGeometry(location.geometryJson);
+      if (!geometry) continue;
+      items.push({ event, locationId: location.id, campusId: location.campusId ?? null, geometry });
+    }
   }
   return items;
 }
@@ -87,6 +83,8 @@ export function MapEventOverlay({
         const color = severityColor(item.event.severity);
         const selected = item.event.id === selectedEventId;
         const common = {
+          // 手势层 pointer capture 会吞 click；命中检测靠这个 data 属性（MapCanvas.handlePointerUp）
+          "data-overlay-event-id": item.event.id,
           style: { pointerEvents: "auto" as const, cursor: "pointer" },
           onClick: (e: React.MouseEvent) => {
             e.stopPropagation();
@@ -97,7 +95,7 @@ export function MapEventOverlay({
         if (item.geometry.type === "Point") {
           const [cx, cy] = item.geometry.coordinates;
           return (
-            <g key={item.location.id} {...common}>
+            <g key={item.locationId} {...common}>
               {/* 脉冲圈 */}
               <circle cx={cx} cy={cy} r={unit * 0.9} fill={color} opacity={0.25} className="event-pulse" />
               <circle
@@ -131,7 +129,7 @@ export function MapEventOverlay({
           const cx = ring.reduce((sum, [x]) => sum + x, 0) / Math.max(1, ring.length);
           const cy = ring.reduce((sum, [, y]) => sum + y, 0) / Math.max(1, ring.length);
           return (
-            <g key={item.location.id} {...common}>
+            <g key={item.locationId} {...common}>
               <polygon
                 points={points}
                 fill={color}
@@ -161,7 +159,7 @@ export function MapEventOverlay({
         const [sx, sy] = line[0] ?? [0, 0];
         const [ex, ey] = line[line.length - 1] ?? [0, 0];
         return (
-          <g key={item.location.id} {...common}>
+          <g key={item.locationId} {...common}>
             <polyline
               points={points}
               fill="none"

@@ -11,9 +11,10 @@ import { useOperations } from "../../lib/hooks/useOperations";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import { CampusSwitcher } from "./CampusSwitcher";
 import { DesktopMapPanel, PoiMapCard } from "./DesktopMapPanel";
+import { LayerPanel } from "./LayerPanel";
 import { PoiDetailSheet } from "./PoiDetailSheet";
 import { SearchHomeSheet } from "./SearchHomeSheet";
-import { useMapPageState, type MapSheetMode } from "./useMapPageState";
+import { useMapPageState, CAMPUS_ID_BY_KEY, type MapSheetMode } from "./useMapPageState";
 
 const TAB_BAR_PX = 64;
 
@@ -33,13 +34,20 @@ export function MapPage() {
   const [containerHeight, setContainerHeight] = useState(760);
   const [viewResetNonce, setViewResetNonce] = useState(0);
 
-  // M8 事件叠加层
+  // M8 事件叠加层 + 图层浮卡
   const [layerOn, setLayerOn] = useState(true);
+  const [layerPanelOpen, setLayerPanelOpen] = useState(false);
   const [viewWindow, setViewWindow] = useState<MapViewWindow | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  // 几何坐标是各校区的 svg_viewbox，只渲染当前校区的事件（campusId 为空视为通用）
   const overlayItems = useMemo(
-    () => (release ? buildEventOverlayItems(release.manifest.locations, activeEvents) : []),
-    [release, activeEvents],
+    () =>
+      buildEventOverlayItems(activeEvents).filter(
+        (item) =>
+          !item.campusId ||
+          item.campusId === CAMPUS_ID_BY_KEY[state.selectedCampus],
+      ),
+    [activeEvents, state.selectedCampus],
   );
   const selectedEvent = selectedEventId
     ? (overlayItems.find((item) => item.event.id === selectedEventId)?.event ?? null)
@@ -103,8 +111,13 @@ export function MapPage() {
           onSelectBuilding={state.openPoiBySvgId}
           onTapEmpty={() => {
             if (selectedEventId) setSelectedEventId(null);
+            else if (layerPanelOpen) setLayerPanelOpen(false);
             else if (state.sheetMode === "poi") state.closePoi();
             else if (state.sheetMode === "results") state.setSheetMode("home");
+          }}
+          onTapOverlayEvent={(eventId) => {
+            setSelectedEventId(eventId);
+            setLayerPanelOpen(false);
           }}
           viewResetNonce={viewResetNonce}
           onViewWindowChange={setViewWindow}
@@ -128,7 +141,7 @@ export function MapPage() {
           ) : (
             <span />
           )}
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col items-end gap-2">
             <button
               type="button"
               aria-label="回到校区中心"
@@ -137,26 +150,40 @@ export function MapPage() {
             >
               <Crosshair size={19} />
             </button>
-            {overlayItems.length > 0 ? (
-              <button
-                type="button"
-                aria-label="事件图层开关"
-                className={`relative grid h-11 w-11 place-items-center rounded-full shadow-floating ${
-                  layerOn ? "bg-surface text-ink" : "bg-surface text-sub"
-                }`}
-                onClick={() => {
-                  setLayerOn((on) => !on);
-                  setSelectedEventId(null);
-                }}
-              >
-                <Layers size={19} />
+            <button
+              type="button"
+              aria-label="图层"
+              aria-pressed={layerPanelOpen}
+              className={`relative grid h-11 w-11 place-items-center rounded-full shadow-floating ${
+                layerPanelOpen ? "bg-primary text-white" : "bg-surface text-ink"
+              }`}
+              onClick={() => setLayerPanelOpen((open) => !open)}
+            >
+              <Layers size={19} />
+              {overlayItems.length > 0 ? (
                 <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-warning px-1 text-[10px] font-bold text-white">
                   {overlayItems.length}
                 </span>
-              </button>
-            ) : null}
+              ) : null}
+            </button>
           </div>
         </div>
+
+        {/* 图层浮卡：z-40 压过底部抽屉（z-30），移动端可完整滚动 */}
+        {layerPanelOpen ? (
+          <div className="absolute right-4 top-[120px] z-40">
+            <LayerPanel
+              eventCount={overlayItems.length}
+              eventsOn={layerOn}
+              onToggleEvents={() => {
+                setLayerOn((on) => !on);
+                setSelectedEventId(null);
+              }}
+              activeFilter={state.activeFilter}
+              onToggleFilter={state.handleFilterHighlight}
+            />
+          </div>
+        ) : null}
 
         {/* M8 事件摘要卡（点选叠加图形后） */}
         {selectedEvent ? (

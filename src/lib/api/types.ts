@@ -304,6 +304,16 @@ export interface OperationalEventUpdate {
   createdAt: string;
 }
 
+/** 事件位置（live 下发，不经 release manifest）；geometryJson 为 GeoJSON 字符串。 */
+export interface OperationalEventLocation {
+  id: string;
+  role: string;
+  geometryType: string | null;
+  geometryJson: string | null;
+  crs: string | null;
+  campusId: string | null;
+}
+
 export interface OperationalEvent {
   id: string;
   eventType: string;
@@ -321,6 +331,7 @@ export interface OperationalEvent {
   updatedAt: string;
   targets?: OperationalEventTarget[];
   updates?: OperationalEventUpdate[];
+  locations?: OperationalEventLocation[];
 }
 
 export interface OperationalEventsResponse {

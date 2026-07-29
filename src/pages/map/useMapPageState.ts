@@ -17,6 +17,8 @@ const CAMPUS_ID_BY_KEY: Record<CampusKey, string> = {
   yanchang: "campus_yanchang",
 };
 
+export { CAMPUS_ID_BY_KEY };
+
 /** M1 地图页状态：校区/搜索/筛选/选中 POI/sheet 档位 + ?poi= 深链。 */
 export function useMapPageState() {
   const { status: releaseStatus, release } = useRelease();
@@ -130,6 +132,11 @@ export function useMapPageState() {
     else setSheetMode("home");
   };
 
+  // 图层浮卡入口：只切地图高亮，不动搜索抽屉（与搜索 chips 共享 activeFilter）
+  const handleFilterHighlight = (filterKey: FilterKey) => {
+    setActiveFilter((cur) => (cur === filterKey ? null : filterKey));
+  };
+
   const resetForCampus = (nextCampus: CampusKey) => {
     setSelectedCampus(nextCampus);
     setQuery("");
@@ -185,6 +192,7 @@ export function useMapPageState() {
     handleQueryFocus,
     clearQuery,
     handleFilterToggle,
+    handleFilterHighlight,
     resetForCampus,
   };
 }
