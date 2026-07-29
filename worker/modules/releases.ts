@@ -87,6 +87,13 @@ export class ReleaseCoordinator {
       statements.push(this.env.DB.prepare(
         "insert into release_activations(id,from_release_id,to_release_id,action,actor_user_id,reason,created_at) values(?,?,?,'publish',?,?,?)",
       ).bind(makeId("activation"), previous?.id ?? null, releaseId, actorUserId, body.reason ?? null, isoNow()));
+      // 激活即发布：本次 release 选中的 map version 从 'ready' 提升为 'published'，
+      // 否则没有任何代码路径写入 'published'（jobs.ts 导入只写 'ready'）。
+      for (const map of candidate.maps as Array<Record<string, unknown>>) {
+        statements.push(this.env.DB.prepare(
+          "update map_versions set lifecycle_status='published' where id=? and lifecycle_status='ready'",
+        ).bind(String(map.id)));
+      }
       await this.env.DB.batch(statements);
       await this.env.RELEASE_KV.put("current_release_v2", releaseId);
       return json({ id: releaseId, version, status: "active", artifactSha256: artifactHash, validation }, { status: 201 });
@@ -143,7 +150,16 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
       from entity_locations el join location_anchors la on la.id=el.anchor_id where el.valid_to is null and (la.valid_to is null or la.valid_to>?)`, [isoNow()]),
     requestedMapVersionIds.length
       ? all(env.DB, `select mv.*,ma.checksum,me.object_key as assetKey from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id where mv.id in (${requestedMapVersionIds.map(() => "?").join(",")}) and mv.lifecycle_status in ('ready','published')`, requestedMapVersionIds)
-      : all(env.DB, `select mv.*,ma.checksum,me.object_key as assetKey from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id where mv.lifecycle_status='published'`),
+      // 默认发布：每个 campus / floor 取最新的 ready 或 published 版本。
+      // 导入产出的版本是 'ready'（jobs.ts），只有发布激活才会把它们提升为 'published'。
+      : all(env.DB, `select mv.*,ma.checksum,me.object_key as assetKey from map_versions mv
+           join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id
+          where mv.lifecycle_status in ('ready','published')
+            and mv.id=(select mv2.id from map_versions mv2
+                        where mv2.lifecycle_status in ('ready','published')
+                          and coalesce(mv2.campus_id,'')=coalesce(mv.campus_id,'')
+                          and coalesce(mv2.floor_id,'')=coalesce(mv.floor_id,'')
+                        order by mv2.created_at desc,mv2.id desc limit 1)`),
     all(env.DB, "select * from transit_stops where status='active'"), all(env.DB, "select * from transit_routes where status='active'"),
     all(env.DB, "select * from transit_patterns"), all(env.DB, "select * from transit_pattern_stops order by pattern_id,stop_sequence"),
     all(env.DB, "select * from service_calendars"), all(env.DB, "select * from service_calendar_exceptions"),

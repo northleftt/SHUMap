@@ -127,11 +127,11 @@ export function ReviewPage() {
     setError("");
     try {
       if (selected.kind === "operation") {
-        await admin.reviewOperation(selected.id, { decision });
+        await admin.reviewOperation(selected.id, { decision, note: note.trim() || undefined });
       } else if (selected.kind === "submission") {
         await admin.reviewSubmission(selected.id, { decision: decision === "approve" ? "accept" : "reject", note: note.trim() || undefined });
       } else {
-        if (!selected.revisionId) throw new Error("缺少修订 ID（列表接口未返回 currentRevisionId，待后端部署后可用）");
+        if (!selected.revisionId) throw new Error("该修订缺少 revisionId，无法提交审核结论");
         await admin.reviewRevision(selected.kind, selected.revisionId, { decision, note: note.trim() || undefined });
       }
       setSelected(null);

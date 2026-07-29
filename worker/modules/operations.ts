@@ -103,14 +103,18 @@ export async function decideOperationalEvent(
   const body = await readJson<Record<string, unknown>>(request);
   const decision = requiredString(body.decision, "decision", 20);
   if (!["approve", "reject"].includes(decision)) throw new HttpError(400, "validation_error", "Invalid decision");
+  const note = optionalString(body.note, "note", 2_000);
   const event = await first<Record<string, unknown>>(env.DB, "select * from operational_events where id=?", [eventId]);
   if (!event) throw new HttpError(404, "not_found", "Event does not exist");
   if (!["draft", "in_review"].includes(String(event.editorial_status))) throw new HttpError(409, "invalid_state", "Event has already been decided");
   const next = decision === "approve" ? "approved" : "rejected";
-  await env.DB.prepare("update operational_events set editorial_status=?,reviewed_by=?,updated_at=? where id=?")
-    .bind(next, principal.userId, isoNow(), eventId).run();
-  await audit(env, principal, `operational_event.${decision}`, "operational_event", eventId, requestId, event, { ...event, editorial_status: next });
-  return json({ id: eventId, editorialStatus: next });
+  await env.DB.prepare("update operational_events set editorial_status=?,reviewed_by=?,reviewed_at=?,review_note=?,updated_at=? where id=?")
+    .bind(next, principal.userId, isoNow(), note, isoNow(), eventId).run();
+  await audit(
+    env, principal, `operational_event.${decision}`, "operational_event", eventId, requestId,
+    event, { ...event, editorial_status: next, review_note: note }, note,
+  );
+  return json({ id: eventId, editorialStatus: next, reviewNote: note });
 }
 
 export async function createOperationalEventUpdate(

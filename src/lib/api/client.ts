@@ -14,6 +14,12 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly details?: unknown,
+    /**
+     * Parsed response body, when the server sent JSON. Some endpoints answer with a
+     * domain payload instead of the `{ error }` envelope (e.g. the release coordinator
+     * returns `{ id, status, validation }` with 422) — callers read it from here.
+     */
+    public readonly body?: unknown,
   ) {
     super(message);
     this.name = "ApiError";
@@ -56,17 +62,20 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
 async function toApiError(response: Response): Promise<ApiError> {
   let code = "http_error";
   let message = `Request failed with status ${response.status}`;
+  let body: unknown;
   try {
-    const data = (await response.json()) as { error?: ApiErrorBody };
+    body = (await response.json()) as unknown;
+    const data = body as { error?: ApiErrorBody; status?: string };
     if (data?.error) {
       code = data.error.code ?? code;
       message = data.error.message ?? message;
-      return new ApiError(response.status, code, message, data.error.details);
+      return new ApiError(response.status, code, message, data.error.details, body);
     }
+    if (typeof data?.status === "string") code = data.status;
   } catch {
     // Non-JSON error body; fall through to status-based message.
   }
-  return new ApiError(response.status, code, message);
+  return new ApiError(response.status, code, message, undefined, body);
 }
 
 /**

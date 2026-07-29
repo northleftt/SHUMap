@@ -248,8 +248,14 @@ export function createOperation(body: Record<string, unknown>): Promise<{ id: st
   return apiFetch<{ id: string }>("/api/admin/operations", { method: "POST", body });
 }
 
-export function reviewOperation(id: string, body: { decision: "approve" | "reject" }): Promise<unknown> {
-  return apiFetch(`/api/admin/operations/${encodeURIComponent(id)}/review`, { method: "POST", body });
+export function reviewOperation(
+  id: string,
+  body: { decision: "approve" | "reject"; note?: string },
+): Promise<{ id: string; editorialStatus: string; reviewNote: string | null }> {
+  return apiFetch<{ id: string; editorialStatus: string; reviewNote: string | null }>(
+    `/api/admin/operations/${encodeURIComponent(id)}/review`,
+    { method: "POST", body },
+  );
 }
 
 export function createOperationUpdate(
