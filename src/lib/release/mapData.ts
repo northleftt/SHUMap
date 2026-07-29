@@ -24,6 +24,7 @@ import type {
   NavigationUrls,
   PoiDetailData,
 } from "../types";
+import { groupMerchantsByPlace } from "./merchants";
 
 export const campusConfigs: CampusConfig[] = [
   {
@@ -238,6 +239,9 @@ export function buildMapBuildings(manifest: ReleaseManifest): MapBuilding[] {
     facilityFiltersByPlace.set(facility.hostPlaceId, set);
   }
 
+  // Merchant outlets grouped onto their host place (no standalone merchant page).
+  const merchantsByPlace = groupMerchantsByPlace(manifest.merchants ?? []);
+
   const buildings: MapBuilding[] = [];
   for (const place of manifest.places) {
     const campusKey = place.campusId ? campusKeyById.get(place.campusId) : null;
@@ -248,7 +252,10 @@ export function buildMapBuildings(manifest: ReleaseManifest): MapBuilding[] {
     const detail = normalizePoiDetail(content.detail);
     const nav = navPointFromLocation(primaryNavByPlace.get(place.id), place.displayName);
     const navigationUrls = buildNavigationUrls(nav);
-    const hostedFilters = facilityFiltersByPlace.get(place.id) ?? new Set<FilterKey>();
+    const hostedFilters = new Set<FilterKey>(facilityFiltersByPlace.get(place.id) ?? []);
+    const merchants = merchantsByPlace.get(place.id) ?? [];
+    // Hosting an outlet is what makes a place commercial — derived, not curated.
+    if (merchants.length > 0) hostedFilters.add("commercial");
 
     buildings.push({
       id: place.id,
@@ -263,6 +270,7 @@ export function buildMapBuildings(manifest: ReleaseManifest): MapBuilding[] {
       detail,
       navigationUrls,
       poiKey: place.id,
+      merchants,
     });
   }
   return buildings;

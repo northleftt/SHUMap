@@ -29,7 +29,10 @@ export function useMapPageState() {
   const [sheetMode, setSheetMode] = useState<MapSheetMode>("home");
   const [previousSheetMode, setPreviousSheetMode] = useState<Exclude<MapSheetMode, "poi">>("home");
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
+  const [selectedMerchantId, setSelectedMerchantId] = useState<string | null>(null);
   const [searchOrder, setSearchOrder] = useState<string[] | null>(null);
+  // 搜索命中的商户 → 其所在楼宇（商户不单设页面，落地到楼宇详情内的商户视图）
+  const [merchantHitByPlace, setMerchantHitByPlace] = useState<Record<string, string>>({});
   const deepLinkAppliedRef = useRef(false);
   const { addRecent } = useRecents();
 
@@ -54,15 +57,31 @@ export function useMapPageState() {
     const trimmed = query.trim();
     if (!trimmed) {
       setSearchOrder(null);
+      setMerchantHitByPlace({});
       return;
     }
     const controller = new AbortController();
     const campusId = CAMPUS_ID_BY_KEY[selectedCampus];
     const timer = window.setTimeout(() => {
       searchRelease({ q: trimmed, campusId }, controller.signal)
-        .then((response) => setSearchOrder(response.results.map((result) => result.id)))
+        .then((response) => {
+          // 商户 / 设施命中折叠到所在楼宇（buildingPlaceId），楼宇命中用自身 id
+          const order: string[] = [];
+          const merchantHits: Record<string, string> = {};
+          for (const result of response.results) {
+            const placeId = result.type === "place" ? result.id : result.buildingPlaceId;
+            if (!placeId) continue;
+            if (result.type === "merchant_outlet" && !merchantHits[placeId]) merchantHits[placeId] = result.id;
+            if (!order.includes(placeId)) order.push(placeId);
+          }
+          setSearchOrder(order);
+          setMerchantHitByPlace(merchantHits);
+        })
         .catch(() => {
-          if (!controller.signal.aborted) setSearchOrder([]);
+          if (!controller.signal.aborted) {
+            setSearchOrder([]);
+            setMerchantHitByPlace({});
+          }
         });
     }, 180);
     return () => {
@@ -85,7 +104,11 @@ export function useMapPageState() {
 
   const selectedPoi = buildings.find((building) => building.poiKey === selectedPoiKey) ?? null;
 
-  const openPoi = (poiKey: string, source: "map_object" | "search_result" | "deep_link" = "search_result") => {
+  const openPoi = (
+    poiKey: string,
+    source: "map_object" | "search_result" | "deep_link" = "search_result",
+    merchantId?: string | null,
+  ) => {
     const building = buildingById.get(poiKey);
     if (!building) return;
     recordAnalyticsEvent({
@@ -98,23 +121,28 @@ export function useMapPageState() {
     if (sheetMode !== "poi") setPreviousSheetMode(sheetMode === "collapsed" ? "home" : sheetMode);
     if (building.campusKey !== selectedCampus) setSelectedCampus(building.campusKey);
     setSelectedPoiKey(poiKey);
+    // 搜索命中商户时直接落到该商户视图，否则展示楼宇详情
+    const merchant = merchantId === undefined ? merchantHitByPlace[poiKey] ?? null : merchantId;
+    setSelectedMerchantId(merchant && building.merchants.some((item) => item.id === merchant) ? merchant : null);
     setSheetMode("poi");
     addRecent(poiKey);
   };
 
   const openPoiBySvgId = (svgElementId: string) => {
     const building = campusBuildings.find((item) => item.svgElementId === svgElementId);
-    if (building) openPoi(building.poiKey, "map_object");
+    if (building) openPoi(building.poiKey, "map_object", null);
   };
 
   const closePoi = () => {
     setSelectedPoiKey(null);
+    setSelectedMerchantId(null);
     setSheetMode(previousSheetMode);
   };
 
   const handleQueryChange = (next: string) => {
     setQuery(next);
     setSelectedPoiKey(null);
+    setSelectedMerchantId(null);
     setSheetMode(next.trim() ? "results" : "home");
   };
 
@@ -142,6 +170,7 @@ export function useMapPageState() {
     setQuery("");
     setActiveFilter(null);
     setSelectedPoiKey(null);
+    setSelectedMerchantId(null);
     setSheetMode("home");
     setPreviousSheetMode("home");
   };
@@ -158,6 +187,7 @@ export function useMapPageState() {
       // 直接展开详情（不走 openPoi 的 campus 判断，避免时序问题）
       if (sheetMode !== "poi") setPreviousSheetMode("home");
       setSelectedPoiKey(building.poiKey);
+      setSelectedMerchantId(null);
       setSheetMode("poi");
       addRecent(building.poiKey);
     }
@@ -182,6 +212,7 @@ export function useMapPageState() {
     sheetMode,
     setSheetMode,
     selectedPoi,
+    selectedMerchantId,
     filteredResults,
     searchActive,
     matchedIds,

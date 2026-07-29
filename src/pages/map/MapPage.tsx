@@ -34,6 +34,13 @@ export function MapPage() {
   const [containerHeight, setContainerHeight] = useState(760);
   const [viewResetNonce, setViewResetNonce] = useState(0);
 
+  // D1 桌面端详情面板（移动端走底部抽屉）
+  const [desktopDetailOpen, setDesktopDetailOpen] = useState(false);
+  // 换 POI 时收起；搜索直接命中商户时自动展开到该商户
+  useEffect(() => {
+    setDesktopDetailOpen(Boolean(state.selectedPoi && state.selectedMerchantId));
+  }, [state.selectedPoi?.poiKey, state.selectedMerchantId]);
+
   // M8 事件叠加层 + 图层浮卡
   const [layerOn, setLayerOn] = useState(true);
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
@@ -250,7 +257,32 @@ export function MapPage() {
 
         {/* D1 选中 POI 的地图小卡（桌面端） */}
         {!isMobile && state.selectedPoi ? (
-          <PoiMapCard building={state.selectedPoi} onClose={state.closePoi} />
+          <PoiMapCard
+            building={state.selectedPoi}
+            onClose={state.closePoi}
+            onOpenMerchants={() => setDesktopDetailOpen(true)}
+          />
+        ) : null}
+
+        {/* D1 桌面端详情浮层：复用 M2 版式（商户区块 + 内嵌商户详情） */}
+        {!isMobile && desktopDetailOpen && state.selectedPoi ? (
+          <div className="absolute right-6 top-6 z-40 flex max-h-[calc(100%-3rem)] w-[380px] flex-col overflow-hidden rounded-2xl bg-surface shadow-floating">
+            <button
+              type="button"
+              aria-label="关闭详情"
+              className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-full bg-page text-sub"
+              onClick={() => setDesktopDetailOpen(false)}
+            >
+              <X size={15} />
+            </button>
+            <div className="min-h-0 flex-1 overflow-y-auto pt-4">
+              <PoiDetailSheet
+                building={state.selectedPoi}
+                events={activeEvents}
+                initialMerchantId={state.selectedMerchantId}
+              />
+            </div>
+          </div>
         ) : null}
 
         {/* 底部抽屉（移动端） */}
@@ -284,7 +316,11 @@ export function MapPage() {
                 </div>
               ) : state.sheetMode === "poi" && state.selectedPoi ? (
                 <div className="h-full overflow-y-auto pt-2">
-                  <PoiDetailSheet building={state.selectedPoi} events={activeEvents} />
+                  <PoiDetailSheet
+                    building={state.selectedPoi}
+                    events={activeEvents}
+                    initialMerchantId={state.selectedMerchantId}
+                  />
                 </div>
               ) : (
                 <div className="h-full pt-2">
