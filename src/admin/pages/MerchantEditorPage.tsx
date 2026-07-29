@@ -1,6 +1,8 @@
+import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
+import type { MerchantMenuItem } from "../../lib/types";
 import type { MerchantDetailResponse, MerchantListItem, PlaceListItem, ReferenceDataResponse } from "../adminTypes";
 import {
   EditorialPill,
@@ -16,6 +18,24 @@ import {
   errorMessage,
   useAsyncData,
 } from "../components/primitives";
+
+/** content_json.menu 的宽松解析：只保留有名称的条目，价格/描述可空。 */
+function parseMenu(value: unknown): MerchantMenuItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: MerchantMenuItem[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const record = raw as Record<string, unknown>;
+    const name = typeof record.name === "string" ? record.name : "";
+    if (!name.trim()) continue;
+    items.push({
+      name,
+      price: typeof record.price === "string" ? record.price : typeof record.price === "number" ? String(record.price) : "",
+      description: typeof record.description === "string" ? record.description : "",
+    });
+  }
+  return items;
+}
 
 // ---------------------------------------------------------------------------
 // A12 商户编辑器（门店 outlet 表单；品牌信息由 organizations 维护）
@@ -43,8 +63,10 @@ export function MerchantEditorPage() {
   const [openingHours, setOpeningHours] = useState("");
   const [phone, setPhone] = useState("");
   const [avgPrice, setAvgPrice] = useState("");
+  const [stallCode, setStallCode] = useState("");
   const [summary, setSummary] = useState("");
   const [sourceId, setSourceId] = useState("");
+  const [menu, setMenu] = useState<MerchantMenuItem[]>([]);
   const [baseContent, setBaseContent] = useState<Record<string, unknown>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -79,7 +101,9 @@ export function MerchantEditorPage() {
     }
     setBaseContent(content);
     setAvgPrice(typeof content.avgPrice === "string" ? content.avgPrice : "");
+    setStallCode(typeof content.stallCode === "string" ? content.stallCode : "");
     setSummary(typeof content.summary === "string" ? content.summary : "");
+    setMenu(parseMenu(content.menu));
     setSourceId(detail.source_id ? String(detail.source_id) : "");
   }, [state, id, isNew]);
 
@@ -89,15 +113,29 @@ export function MerchantEditorPage() {
   const item = isNew ? null : data.merchants.find((m) => m.id === id) ?? null;
   const reviewLocked = item?.editorialStatus === "in_review";
 
+  function updateMenuItem(index: number, patch: Partial<MerchantMenuItem>) {
+    setMenu((items) => items.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+  }
+
   async function save(thenSubmit: boolean) {
     if (!name.trim()) { setError("请填写名称"); return; }
     setBusy(true);
     setError("");
+    // baseContent 合并：未在表单展示的扩展字段原样保留
     const content = { ...baseContent };
-    for (const [key, value] of [["avgPrice", avgPrice], ["summary", summary]] as const) {
+    for (const [key, value] of [["avgPrice", avgPrice], ["stallCode", stallCode], ["summary", summary]] as const) {
       if (value.trim()) content[key] = value.trim();
       else delete content[key];
     }
+    const menuItems = menu
+      .filter((entry) => entry.name.trim())
+      .map((entry) => ({
+        name: entry.name.trim(),
+        ...(entry.price.trim() ? { price: entry.price.trim() } : {}),
+        ...(entry.description.trim() ? { description: entry.description.trim() } : {}),
+      }));
+    if (menuItems.length) content.menu = menuItems;
+    else delete content.menu;
     try {
       let revisionId = "";
       if (isNew) {
@@ -168,6 +206,7 @@ export function MerchantEditorPage() {
               <Field label="营业时间" onChange={setOpeningHours} placeholder="如 08:00 - 20:00" value={openingHours} />
               <Field label="联系电话" onChange={setPhone} placeholder="如 6613 5200" value={phone} />
               <Field label="人均" onChange={setAvgPrice} placeholder="如 ¥15" value={avgPrice} />
+              <Field label="档口号" onChange={setStallCode} placeholder="如 A12 档口" value={stallCode} />
             </div>
           </div>
           <TextArea label="简介" onChange={setSummary} placeholder="如 图书馆一层西侧，提供咖啡、简餐" rows={2} value={summary} />
@@ -192,8 +231,57 @@ export function MerchantEditorPage() {
       </Panel>
 
       <div className="space-y-4 self-start">
-        <Panel title="菜单 / 商品">
-          <InfoNote>菜单为商户的可选扩展字段（content.menu）；本轮编辑器不含菜单子表，可在简介中说明。</InfoNote>
+        <Panel
+          title={`菜单 / 商品${menu.length ? `（${menu.length}）` : ""}`}
+          action={
+            <GhostButton
+              disabled={reviewLocked}
+              onClick={() => setMenu((items) => [...items, { name: "", price: "", description: "" }])}
+            >
+              <Plus size={14} />
+              添加条目
+            </GhostButton>
+          }
+        >
+          <div className="space-y-3">
+            {menu.length === 0 ? (
+              <InfoNote>菜单为商户的可选扩展字段（content.menu），保存后随发布进入 release manifest，在 POI 详情的商户视图展示。</InfoNote>
+            ) : (
+              menu.map((entry, index) => (
+                <div key={index} className="space-y-2 rounded-lg border border-line p-3">
+                  <div className="flex items-start gap-2">
+                    <div className="grid flex-1 grid-cols-[1fr_100px] gap-2">
+                      <Field
+                        onChange={(value) => updateMenuItem(index, { name: value })}
+                        placeholder="条目名称，如 拿铁"
+                        value={entry.name}
+                      />
+                      <Field
+                        onChange={(value) => updateMenuItem(index, { price: value })}
+                        placeholder="¥15"
+                        value={entry.price}
+                      />
+                    </div>
+                    <GhostButton
+                      danger
+                      disabled={reviewLocked}
+                      onClick={() => setMenu((items) => items.filter((_, i) => i !== index))}
+                    >
+                      <Trash2 size={14} />
+                    </GhostButton>
+                  </div>
+                  <Field
+                    onChange={(value) => updateMenuItem(index, { description: value })}
+                    placeholder="描述（可选）"
+                    value={entry.description}
+                  />
+                </div>
+              ))
+            )}
+            {menu.length > 0 ? (
+              <InfoNote tone="info">未填名称的条目在保存时会被丢弃；价格与描述可留空。</InfoNote>
+            ) : null}
+          </div>
         </Panel>
         <Panel title="修订历史">
           <InfoNote tone="info">保存时会保留当前修订中未在表单展示的扩展字段。</InfoNote>

@@ -210,26 +210,55 @@ function buildSearchDocuments(
   for (const raw of locations as Array<Record<string, unknown>>) {
     if (Number(raw.isPrimary) === 1) primaryLocation.set(`${raw.entityType}:${raw.entityId}`, raw);
   }
+  // Hosted entities (facilities, merchant outlets) usually carry no anchor of
+  // their own; inherit the host place's campus so campus-scoped search finds them.
+  const campusByPlace = new Map<string, string>();
+  for (const place of places) {
+    const campusId = place.campusId ?? primaryLocation.get(`place:${place.id}`)?.campus_id;
+    if (campusId) campusByPlace.set(String(place.id), String(campusId));
+  }
+  const hostCampus = (record: Record<string, unknown>) =>
+    record.hostPlaceId ? campusByPlace.get(String(record.hostPlaceId)) : undefined;
   return [
     ...places.map((record) => document(releaseId, "place", record, primaryLocation.get(`place:${record.id}`), 10)),
-    ...facilities.map((record) => document(releaseId, "facility", record, primaryLocation.get(`facility:${record.id}`), 8)),
-    ...merchants.map((record) => document(releaseId, "merchant_outlet", record, primaryLocation.get(`merchant_outlet:${record.id}`), 7)),
+    ...facilities.map((record) => document(releaseId, "facility", record, primaryLocation.get(`facility:${record.id}`), 8, hostCampus(record))),
+    ...merchants.map((record) => document(releaseId, "merchant_outlet", record, primaryLocation.get(`merchant_outlet:${record.id}`), 7, hostCampus(record))),
   ];
 }
 
-function document(_releaseId: string, type: string, record: Record<string, unknown>, location: Record<string, unknown> | undefined, weight: number) {
+function document(
+  _releaseId: string,
+  type: string,
+  record: Record<string, unknown>,
+  location: Record<string, unknown> | undefined,
+  weight: number,
+  fallbackCampusId?: string,
+) {
   const title = String(record.displayName ?? record.id);
+  const searchable = [title, record.summary, record.businessType, merchantSearchText(record.contentJson)]
+    .filter(Boolean)
+    .join(" ");
   return {
     documentType: type, entityId: String(record.id), title,
     subtitle: location?.location_hint ? String(location.location_hint) : null,
-    normalizedText: normalizeSearchText(`${title} ${record.summary ?? ""} ${record.businessType ?? ""}`), pinyin: null,
-    campusId: String(record.campusId ?? location?.campus_id ?? "") || null,
+    normalizedText: normalizeSearchText(searchable), pinyin: null,
+    campusId: String(record.campusId ?? location?.campus_id ?? fallbackCampusId ?? "") || null,
     buildingPlaceId: String(record.hostPlaceId ?? location?.building_place_id ?? "") || null,
     floorId: String(record.floorId ?? location?.floor_id ?? "") || null,
     facets: [type, record.kindId, record.facilityTypeId, record.businessType].filter(Boolean),
     mapTarget: location ? { type: "locationAnchor", id: location.id } : { type, id: record.id },
     rankingWeight: weight,
   };
+}
+
+/** content_json summary / stall code is what people type when searching for an outlet. */
+function merchantSearchText(contentJson: unknown): string {
+  if (typeof contentJson !== "string") return "";
+  const content = parseJson<Record<string, unknown> | null>(contentJson, null);
+  if (!content) return "";
+  return [content.summary, content.stallCode]
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
 }
 
 function normalizeJsonFields(record: Record<string, unknown>) {

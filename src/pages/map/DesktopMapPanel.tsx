@@ -1,4 +1,4 @@
-import { Building2, Navigation, X } from "lucide-react";
+import { Building2, ChevronRight, Navigation, Store, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -87,11 +87,15 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
 export function PoiMapCard({
   building,
   onClose,
+  onOpenMerchants,
 }: {
   building: MapBuilding;
   onClose: () => void;
+  /** 打开楼内商户（桌面端详情面板）。 */
+  onOpenMerchants?: () => void;
 }) {
   const navigate = useNavigate();
+  const merchantCount = building.merchants.length;
   return (
     <div className="absolute bottom-6 left-6 z-30 w-[300px] rounded-2xl bg-surface p-4 shadow-floating">
       <div className="flex items-start justify-between gap-2">
@@ -110,6 +114,26 @@ export function PoiMapCard({
           <X size={14} />
         </button>
       </div>
+      {/* 楼内商户入口（release manifest merchants 归到本楼） */}
+      {merchantCount > 0 ? (
+        <button
+          type="button"
+          className="mt-3 flex w-full items-center gap-2.5 rounded-xl bg-page px-3 py-2.5 text-left hover:bg-line"
+          onClick={onOpenMerchants}
+        >
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary-container text-primary">
+            <Store size={14} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-body font-medium text-ink">楼内商户 {merchantCount} 家</span>
+            <span className="mt-0.5 block truncate text-aux text-sub">
+              {building.merchants.map((merchant) => merchant.name).join("、")}
+            </span>
+          </span>
+          <ChevronRight size={15} className="shrink-0 text-sub" />
+        </button>
+      ) : null}
+
       <div className="mt-3 flex gap-2">
         {building.navigationUrls ? (
           <a
