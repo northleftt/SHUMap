@@ -28,6 +28,8 @@ export interface CollectedFloor {
   levelCode: string;
   note: string;
   facilities: CollectedFacility[];
+  /** 该层平面图照片，已上传到隔离区的 media id（最多 2 张）。 */
+  photoMediaIds?: string[];
 }
 
 export interface CollectionTask {
@@ -39,6 +41,8 @@ export interface CollectionTask {
   phone: string;
   organization: string;
   floors: CollectedFloor[];
+  /** 大门照片，已上传到隔离区的 media id（最多 3 张）。 */
+  photoMediaIds: string[];
   lockExpiresAt: string | null;
   updatedAt: string | null;
   submittedAt: string | null;
@@ -46,7 +50,7 @@ export interface CollectionTask {
 
 export type CollectionTaskMap = Record<string, CollectionTask>;
 
-type DraftPatch = Partial<Pick<CollectionTask, "openHours" | "phone" | "organization" | "floors">>;
+type DraftPatch = Partial<Pick<CollectionTask, "openHours" | "phone" | "organization" | "floors" | "photoMediaIds">>;
 
 function emptyTask(buildingId: string, assignee: string): CollectionTask {
   return {
@@ -58,6 +62,7 @@ function emptyTask(buildingId: string, assignee: string): CollectionTask {
     phone: "",
     organization: "",
     floors: [],
+    photoMediaIds: [],
     lockExpiresAt: null,
     updatedAt: new Date().toISOString(),
     submittedAt: null,
@@ -70,6 +75,7 @@ function payloadOf(task: CollectionTask): Record<string, unknown> {
     phone: task.phone,
     organization: task.organization,
     floors: task.floors,
+    photoMediaIds: task.photoMediaIds,
   };
 }
 
@@ -84,6 +90,9 @@ function fromDto(dto: CollectionTaskDto, cached?: CollectionTask): CollectionTas
     phone: typeof payload.phone === "string" ? payload.phone : (cached?.phone ?? ""),
     organization: typeof payload.organization === "string" ? payload.organization : (cached?.organization ?? ""),
     floors: Array.isArray(payload.floors) ? (payload.floors as CollectedFloor[]) : (cached?.floors ?? []),
+    photoMediaIds: Array.isArray(payload.photoMediaIds)
+      ? (payload.photoMediaIds as string[])
+      : (cached?.photoMediaIds ?? []),
     lockExpiresAt: dto.lockExpiresAt,
     updatedAt: dto.updatedAt,
     submittedAt: dto.submittedAt,

@@ -1,5 +1,5 @@
 import { Building2, ChevronLeft, ChevronRight, Clock, Heart, Navigation, Phone, Store, Wallet } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getPlace } from "../../lib/api/public";
 import type { OperationalEvent } from "../../lib/api/types";
@@ -9,7 +9,7 @@ import { SeverityBanner, severityOf } from "../../components/ui/SeverityBanner";
 import { facilityIcon } from "../../lib/facilityIcons";
 import { useAsyncData } from "../../lib/hooks/useAsyncData";
 import { useFavorites } from "../../lib/storage/favorites";
-import type { MapBuilding, MerchantSummary } from "../../lib/types";
+import type { MapBuilding, MerchantSummary, PoiDetailData } from "../../lib/types";
 import { categoryLabel } from "./category";
 
 const FACT_ICONS = [Clock, Building2, Phone];
@@ -138,21 +138,8 @@ export function PoiDetailSheet({
       ) : null}
 
       <div className="px-5">
-        {/* 照片区：单张通宽 + 分页点 */}
-        <div className="mt-4">
-          {media.length > 0 ? (
-            <img src={media[0].url} alt={media[0].alt ?? building.name} className="h-44 w-full rounded-xl object-cover" />
-          ) : (
-            <div className="grid h-44 w-full place-items-center rounded-xl bg-line/60 text-body text-sub">实拍图</div>
-          )}
-          {media.length > 1 ? (
-            <div className="mt-2 flex justify-center gap-1.5">
-              {media.map((item, index) => (
-                <span key={index} className={`h-1.5 w-1.5 rounded-full ${index === 0 ? "bg-primary" : "bg-line"}`} />
-              ))}
-            </div>
-          ) : null}
-        </div>
+        {/* 照片区：横滑轮播 + 真实分页点 */}
+        <PhotoCarousel alt={building.name} media={media} />
 
         {/* 信息字段行 */}
         {facts.length > 0 ? (
@@ -234,6 +221,82 @@ export function PoiDetailSheet({
           <p className="mt-4 text-body leading-relaxed text-ink">{building.detail.description}</p>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * M2 照片区：横滑轮播 + 真实分页点。
+ *
+ * 用 CSS scroll-snap 做吸附（不引手势库），滚动时按容器宽度换算当前页更新分页点；
+ * 点击分页点用 scrollTo 回滚到对应页。数据源同时兼容 place content 里的外链 URL 和
+ * `/api/public/media/:id` 相对路径——后者是用户提交照片被审核采纳后发布的地址。
+ */
+function PhotoCarousel({
+  media,
+  alt,
+}: {
+  media: PoiDetailData["media"];
+  alt: string;
+}) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(0);
+  // 图片可能 404（外链失效 / media 尚未发布），失败的整张跳过而不是留白框
+  const [broken, setBroken] = useState<Set<string>>(new Set());
+
+  const usable = media.filter((item) => !broken.has(item.url));
+
+  if (usable.length === 0) {
+    return (
+      <div className="mt-4">
+        <div className="grid h-44 w-full place-items-center rounded-xl bg-line/60 text-body text-sub">实拍图</div>
+      </div>
+    );
+  }
+
+  const current = Math.min(page, usable.length - 1);
+
+  return (
+    <div className="mt-4">
+      <div
+        className="flex h-44 w-full snap-x snap-mandatory gap-2 overflow-x-auto scroll-smooth rounded-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onScroll={(event) => {
+          const track = event.currentTarget;
+          const width = track.clientWidth;
+          if (width > 0) setPage(Math.round(track.scrollLeft / width));
+        }}
+        ref={trackRef}
+      >
+        {usable.map((item, index) => (
+          <img
+            alt={item.alt?.trim() || `${alt} 实拍图 ${index + 1}`}
+            className="h-44 w-full shrink-0 snap-start rounded-xl object-cover"
+            key={item.url}
+            loading={index === 0 ? "eager" : "lazy"}
+            onError={() => setBroken((cur) => new Set(cur).add(item.url))}
+            src={item.url}
+          />
+        ))}
+      </div>
+      {usable.length > 1 ? (
+        <div className="mt-2 flex justify-center gap-1.5">
+          {usable.map((item, index) => (
+            <button
+              aria-current={index === current}
+              aria-label={`查看第 ${index + 1} 张照片`}
+              className={`h-1.5 rounded-full transition-all ${index === current ? "w-3 bg-primary" : "w-1.5 bg-line"}`}
+              key={item.url}
+              onClick={() => {
+                const track = trackRef.current;
+                if (!track) return;
+                track.scrollTo({ left: index * track.clientWidth, behavior: "smooth" });
+                setPage(index);
+              }}
+              type="button"
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

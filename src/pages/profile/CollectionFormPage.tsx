@@ -1,16 +1,22 @@
-import { Camera, ClipboardList, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ClipboardList, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SheetModal } from "../../components/ui/SheetModal";
 import { facilityIcon } from "../../lib/facilityIcons";
+import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import {
   useCollectionTasks,
   type CollectedFacility,
   type CollectedFloor,
 } from "../../lib/storage/collectionTasks";
+
+/** 与 worker 端 collections.ts 的 MAX_ENTRANCE_PHOTOS / MAX_FLOOR_PHOTOS 一致。 */
+const MAX_ENTRANCE_PHOTOS = 3;
+const MAX_FLOOR_PHOTOS = 2;
 
 const FACILITY_TYPE_OPTIONS = [
   { code: "restroom", label: "卫生间" },
@@ -32,6 +38,65 @@ function nextLocalId(prefix: string): string {
   return `local_${prefix}_${Date.now().toString(36)}_${facilitySeq}`;
 }
 
+/**
+ * 采集照片槽位：已保存在草稿里的 media id + 本次新选的上传。
+ *
+ * 草稿里只有 id（字节早已经 POST /api/public/media 落到隔离区），刷新后拿不回本地
+ * 预览，所以已保存的那部分用 `/api/public/media/:id` 占位——审核通过后这个地址才
+ * 真正可读，在此之前显示为「已上传」缩略占位。
+ */
+function CollectionPhotoField({
+  committed,
+  maximum,
+  onCommittedChange,
+  uploads,
+  disabled = false,
+}: {
+  committed: string[];
+  maximum: number;
+  onCommittedChange: (ids: string[]) => void;
+  uploads: ReturnType<typeof usePhotoUploads>;
+  disabled?: boolean;
+}) {
+  const slotsLeft = Math.max(0, maximum - committed.length - uploads.photos.length);
+  return (
+    <div className="mt-2.5 space-y-2">
+      {committed.length ? (
+        <div className="flex flex-wrap gap-3">
+          {committed.map((mediaId) => (
+            <div key={mediaId} className="relative h-20 w-20 overflow-hidden rounded-2xl bg-line/70">
+              <div className="grid h-full w-full place-items-center text-center text-[11px] leading-tight text-sub">
+                已上传
+              </div>
+              {disabled ? null : (
+                <button
+                  aria-label="移除照片"
+                  className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/55 text-white"
+                  onClick={() => onCommittedChange(committed.filter((id) => id !== mediaId))}
+                  type="button"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <PhotoPicker
+        disabled={disabled}
+        onPick={uploads.addFiles}
+        onRemove={uploads.remove}
+        onRetry={uploads.retry}
+        photos={uploads.photos}
+        slotsLeft={slotsLeft}
+      />
+      {uploads.failedCount ? (
+        <p className="text-aux text-error">{uploads.failedCount} 张照片上传失败，可点击缩略图重试；不影响文字提交。</p>
+      ) : null}
+    </div>
+  );
+}
+
 /** M13 楼层详情弹卡：位置描述 + 设施行 + 添加设施。 */
 function FloorDetailModal({
   floor,
@@ -44,8 +109,14 @@ function FloorDetailModal({
 }) {
   const [draft, setDraft] = useState<CollectedFloor | null>(floor);
   const [addingType, setAddingType] = useState(false);
+  const floorUploads = usePhotoUploads(MAX_FLOOR_PHOTOS);
+  const { reset: resetFloorUploads } = floorUploads;
 
-  useEffect(() => setDraft(floor), [floor]);
+  // 这张卡片常驻挂载（无楼层时渲染 null），切换楼层时必须清掉上一层的待上传项。
+  useEffect(() => {
+    setDraft(floor);
+    resetFloorUploads();
+  }, [floor, resetFloorUploads]);
   if (!floor || !draft) return null;
 
   const updateFacility = (id: string, patch: Partial<CollectedFacility>) => {
@@ -151,22 +222,23 @@ function FloorDetailModal({
           </button>
         )}
 
-        {/* 现场照片（UI-only） */}
         <h3 className="mt-5 text-emphasis">现场照片（需要：该层平面图照片）</h3>
-        <div className="mt-2.5 flex gap-3">
-          <div className="grid h-20 w-20 place-items-center rounded-2xl bg-line/70 text-sub">
-            <Camera size={24} />
-          </div>
-          <div className="grid h-20 w-20 place-items-center rounded-2xl border-2 border-dashed border-line text-sub">
-            <Plus size={20} />
-          </div>
-        </div>
+        <CollectionPhotoField
+          committed={draft.photoMediaIds ?? []}
+          maximum={MAX_FLOOR_PHOTOS}
+          onCommittedChange={(ids) => setDraft({ ...draft, photoMediaIds: ids })}
+          uploads={floorUploads}
+        />
 
         <button
           type="button"
           className="mt-6 w-full rounded-full bg-primary py-3 text-body font-semibold text-white active:bg-primary-pressed"
           onClick={() => {
-            onSave(draft);
+            // 新上传的照片在保存时并入该层，超出上限的多余项丢弃。
+            onSave({
+              ...draft,
+              photoMediaIds: [...(draft.photoMediaIds ?? []), ...floorUploads.mediaIds].slice(0, MAX_FLOOR_PHOTOS),
+            });
             onClose();
           }}
         >
@@ -192,6 +264,23 @@ export function CollectionFormPage() {
   const [editingFloor, setEditingFloor] = useState<CollectedFloor | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const entranceUploads = usePhotoUploads(MAX_ENTRANCE_PHOTOS);
+  // 本次会话上传成功的 id：用来把「草稿里已有的」和「刚上传的」区分开，
+  // 这样删除一个待上传项时也能把它从草稿里摘掉。
+  const sessionIds = useRef(new Set<string>());
+  for (const mediaId of entranceUploads.mediaIds) sessionIds.current.add(mediaId);
+
+  const draftPhotoIds = task?.photoMediaIds ?? [];
+  const entranceCommitted = draftPhotoIds.filter((id) => !sessionIds.current.has(id));
+  const desiredPhotoIds = [...entranceCommitted, ...entranceUploads.mediaIds].slice(0, MAX_ENTRANCE_PHOTOS);
+
+  // 大门照片没有独立的「保存」按钮，上传完成 / 删除后直接同步进采集草稿。
+  const desiredKey = desiredPhotoIds.join(",");
+  useEffect(() => {
+    if (!task || task.status !== "collecting" || !task.owned) return;
+    if (desiredKey === draftPhotoIds.join(",")) return;
+    saveDraft(buildingId, { photoMediaIds: desiredKey ? desiredKey.split(",") : [] });
+  }, [buildingId, desiredKey, draftPhotoIds, saveDraft, task]);
 
   if (!task) {
     return (
@@ -300,16 +389,17 @@ export function CollectionFormPage() {
           ) : null}
         </div>
 
-        {/* 现场照片（UI-only） */}
+        {/* 大门照片：上传到隔离区，审核采纳后才公开 */}
         <h2 className="mt-5 text-emphasis">现场照片（需要：大门照片）</h2>
-        <div className="mt-2.5 flex gap-3">
-          <div className="grid h-20 w-20 place-items-center rounded-2xl bg-line/70 text-sub">
-            <Camera size={24} />
-          </div>
-          <div className="grid h-20 w-20 place-items-center rounded-2xl border-2 border-dashed border-line text-sub">
-            <Plus size={20} />
-          </div>
-        </div>
+        <CollectionPhotoField
+          committed={entranceCommitted}
+          disabled={readOnly}
+          maximum={MAX_ENTRANCE_PHOTOS}
+          onCommittedChange={(ids) =>
+            saveDraft(buildingId, { photoMediaIds: [...ids, ...entranceUploads.mediaIds].slice(0, MAX_ENTRANCE_PHOTOS) })
+          }
+          uploads={entranceUploads}
+        />
 
         {/* 操作 */}
         {readOnly ? (

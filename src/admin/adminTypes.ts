@@ -237,6 +237,13 @@ export interface TransitResponse {
 // Submissions
 // ---------------------------------------------------------------------------
 
+/** 一条提交关联的照片。scope/status 用来提示「尚在隔离区」还是「已发布」。 */
+export interface SubmissionPhotoRow {
+  mediaId: string;
+  bucketScope: string;
+  status: string;
+}
+
 export interface SubmissionRow {
   id: string;
   targetType: string;
@@ -248,4 +255,5 @@ export interface SubmissionRow {
   status: string;
   createdAt: string;
   reviewedAt: string | null;
+  photos?: SubmissionPhotoRow[];
 }

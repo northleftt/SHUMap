@@ -1,6 +1,6 @@
 import { useState } from "react";
 import * as admin from "../../lib/api/admin";
-import type { SubmissionRow } from "../adminTypes";
+import type { SubmissionPhotoRow, SubmissionRow } from "../adminTypes";
 import {
   Chip,
   EmptyState,
@@ -78,10 +78,80 @@ function payloadFields(payload: Record<string, unknown>): Array<{ key: string; l
   return fields;
 }
 
+/**
+ * 提交照片区：缩略图 + 点击看大图。
+ *
+ * 原图走 GET /api/admin/media/:id/content（带管理会话，任意 scope 可读），
+ * 未采纳前照片还在隔离区，公共端读不到，所以这里不能用 /api/public/media/:id。
+ */
+function SubmissionPhotos({
+  photos,
+  pending,
+  adopt,
+  onAdoptChange,
+}: {
+  photos: SubmissionPhotoRow[];
+  pending: boolean;
+  adopt: boolean;
+  onAdoptChange: (next: boolean) => void;
+}) {
+  const [zoomed, setZoomed] = useState<string | null>(null);
+  if (!photos.length) return null;
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-3">
+        <p className="text-emphasis">提交照片（{photos.length}）</p>
+        {pending ? (
+          <label className="flex items-center gap-1.5 text-label text-sub">
+            <input
+              checked={adopt}
+              className="h-4 w-4 accent-primary"
+              onChange={(event) => onAdoptChange(event.target.checked)}
+              type="checkbox"
+            />
+            采纳并公开这些照片
+          </label>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        {photos.map((photo) => (
+          <button
+            className="relative h-24 w-24 overflow-hidden rounded-lg border border-line"
+            key={photo.mediaId}
+            onClick={() => setZoomed(photo.mediaId)}
+            title={`${photo.bucketScope} / ${photo.status}`}
+            type="button"
+          >
+            <img alt="用户提交照片" className="h-full w-full object-cover" src={admin.adminMediaContentUrl(photo.mediaId)} />
+            {photo.bucketScope === "public" ? (
+              <span className="absolute bottom-0 left-0 right-0 bg-black/55 py-0.5 text-center text-[10px] text-white">已公开</span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 text-label text-sub">
+        照片在采纳前存放于隔离区，公共接口不可读；采纳后复制到公共前缀并写入地点修订的照片区。
+      </p>
+
+      {zoomed ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-8"
+          onClick={() => setZoomed(null)}
+          role="presentation"
+        >
+          <img alt="用户提交照片原图" className="max-h-full max-w-full rounded-lg" src={admin.adminMediaContentUrl(zoomed)} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SubmissionsPage() {
   const [filter, setFilter] = useState<string>("todo");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adopted, setAdopted] = useState<Set<string>>(new Set());
+  const [adoptPhotos, setAdoptPhotos] = useState(true);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -106,6 +176,7 @@ export function SubmissionsPage() {
   const selected = items.find((s) => s.id === selectedId) ?? null;
   const selectedPayload = selected ? safeParse(selected.payloadJson) : {};
   const fields = selected ? payloadFields(selectedPayload) : [];
+  const photos = selected?.photos ?? [];
   const selectedMeta = selected ? (STATUS_META[selected.status] ?? STATUS_META.pending) : null;
   const selectedPending = selected ? selected.status === "pending" || selected.status === "in_review" : false;
   const canGenerateRevision = selected?.targetType === "place" && (
@@ -117,6 +188,7 @@ export function SubmissionsPage() {
     setNote("");
     setError("");
     setAdopted(new Set(payloadFields(safeParse(submission.payloadJson)).map((f) => f.key)));
+    setAdoptPhotos(true);
   }
 
   async function decide(decision: "accept" | "partial" | "reject") {
@@ -125,7 +197,11 @@ export function SubmissionsPage() {
     setBusy(true);
     setError("");
     try {
-      const fieldDecisions = Object.fromEntries(fields.map((f) => [f.key, adopted.has(f.key) ? "adopt" : "skip"]));
+      const fieldDecisions: Record<string, unknown> = Object.fromEntries(
+        fields.map((f) => [f.key, adopted.has(f.key) ? "adopt" : "skip"]),
+      );
+      // photos 是给 worker 看的开关：partial 时只有 adopt 才把照片提升为公共可读。
+      if (photos.length) fieldDecisions.photos = adoptPhotos ? "adopt" : "skip";
       await admin.reviewSubmission(selected.id, {
         decision,
         note: note.trim() || undefined,
@@ -230,6 +306,13 @@ export function SubmissionsPage() {
                   <EmptyState label="（无文字描述）" />
                 )}
               </div>
+
+              <SubmissionPhotos
+                adopt={adoptPhotos}
+                onAdoptChange={setAdoptPhotos}
+                pending={selectedPending}
+                photos={photos}
+              />
 
               {selectedPending ? (
                 <>

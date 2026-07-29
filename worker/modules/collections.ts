@@ -3,11 +3,18 @@ import { all, first } from "../lib/db";
 import { HttpError, json, readJsonLimited } from "../lib/http";
 import { enforcePublicRateLimit } from "../lib/public-rate-limit";
 import { isoNow, jsonString, makeId, objectValue, requiredString } from "../lib/values";
+import { filterAttachablePhotos, linkSubmissionPhotoStatements, normalizePhotoIds } from "./media";
 
 const LOCK_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 48 * 1024;
 const MAX_FLOORS = 40;
 const MAX_FACILITIES_PER_FLOOR = 80;
+/** 大门照片（楼宇级）。 */
+const MAX_ENTRANCE_PHOTOS = 3;
+/** 每层平面图照片。 */
+const MAX_FLOOR_PHOTOS = 2;
+/** 一次采集提交最多关联的照片总数。 */
+const MAX_COLLECTION_PHOTOS = 12;
 const FACILITY_CODES = new Set(["restroom", "elevator", "drinking_water", "printer", "study_area", "vending_machine", "power_bank"]);
 
 interface CollectionBody {
@@ -165,6 +172,9 @@ export async function submitCollectionTask(request: Request, env: Env, buildingI
 
   const submissionId = makeId("submission");
   const now = isoNow();
+  // 采集草稿里的照片 id 可能已经被上一次提交占用（needs_recollection 后重交），
+  // 所以这里用宽松过滤：挂得上的挂，挂不上的静默丢弃，不让整次提交失败。
+  const photoMediaIds = await filterAttachablePhotos(env, collectionPhotoIds(payload), MAX_COLLECTION_PHOTOS);
   await env.DB.batch([
     env.DB.prepare(
       `insert into content_submissions(id,target_type,target_id,payload_json,submitter_name,status,created_at)
@@ -176,6 +186,7 @@ export async function submitCollectionTask(request: Request, env: Env, buildingI
       `update collection_tasks set status='submitted',payload_json=?,lock_expires_at=null,submission_id=?,updated_at=?,submitted_at=?
         where building_place_id=? and device_id=? and status='collecting' and lock_expires_at>?`,
     ).bind(jsonString(payload), submissionId, now, now, buildingId, deviceId, now),
+    ...linkSubmissionPhotoStatements(env, submissionId, photoMediaIds),
   ]);
   const submitted = await getRow(env, buildingId);
   if (!submitted) throw new HttpError(404, "not_found", "Collection task does not exist");
@@ -191,7 +202,7 @@ export async function submitCollectionTask(request: Request, env: Env, buildingI
 
 function validatePayload(value: unknown): Record<string, unknown> {
   const payload = objectValue(value, "payload");
-  const allowed = new Set(["openHours", "phone", "organization", "floors"]);
+  const allowed = new Set(["openHours", "phone", "organization", "floors", "photoMediaIds"]);
   for (const key of Object.keys(payload)) {
     if (!allowed.has(key)) throw new HttpError(400, "validation_error", `Unknown collection field: ${key}`);
   }
@@ -217,6 +228,8 @@ function validatePayload(value: unknown): Record<string, unknown> {
     levelCodes.add(normalizedLevelCode);
     const note = typeof floor.note === "string" ? floor.note.trim() : "";
     if (note.length > 500) throw new HttpError(400, "validation_error", `floors[${floorIndex}].note is too long`);
+    // 楼层平面图照片：草稿里只存 media id，字节走 POST /api/public/media。
+    const floorPhotos = normalizePhotoIds(floor.photoMediaIds, MAX_FLOOR_PHOTOS);
     if (!Array.isArray(floor.facilities) || floor.facilities.length > MAX_FACILITIES_PER_FLOOR) {
       throw new HttpError(400, "validation_error", `floors[${floorIndex}].facilities is invalid`);
     }
@@ -234,10 +247,33 @@ function validatePayload(value: unknown): Record<string, unknown> {
       facilityKeys.add(facilityKey);
       return { id: facilityId, typeCode, name, locationText };
     });
-    return { id, levelCode, note, facilities };
+    return { id, levelCode, note, facilities, photoMediaIds: floorPhotos };
   });
+  // 大门照片（楼宇级）。
+  result.photoMediaIds = normalizePhotoIds(payload.photoMediaIds, MAX_ENTRANCE_PHOTOS);
   if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BODY_BYTES) {
     throw new HttpError(413, "payload_too_large", "Collection payload must be at most 48 KiB");
   }
   return result;
+}
+
+/**
+ * 一次采集里出现的所有照片 id：大门照片 + 每层平面图照片，按出现顺序。
+ * validatePayload 已经保证结构与单处上限，这里只做扁平化。
+ */
+function collectionPhotoIds(payload: Record<string, unknown>): string[] {
+  const ids: string[] = [];
+  const push = (value: unknown) => {
+    if (!Array.isArray(value)) return;
+    for (const raw of value) {
+      if (typeof raw === "string" && !ids.includes(raw)) ids.push(raw);
+    }
+  };
+  push(payload.photoMediaIds);
+  if (Array.isArray(payload.floors)) {
+    for (const floor of payload.floors) {
+      if (floor && typeof floor === "object") push((floor as Record<string, unknown>).photoMediaIds);
+    }
+  }
+  return ids.slice(0, MAX_COLLECTION_PHOTOS);
 }

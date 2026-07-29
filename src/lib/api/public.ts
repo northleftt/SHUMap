@@ -8,6 +8,7 @@ import type {
   CollectionTaskDto,
   CollectionTasksResponse,
   JourneysResponse,
+  MediaUploadResult,
   OperationalEventsResponse,
   PublicPlaceListResponse,
   PublicPlaceResponse,
@@ -74,6 +75,20 @@ export function createSubmission(input: SubmissionInput, signal?: AbortSignal): 
   return apiFetch<SubmissionResult>("/api/public/submissions", {
     method: "POST",
     body: input,
+    signal,
+  });
+}
+
+/**
+ * POST /api/public/media — anonymous photo upload. Raw image bytes, no JSON envelope;
+ * the Worker sniffs the magic bytes, caps each file at 2 MiB and parks the object in
+ * the quarantine scope until a reviewer accepts the submission it is attached to.
+ */
+export function uploadPublicPhoto(blob: Blob, signal?: AbortSignal): Promise<MediaUploadResult> {
+  return apiFetch<MediaUploadResult>("/api/public/media", {
+    method: "POST",
+    rawBody: blob,
+    contentType: blob.type || "image/jpeg",
     signal,
   });
 }

@@ -359,6 +359,13 @@ export function createTransitTrip(body: Record<string, unknown>): Promise<{ id: 
 // Submissions review
 // ---------------------------------------------------------------------------
 
+/** 一条提交关联的用户照片。审核端用 GET /api/admin/media/:id/content 取原图。 */
+export interface AdminSubmissionPhoto {
+  mediaId: string;
+  bucketScope: string;
+  status: string;
+}
+
 export interface AdminSubmission {
   id: string;
   targetType: string;
@@ -370,6 +377,12 @@ export interface AdminSubmission {
   status: string;
   createdAt: string;
   reviewedAt: string | null;
+  photos: AdminSubmissionPhoto[];
+}
+
+/** GET /api/admin/media/:id/content — 任意 scope（含隔离区）的原图地址。 */
+export function adminMediaContentUrl(mediaId: string): string {
+  return `/api/admin/media/${encodeURIComponent(mediaId)}/content`;
 }
 
 export function listSubmissions(signal?: AbortSignal): Promise<ListResponse<AdminSubmission>> {

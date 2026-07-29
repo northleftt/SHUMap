@@ -372,10 +372,24 @@ export interface SubmissionInput {
   payload: Record<string, unknown>;
   submitterName?: string | null;
   submitterContact?: string | null;
+  /** Quarantined uploads from POST /api/public/media, at most 3 per submission. */
+  photoMediaIds?: string[];
 }
 
 export interface SubmissionResult {
   id: string;
+  status: string;
+  photoCount?: number;
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/public/media — anonymous photo upload (quarantine scope)
+// ---------------------------------------------------------------------------
+
+export interface MediaUploadResult {
+  mediaId: string;
+  byteSize: number;
+  contentType: string;
   status: string;
 }
 

@@ -1,11 +1,13 @@
-import { Camera, ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { createSubmission } from "../../lib/api/public";
 import type { SubmissionTargetType, TransitStop } from "../../lib/api/types";
+import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import { useIdentity } from "../../lib/storage/identity";
 import { useSubmissionsLog } from "../../lib/storage/submissionsLog";
@@ -19,7 +21,10 @@ const FEEDBACK_TYPES: Array<{ key: FeedbackType; label: string; targetType: Subm
   { key: "other", label: "其他", targetType: "place" },
 ];
 
-/** M11 用户反馈。照片上传仅 UI（submissions 限 64KiB JSON）。 */
+/** 反馈最多 3 张照片，与 worker 的 MAX_SUBMISSION_PHOTOS 一致。 */
+const MAX_PHOTOS = 3;
+
+/** M11 用户反馈。照片经 POST /api/public/media 落隔离区，审核采纳后才公开。 */
 export function FeedbackPage() {
   const navigate = useNavigate();
   const { release } = useRelease();
@@ -35,6 +40,7 @@ export function FeedbackPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const uploads = usePhotoUploads(MAX_PHOTOS);
 
   const buildings = useMemo(() => release?.buildings ?? [], [release]);
   const transitStops = useMemo(() => release?.manifest.transit.stops ?? [], [release]);
@@ -68,8 +74,9 @@ export function FeedbackPage() {
         payload: {
           feedbackType: type,
           description: content.trim(),
-          photos: 0, // 照片上传仅 UI，未实际上传
         },
+        // 上传失败的照片不在 mediaIds 里，文字提交照常进行
+        photoMediaIds: uploads.mediaIds,
         submitterName: identity.name,
         submitterContact: contact.trim() || null,
       });
@@ -194,21 +201,21 @@ export function FeedbackPage() {
           onChange={(event) => setContent(event.target.value)}
         />
 
-        {/* 补充照片（UI-only） */}
-        <h2 className="mt-5 text-emphasis">补充照片（选填）</h2>
-        <div className="mt-2.5 flex gap-3">
-          <div className="grid h-20 w-20 place-items-center rounded-2xl bg-line/70 text-sub">
-            <Camera size={26} />
-          </div>
-          {[0, 1].map((slot) => (
-            <div
-              key={slot}
-              className="grid h-20 w-20 place-items-center rounded-2xl border-2 border-dashed border-line text-sub"
-              title="照片上传暂未开放"
-            >
-              <Plus size={22} />
-            </div>
-          ))}
+        {/* 补充照片：即传即存隔离区，审核采纳后才公开 */}
+        <h2 className="mt-5 text-emphasis">补充照片（选填，最多 {MAX_PHOTOS} 张）</h2>
+        <div className="mt-2.5">
+          <PhotoPicker
+            onPick={uploads.addFiles}
+            onRemove={uploads.remove}
+            onRetry={uploads.retry}
+            photos={uploads.photos}
+            slotsLeft={uploads.slotsLeft}
+          />
+          {uploads.failedCount > 0 ? (
+            <p className="mt-2 text-aux text-sub">
+              有 {uploads.failedCount} 张照片上传失败，可点击重试；不重试也能直接提交文字反馈。
+            </p>
+          ) : null}
         </div>
 
         {/* 联系方式 */}

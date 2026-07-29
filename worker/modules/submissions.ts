@@ -4,6 +4,13 @@ import { all, first } from "../lib/db";
 import { HttpError, json, readJson, readJsonLimited } from "../lib/http";
 import { enforcePublicRateLimit } from "../lib/public-rate-limit";
 import { isoNow, jsonString, makeId, objectValue, optionalString, parseJson, requiredString, sha256 } from "../lib/values";
+import {
+  assertAttachablePhotos,
+  dropQuarantineCopies,
+  linkSubmissionPhotoStatements,
+  listSubmissionPhotos,
+  promoteSubmissionPhotos,
+} from "./media";
 
 export async function createSubmission(request: Request, env: Env): Promise<Response> {
   await enforcePublicRateLimit(request, env, "submission-create", 20);
@@ -15,6 +22,10 @@ export async function createSubmission(request: Request, env: Env): Promise<Resp
   const targetId = optionalString(body.targetId, "targetId", 100);
   if (targetType !== "new_place" && !targetId) throw new HttpError(400, "validation_error", "targetId is required");
   const payload = objectValue(body.payload, "payload");
+  // photoMediaIds 走独立通道（POST /api/public/media），payload 里只留 id 引用，
+  // 因此 64KiB 的 JSON 上限不受影响。
+  const photoMediaIds = await assertAttachablePhotos(env, payload.photoMediaIds ?? body.photoMediaIds);
+  delete payload.photoMediaIds;
   validateSubmissionPayload(payload);
   if (targetId && targetType !== "new_place") {
     const targetTables: Record<string, string> = {
@@ -27,24 +38,42 @@ export async function createSubmission(request: Request, env: Env): Promise<Resp
     if (!target) throw new HttpError(404, "target_not_found", "Submission target does not exist");
   }
   const id = makeId("submission");
-  await env.DB.prepare(
-    `insert into content_submissions(id,target_type,target_id,base_revision_id,payload_json,submitter_name,submitter_contact,status,created_at)
-     values(?,?,?,?,?,?,?,'pending',?)`,
-  ).bind(
-    id, targetType, targetId, optionalString(body.baseRevisionId, "baseRevisionId", 100), jsonString(payload),
-    optionalString(body.submitterName, "submitterName", 100), optionalString(body.submitterContact, "submitterContact", 200), isoNow(),
-  ).run();
-  return json({ id, status: "pending" }, { status: 201 });
+  await env.DB.batch([
+    env.DB.prepare(
+      `insert into content_submissions(id,target_type,target_id,base_revision_id,payload_json,submitter_name,submitter_contact,status,created_at)
+       values(?,?,?,?,?,?,?,'pending',?)`,
+    ).bind(
+      id, targetType, targetId, optionalString(body.baseRevisionId, "baseRevisionId", 100), jsonString(payload),
+      optionalString(body.submitterName, "submitterName", 100), optionalString(body.submitterContact, "submitterContact", 200), isoNow(),
+    ),
+    ...linkSubmissionPhotoStatements(env, id, photoMediaIds),
+  ]);
+  return json({ id, status: "pending", photoCount: photoMediaIds.length }, { status: 201 });
 }
 
 export async function listSubmissions(env: Env): Promise<Response> {
-  const items = await all(
+  const items = await all<Record<string, unknown>>(
     env.DB,
     `select id,target_type as targetType,target_id as targetId,base_revision_id as baseRevisionId,payload_json as payloadJson,
             submitter_name as submitterName,submitter_contact as submitterContact,status,created_at as createdAt,reviewed_at as reviewedAt
        from content_submissions order by created_at desc limit 200`,
   );
-  return json({ items });
+  // 审核端需要缩略图，所以把关联照片一次查出来按提交分组，避免 N+1。
+  const links = await all<{ submissionId: string; mediaAssetId: string; bucketScope: string; status: string }>(
+    env.DB,
+    `select sm.submission_id as submissionId,sm.media_asset_id as mediaAssetId,ma.bucket_scope as bucketScope,ma.status
+       from submission_media sm join media_assets ma on ma.id=sm.media_asset_id
+      order by sm.submission_id, sm.sort_order`,
+  );
+  const grouped = new Map<string, Array<{ mediaId: string; bucketScope: string; status: string }>>();
+  for (const link of links) {
+    const list = grouped.get(link.submissionId) ?? [];
+    list.push({ mediaId: link.mediaAssetId, bucketScope: link.bucketScope, status: link.status });
+    grouped.set(link.submissionId, list);
+  }
+  return json({
+    items: items.map((item) => ({ ...item, photos: grouped.get(String(item.id)) ?? [] })),
+  });
 }
 
 export async function reviewSubmission(request: Request, env: Env, reviewer: SessionPrincipal, submissionId: string): Promise<Response> {
@@ -59,8 +88,15 @@ export async function reviewSubmission(request: Request, env: Env, reviewer: Ses
   const now = isoNow();
   const fieldDecisions = objectValue(body.fieldDecisions, "fieldDecisions");
   const payload = parseJson<Record<string, unknown>>(String(submission.payload_json ?? "{}"), {});
+
+  // 照片随「采纳」一起发布：accept 全量放行，partial 只在勾选了 photos 时放行。
+  // 驳回（以及 partial 未勾选）保持 quarantined，公共读端因此仍然读不到。
+  const attached = await listSubmissionPhotos(env, submissionId);
+  const publishPhotos = attached.length > 0 && (decision === "accept" || fieldDecisions.photos === "adopt");
+  const promotion = publishPhotos ? await promoteSubmissionPhotos(env, submissionId) : { urls: [], statements: [] };
+
   const produced = decision !== "reject"
-    ? await buildProducedRevision(env, reviewer, submission, payload, fieldDecisions, decision)
+    ? await buildProducedRevision(env, reviewer, submission, payload, fieldDecisions, decision, promotion.urls)
     : null;
   const statements = [
     env.DB.prepare(
@@ -73,13 +109,23 @@ export async function reviewSubmission(request: Request, env: Env, reviewer: Ses
     env.DB.prepare("update content_submissions set status=?,reviewed_at=? where id=?").bind(status, now, submissionId),
   ];
   if (produced) statements.push(produced.statement);
+  statements.push(...promotion.statements);
   statements.push(
     env.DB.prepare(
       `update collection_tasks set status=?,reviewed_at=?,updated_at=? where submission_id=?`,
     ).bind(decision === "accept" && produced ? "submitted" : "needs_recollection", now, now, submissionId),
   );
   await env.DB.batch(statements);
-  return json({ id: reviewId, submissionId, status, producedRevisionType: produced?.type ?? null, producedRevisionId: produced?.id ?? null });
+  // 行已经指向 public/media/ 之后隔离区副本再无引用，删除失败不影响结果。
+  if (promotion.statements.length) await dropQuarantineCopies(env, attached);
+  return json({
+    id: reviewId,
+    submissionId,
+    status,
+    producedRevisionType: produced?.type ?? null,
+    producedRevisionId: produced?.id ?? null,
+    publishedPhotoCount: promotion.urls.length,
+  });
 }
 
 interface ProducedRevision {
@@ -95,13 +141,15 @@ async function buildProducedRevision(
   payload: Record<string, unknown>,
   fieldDecisions: Record<string, unknown>,
   decision: string,
+  /** 已提升为公共可读的照片路径（/api/public/media/:id），会并入 detail.media。 */
+  photoUrls: string[] = [],
 ): Promise<ProducedRevision | null> {
   if (submission.target_type !== "place" || typeof submission.target_id !== "string") return null;
   const collection = payload.collection;
   const detailPatch = payload.detail;
   const changes = payload.changes;
-  if (!isObject(collection) && !isObject(detailPatch) && !isObject(changes)) return null;
-  if (decision === "partial" && !Object.values(fieldDecisions).includes("adopt")) return null;
+  if (!isObject(collection) && !isObject(detailPatch) && !isObject(changes) && photoUrls.length === 0) return null;
+  if (decision === "partial" && !Object.values(fieldDecisions).includes("adopt") && photoUrls.length === 0) return null;
 
   const pending = await first<{ id: string }>(
     env.DB,
@@ -158,6 +206,19 @@ async function buildProducedRevision(
         .filter(Boolean);
       if (notes.length) content.floorNotes = notes.join("\n");
     }
+  }
+  // 已发布的用户照片并入 detail.media，随这条修订走正常审核/发布流程后出现在 M2 照片区。
+  if (photoUrls.length) {
+    const media = Array.isArray(detail.media)
+      ? detail.media.filter((item): item is Record<string, unknown> => isObject(item))
+      : [];
+    const known = new Set(media.map((item) => String(item.url ?? "")));
+    for (const url of photoUrls) {
+      if (known.has(url)) continue;
+      known.add(url);
+      media.push({ role: media.length === 0 ? "cover" : "gallery", url, alt: "", caption: "用户提供" });
+    }
+    detail.media = media;
   }
   content.detail = detail;
 

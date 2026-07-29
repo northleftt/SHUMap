@@ -7,7 +7,7 @@ import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCol
 import { createFacilityHandler, createFacilityRevisionHandler, getFacility, listFacilities } from "./modules/facilities";
 import { processQueue } from "./modules/jobs";
 import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapVersions, uploadMapContent } from "./modules/maps";
-import { getPublicMedia } from "./modules/media";
+import { createPublicMediaUpload, getAdminMediaContent, getPublicMedia } from "./modules/media";
 import { createMerchant, createMerchantRevision, getMerchant, listMerchants } from "./modules/merchants";
 import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
@@ -76,6 +76,7 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "POST" && collectionSubmit) return submitCollectionTask(request, env, collectionSubmit.id);
   const collectionTask = match(path, "/api/public/collection-tasks/:id");
   if (method === "PUT" && collectionTask) return saveCollectionTask(request, env, collectionTask.id);
+  if (method === "POST" && path === "/api/public/media") return createPublicMediaUpload(request, env);
   const media = match(path, "/api/public/media/:id");
   if (method === "GET" && media) return getPublicMedia(env, media.id);
 
@@ -204,6 +205,11 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "PUT" && mediaContent) {
     principal = await requireSession(request, env, "write:maps");
     return uploadMapContent(request, env, principal, mediaContent.id);
+  }
+  // 审核端读原图：任意 scope（含隔离区）可读，因此只对已登录的管理会话开放。
+  if (method === "GET" && mediaContent) {
+    principal = await requireSession(request, env, "read:admin");
+    return getAdminMediaContent(env, principal, mediaContent.id);
   }
   if (method === "POST" && path === "/api/admin/maps/import-jobs") {
     principal = await requireSession(request, env, "write:maps");
