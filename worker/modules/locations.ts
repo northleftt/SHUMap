@@ -1,5 +1,5 @@
 import type { EntityLocationType, LocationInput, SessionPrincipal } from "../domain/types";
-import type { Env } from "../types/cloudflare";
+import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { assertExists, first, run } from "../lib/db";
 import { HttpError } from "../lib/http";
 import { isoNow, jsonString, makeId } from "../lib/values";
@@ -20,10 +20,33 @@ export async function createLocation(
   principal: SessionPrincipal,
   isPrimary: boolean,
 ): Promise<{ anchorId: string; bindingId: string }> {
+  const plan = await planLocation(env, entityType, entityId, input, principal, isPrimary, isoNow());
+  const statements = [];
+  if (isPrimary) {
+    statements.push(env.DB.prepare("update entity_locations set is_primary=0 where entity_type=? and entity_id=?").bind(entityType, entityId));
+  }
+  statements.push(...plan.statements);
+  await env.DB.batch(statements);
+  return { anchorId: plan.anchorId, bindingId: plan.bindingId };
+}
+
+/**
+ * Validates a location input and returns the anchor + binding inserts without
+ * running them, so callers can compose several locations into a single
+ * transactional `DB.batch` (used by the operational event replace-all edit).
+ */
+export async function planLocation(
+  env: Env,
+  entityType: EntityLocationType,
+  entityId: string,
+  input: LocationInput,
+  principal: SessionPrincipal,
+  isPrimary: boolean,
+  now: string,
+): Promise<{ anchorId: string; bindingId: string; statements: D1PreparedStatement[] }> {
   validateInput(input);
   await validateHierarchy(env, input);
 
-  const now = isoNow();
   const anchorId = makeId("anchor");
   const bindingId = makeId("eloc");
   const geometryType = input.geometryType ?? "Point";
@@ -32,10 +55,7 @@ export async function createLocation(
     : "unverified";
   const geometryJson = input.geometry === undefined || input.geometry === null ? null : jsonString(input.geometry);
 
-  const statements = [];
-  if (isPrimary) {
-    statements.push(env.DB.prepare("update entity_locations set is_primary=0 where entity_type=? and entity_id=?").bind(entityType, entityId));
-  }
+  const statements: D1PreparedStatement[] = [];
   statements.push(
     env.DB.prepare(
       `insert into location_anchors(
@@ -54,8 +74,7 @@ export async function createLocation(
       "insert into entity_locations(id,entity_type,entity_id,anchor_id,role,is_primary,valid_from,valid_to,created_at) values(?,?,?,?,?,?,?,?,?)",
     ).bind(bindingId, entityType, entityId, anchorId, input.role, isPrimary ? 1 : 0, input.validFrom ?? null, input.validTo ?? null, now),
   );
-  await env.DB.batch(statements);
-  return { anchorId, bindingId };
+  return { anchorId, bindingId, statements };
 }
 
 export async function retireEntityLocations(env: Env, entityType: EntityLocationType, entityId: string): Promise<void> {

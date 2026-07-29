@@ -52,6 +52,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/content")) return "内容管理";
   if (pathname.startsWith("/admin/review")) return "审核中心";
   if (pathname.startsWith("/admin/operations/new")) return "新建运营事件 · 地图编辑器";
+  if (pathname.endsWith("/edit") && pathname.startsWith("/admin/operations/")) return "运营事件 · 编辑几何";
   if (pathname.startsWith("/admin/operations/")) return "运营信息 · 事件详情与进展";
   if (pathname.startsWith("/admin/operations")) return "运营信息管理";
   if (pathname.startsWith("/admin/transit")) return "校车时刻";
@@ -223,6 +224,7 @@ export function AdminPage() {
         <Route path="review" element={hasPermission("review:content") ? <ReviewPage /> : <Navigate to="/admin" replace />} />
         <Route path="operations" element={<OperationsPage />} />
         <Route path="operations/new" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />
+        <Route path="operations/:id/edit" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />
         <Route path="operations/:id" element={<OperationDetailPage />} />
         <Route path="transit" element={hasPermission("write:transit") ? <TransitPage /> : <Navigate to="/admin" replace />} />
         <Route path="maps" element={hasPermission("write:maps") ? <MapsPage /> : <Navigate to="/admin" replace />} />

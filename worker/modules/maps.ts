@@ -113,6 +113,26 @@ export async function enqueueMapImport(
   return json({ id: jobId, status: "queued" }, { status: 202 });
 }
 
+/**
+ * GET /api/admin/map-features?mapVersionId=... — features of one imported map
+ * version. geometry_json/bbox_json are populated by the SVG import parser; they
+ * stay null for sources it cannot resolve to coordinates.
+ */
+export async function listMapFeatures(request: Request, env: Env): Promise<Response> {
+  const mapVersionId = requiredString(new URL(request.url).searchParams.get("mapVersionId"), "mapVersionId", 100);
+  const version = await first<{ id: string }>(env.DB, "select id from map_versions where id=?", [mapVersionId]);
+  if (!version) throw new HttpError(404, "not_found", "Map version does not exist");
+  const items = await all(
+    env.DB,
+    `select id,map_version_id as mapVersionId,stable_feature_key as stableFeatureKey,source_element_id as sourceElementId,
+            feature_kind as kind,label,geometry_json as geometryJson,bbox_json as bboxJson,shape_hash as shapeHash,
+            metadata_json as metadataJson
+       from map_features where map_version_id=? order by feature_kind, coalesce(label, source_element_id)`,
+    [mapVersionId],
+  );
+  return json({ items });
+}
+
 export async function listMapVersions(env: Env): Promise<Response> {
   const items = await all(
     env.DB,

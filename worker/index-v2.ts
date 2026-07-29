@@ -6,10 +6,10 @@ import { recordAnalyticsEvent } from "./modules/analytics";
 import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCollectionTask } from "./modules/collections";
 import { createFacilityHandler, createFacilityRevisionHandler, getFacility, listFacilities } from "./modules/facilities";
 import { processQueue } from "./modules/jobs";
-import { enqueueMapImport, createMapUploadIntent, listMapVersions, uploadMapContent } from "./modules/maps";
+import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapVersions, uploadMapContent } from "./modules/maps";
 import { getPublicMedia } from "./modules/media";
 import { createMerchant, createMerchantRevision, getMerchant, listMerchants } from "./modules/merchants";
-import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents } from "./modules/operations";
+import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
 import { getCurrentRelease, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
@@ -192,6 +192,10 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return listMapVersions(env);
   }
+  if (method === "GET" && path === "/api/admin/map-features") {
+    await requireSession(request, env, "read:admin");
+    return listMapFeatures(request, env);
+  }
   if (method === "POST" && path === "/api/admin/maps/upload-intents") {
     principal = await requireSession(request, env, "write:maps");
     return createMapUploadIntent(request, env, principal);
@@ -218,6 +222,11 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && eventReview) {
     principal = await requireSession(request, env, "review:content");
     return decideOperationalEvent(request, env, principal, eventReview.id, requestId);
+  }
+  const eventLocations = match(path, "/api/admin/operations/:id/locations");
+  if (method === "PUT" && eventLocations) {
+    principal = await requireSession(request, env, "write:content");
+    return replaceOperationalEventLocations(request, env, principal, eventLocations.id, requestId);
   }
   const eventUpdates = match(path, "/api/admin/operations/:id/updates");
   if (method === "POST" && eventUpdates) {

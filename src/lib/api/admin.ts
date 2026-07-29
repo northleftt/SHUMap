@@ -225,6 +225,27 @@ export function uploadMediaContent(
   );
 }
 
+export interface MapFeatureRow {
+  id: string;
+  mapVersionId: string;
+  stableFeatureKey: string | null;
+  sourceElementId: string | null;
+  kind: string;
+  label: string | null;
+  geometryJson: string | null;
+  bboxJson: string | null;
+  shapeHash: string | null;
+  metadataJson: string;
+}
+
+/** GET /api/admin/map-features?mapVersionId=… — features of one imported version. */
+export function listMapFeatures(mapVersionId: string, signal?: AbortSignal): Promise<ListResponse<MapFeatureRow>> {
+  return apiFetch<ListResponse<MapFeatureRow>>(
+    `/api/admin/map-features?mapVersionId=${encodeURIComponent(mapVersionId)}`,
+    { signal },
+  );
+}
+
 export function createImportJob(body: {
   mediaAssetId: string;
   campusId?: string | null;
@@ -246,6 +267,39 @@ export function listAdminOperations<T = unknown>(signal?: AbortSignal): Promise<
 
 export function createOperation(body: Record<string, unknown>): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/api/admin/operations", { method: "POST", body });
+}
+
+/** One row of GET /api/admin/operations `locations[]` (live anchors, not manifest). */
+export interface OperationLocationRow {
+  id: string;
+  role: string;
+  geometryType: string;
+  geometryJson: string | null;
+  crs: string | null;
+  campusId: string | null;
+}
+
+export interface OperationLocationInput {
+  role: string;
+  campusId?: string | null;
+  mapVersionId?: string | null;
+  geometryType: string;
+  geometry: unknown;
+  crs: string;
+}
+
+/**
+ * PUT /api/admin/operations/:id/locations — replace-all: the submitted array
+ * becomes the event's complete geometry set, and an empty array clears it.
+ */
+export function replaceOperationLocations(
+  id: string,
+  locations: OperationLocationInput[],
+): Promise<{ id: string; removed: number; locations: Array<{ id: string; role: string; isPrimary: boolean }> }> {
+  return apiFetch(`/api/admin/operations/${encodeURIComponent(id)}/locations`, {
+    method: "PUT",
+    body: { locations },
+  });
 }
 
 export function reviewOperation(id: string, body: { decision: "approve" | "reject" }): Promise<unknown> {
