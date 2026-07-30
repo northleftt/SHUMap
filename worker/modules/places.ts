@@ -36,8 +36,8 @@ export async function listPlaces(env: Env): Promise<Response> {
 export async function getPlace(env: Env, id: string): Promise<Response> {
   const place = await first<Record<string, unknown>>(
     env.DB,
-    `select p.*,r.display_name,r.summary,r.description,r.content_json,r.source_id,r.editorial_status
-       from places p left join place_revisions r on r.id=coalesce(
+    `select p.*,b.building_code,r.display_name,r.summary,r.description,r.content_json,r.source_id,r.editorial_status
+       from places p left join buildings b on b.place_id=p.id left join place_revisions r on r.id=coalesce(
          (select pending.id from place_revisions pending
            where pending.place_id=p.id and pending.editorial_status in ('draft','in_review')
            order by case pending.editorial_status when 'in_review' then 0 else 1 end,pending.revision_no desc limit 1),
@@ -121,6 +121,111 @@ export async function createPlaceHandler(
   }
   await audit(env, principal, "place.create", "place", placeId, requestId, null, { ...body, revisionId });
   return json({ id: placeId, revisionId, editorialStatus: "draft" }, { status: 201 });
+}
+
+/**
+ * PATCH /api/admin/places/:id — 结构字段直接生效，不走修订流。
+ *
+ * 设计边界：place_revisions 只承载 displayName/summary/description/content/sourceId
+ * 这些「文案」字段，实体的骨架（所属类型、校区、稳定编码、楼栋编码、检索别名）
+ * 没有任何列可以进修订表，因此无法用「提交草稿 → 审核 → 发布」承载。这些字段
+ * 一律即时写库并记审计；正文改动仍旧只能经修订流。
+ *
+ * 别名走 place_names 的 replace 语义：删掉全部 name_type='alias' 行后按入参重建。
+ * name_type='primary' 那行由 displayName 的既有机制维护，这里不碰。
+ */
+export async function updatePlaceHandler(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  placeId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    `select p.id,p.kind_id,p.campus_id,p.stable_code,b.building_code
+       from places p left join buildings b on b.place_id=p.id where p.id=?`,
+    [placeId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Place does not exist");
+
+  const body = await readJson<{
+    kindId?: unknown;
+    campusId?: unknown;
+    stableCode?: unknown;
+    buildingCode?: unknown;
+    aliases?: unknown;
+  }>(request);
+
+  const kindId = body.kindId === undefined ? String(before.kind_id) : requiredString(body.kindId, "kindId", 80);
+  const campusId = body.campusId === undefined
+    ? (before.campus_id === null ? null : String(before.campus_id))
+    : optionalString(body.campusId, "campusId", 100);
+  const stableCode = body.stableCode === undefined
+    ? (before.stable_code === null ? null : String(before.stable_code))
+    : optionalString(body.stableCode, "stableCode", 100);
+  await Promise.all([
+    assertExists(env.DB, "place_kinds", kindId, "Place kind"),
+    assertExists(env.DB, "campuses", campusId, "Campus"),
+  ]);
+  if (stableCode) {
+    const clash = await first<{ id: string }>(
+      env.DB,
+      "select id from places where id<>? and stable_code=? and coalesce(campus_id,'')=coalesce(?,'')",
+      [placeId, stableCode, campusId],
+    );
+    if (clash) throw new HttpError(409, "duplicate_stable_code", "Another place in this campus already uses this code");
+  }
+
+  const aliases: string[] | null = body.aliases === undefined
+    ? null
+    : (() => {
+      if (!Array.isArray(body.aliases)) throw new HttpError(400, "validation_error", "aliases must be an array");
+      const unique: string[] = [];
+      for (const raw of body.aliases) {
+        const name = requiredString(raw, "alias", 200);
+        if (!unique.includes(name)) unique.push(name);
+      }
+      if (unique.length > 20) throw new HttpError(400, "validation_error", "At most 20 aliases per place");
+      return unique;
+    })();
+
+  const now = isoNow();
+  const statements = [
+    env.DB.prepare("update places set kind_id=?,campus_id=?,stable_code=?,updated_at=? where id=?")
+      .bind(kindId, campusId, stableCode, now, placeId),
+  ];
+
+  if (body.buildingCode !== undefined) {
+    const buildingCode = optionalString(body.buildingCode, "buildingCode", 100);
+    // buildings 是 places 的 1:1 扩展，且 floors 以 on delete cascade 挂在它上面。
+    // 因此只补建不删除：类型改成非建筑时保留原行，避免连带删掉已采集的楼层。
+    statements.push(
+      env.DB.prepare("insert or ignore into buildings(place_id,building_code,public_access_level) values(?,?,'unknown')")
+        .bind(placeId, buildingCode),
+      env.DB.prepare("update buildings set building_code=? where place_id=?").bind(buildingCode, placeId),
+    );
+  } else if (kindId === "building") {
+    statements.push(
+      env.DB.prepare("insert or ignore into buildings(place_id,building_code,public_access_level) values(?,null,'unknown')")
+        .bind(placeId),
+    );
+  }
+
+  if (aliases) {
+    statements.push(env.DB.prepare("delete from place_names where place_id=? and name_type='alias'").bind(placeId));
+    for (const alias of aliases) {
+      statements.push(env.DB.prepare(
+        `insert into place_names(id,place_id,language,name,normalized_name,name_type,is_searchable) values(?,?,'zh-CN',?,?,'alias',1)`,
+      ).bind(makeId("pname"), placeId, alias, normalizeSearchText(alias)));
+    }
+  }
+
+  await env.DB.batch(statements);
+  await audit(env, principal, "place.update", "place", placeId, requestId, before, {
+    kindId, campusId, stableCode, buildingCode: body.buildingCode, aliases,
+  });
+  return json({ id: placeId, kindId, campusId, stableCode, aliases: aliases ?? undefined });
 }
 
 export async function createPlaceRevisionHandler(

@@ -92,6 +92,10 @@ export interface ReleaseManifest {
   merchants: unknown[];
   maps: unknown[];
   locations: unknown[];
+  /** lifecycle_status='active' 的全部楼层（客户端楼层视图不再需要绕过 release）。 */
+  floors: unknown[];
+  /** facility_types 的 id/code/name/category/iconKey，供客户端做 id → code 映射。 */
+  facilityTypes: unknown[];
   transit: {
     stops: unknown[];
     routes: unknown[];

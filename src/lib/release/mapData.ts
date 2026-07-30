@@ -73,20 +73,34 @@ export const filters: Array<{ key: FilterKey; label: string }> = [
   { key: "canteen", label: "食堂" },
   { key: "commercial", label: "商业" },
   { key: "printing", label: "打印机" },
-  { key: "parking", label: "停车场" },
+  { key: "parking", label: "充电桩" },
   { key: "powerBank", label: "充电宝" },
 ];
 
 // Facility type codes that map onto user-facing filter chips. Derived building
 // summaries ("has a printer") come from hosted facility instances, per the v2
 // model, rather than independently maintained booleans.
-const FACILITY_FILTER_BY_TYPE: Record<string, FilterKey> = {
+//
+// Keys are facility_types.code — the real seeded values. Facility rows only carry
+// facilityTypeId (`facility_type_printer`), so callers must resolve id -> code via
+// the manifest's facilityTypes dictionary first; looking codes up by id was why
+// these chips never matched anything. Codes absent from the schema (printing /
+// powerbank / parking) are gone: there is no parking facility type, so the
+// 停车场 chip has no facility-derived source and stays name-derived only.
+const FACILITY_FILTER_BY_TYPE_CODE: Record<string, FilterKey> = {
   printer: "printing",
-  printing: "printing",
   power_bank: "powerBank",
-  powerbank: "powerBank",
-  parking: "parking",
+  charging_station: "parking",
 };
+
+/** facilityTypeId -> facility_types.code, from the manifest dictionary. */
+function facilityTypeCodesById(manifest: ReleaseManifest): Map<string, string> {
+  const byId = new Map<string, string>();
+  for (const type of manifest.facilityTypes ?? []) {
+    if (type.id && type.code) byId.set(type.id, type.code);
+  }
+  return byId;
+}
 
 // ---------------------------------------------------------------------------
 // Campus mapping
@@ -228,11 +242,16 @@ export function buildMapBuildings(manifest: ReleaseManifest): MapBuilding[] {
     if (!existing || location.isPrimary === 1) primaryNavByPlace.set(location.entityId, location);
   }
 
-  // Hosted facility filter chips per host place.
+  // Hosted facility filter chips per host place. facilities[] only carries the
+  // facility type *id*; the filter table is keyed by the business *code*, so the
+  // manifest's facilityTypes dictionary is what bridges the two.
+  const codeByTypeId = facilityTypeCodesById(manifest);
+
   const facilityFiltersByPlace = new Map<string, Set<FilterKey>>();
   for (const facility of manifest.facilities) {
     if (!facility.hostPlaceId) continue;
-    const filterKey = FACILITY_FILTER_BY_TYPE[facility.facilityTypeId];
+    const typeCode = codeByTypeId.get(facility.facilityTypeId);
+    const filterKey = typeCode ? FACILITY_FILTER_BY_TYPE_CODE[typeCode] : undefined;
     if (!filterKey) continue;
     const set = facilityFiltersByPlace.get(facility.hostPlaceId) ?? new Set<FilterKey>();
     set.add(filterKey);

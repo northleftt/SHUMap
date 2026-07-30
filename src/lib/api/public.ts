@@ -109,6 +109,23 @@ export function uploadPublicPhoto(blob: Blob, signal?: AbortSignal): Promise<Med
   });
 }
 
+/** 采集表单可选的设施类型。 */
+export interface PublicFacilityType {
+  code: string;
+  name: string;
+  iconKey: string | null;
+}
+
+/**
+ * GET /api/public/facility-types — 仅「启用中」的设施类型。
+ *
+ * 不走 release manifest：manifest 里的 facilityTypes 是发布快照且不区分启用状态，
+ * 后台停用一个类型后要立刻从采集表单消失，因此这里直读实时表。
+ */
+export function listPublicFacilityTypes(signal?: AbortSignal): Promise<{ items: PublicFacilityType[] }> {
+  return apiFetch<{ items: PublicFacilityType[] }>("/api/public/facility-types", { signal });
+}
+
 export function listCollectionTasks(deviceId: string, signal?: AbortSignal): Promise<CollectionTasksResponse> {
   return apiFetch<CollectionTasksResponse>("/api/public/collection-tasks", {
     headers: { "x-shumap-device-id": deviceId },

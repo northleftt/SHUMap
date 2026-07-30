@@ -89,6 +89,70 @@ export async function createMerchant(
   return json({ id, revisionId, editorialStatus: "draft" }, { status: 201 });
 }
 
+/**
+ * PATCH /api/admin/merchants/:id — 结构字段直接生效，不走修订流。
+ *
+ * 同 places/facilities：merchant_revisions 只承载文案字段，门店的挂接关系
+ * （品牌、所在地点、楼层、室内空间）在 merchant_outlets 上，修订表没有对应列。
+ */
+export async function updateMerchantHandler(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  outletId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    "select id,organization_id,host_place_id,floor_id,indoor_space_id from merchant_outlets where id=?",
+    [outletId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Merchant outlet does not exist");
+
+  const body = await readJson<Record<string, unknown>>(request);
+  const organizationId = body.organizationId === undefined
+    ? (before.organization_id === null ? null : String(before.organization_id))
+    : optionalString(body.organizationId, "organizationId", 100);
+  const hostPlaceId = body.hostPlaceId === undefined
+    ? (before.host_place_id === null ? null : String(before.host_place_id))
+    : optionalString(body.hostPlaceId, "hostPlaceId", 100);
+  // 换地点时旧楼层必然失效（同 facilities 的处理）。
+  const floorId = body.floorId !== undefined
+    ? optionalString(body.floorId, "floorId", 100)
+    : hostPlaceId === (before.host_place_id ?? null)
+      ? (before.floor_id === null ? null : String(before.floor_id))
+      : null;
+  const indoorSpaceId = body.indoorSpaceId !== undefined
+    ? optionalString(body.indoorSpaceId, "indoorSpaceId", 100)
+    : floorId === (before.floor_id ?? null)
+      ? (before.indoor_space_id === null ? null : String(before.indoor_space_id))
+      : null;
+
+  await Promise.all([
+    assertExists(env.DB, "organizations", organizationId, "Organization"),
+    assertExists(env.DB, "places", hostPlaceId, "Host place"),
+    assertExists(env.DB, "floors", floorId, "Floor"),
+    assertExists(env.DB, "indoor_spaces", indoorSpaceId, "Indoor space"),
+  ]);
+  if (floorId && hostPlaceId) {
+    const floor = await first<{ building_place_id: string }>(env.DB, "select building_place_id from floors where id=?", [floorId]);
+    if (floor?.building_place_id !== hostPlaceId) throw new HttpError(400, "invalid_spatial_hierarchy", "Floor does not belong to host place");
+  }
+  if (indoorSpaceId && floorId) {
+    const space = await first<{ floor_id: string }>(env.DB, "select floor_id from indoor_spaces where id=?", [indoorSpaceId]);
+    if (space?.floor_id !== floorId) throw new HttpError(400, "invalid_spatial_hierarchy", "Space does not belong to floor");
+  }
+
+  const now = isoNow();
+  await env.DB.prepare(
+    "update merchant_outlets set organization_id=?,host_place_id=?,floor_id=?,indoor_space_id=?,updated_at=? where id=?",
+  ).bind(organizationId, hostPlaceId, floorId, indoorSpaceId, now, outletId).run();
+  await audit(env, principal, "merchant.update", "merchant_outlet", outletId, requestId, before, {
+    organizationId, hostPlaceId, floorId, indoorSpaceId,
+  });
+  return json({ id: outletId, organizationId, hostPlaceId, floorId, indoorSpaceId });
+}
+
 export async function createMerchantRevision(request: Request, env: Env, principal: SessionPrincipal, outletId: string, requestId: string): Promise<Response> {
   const outlet = await first<{ id: string; current_revision_id: string | null }>(env.DB, "select id,current_revision_id from merchant_outlets where id=?", [outletId]);
   if (!outlet) throw new HttpError(404, "not_found", "Merchant outlet does not exist");

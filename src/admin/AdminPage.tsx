@@ -9,6 +9,7 @@ import {
   Rocket,
   Search,
   SquareCheckBig,
+  Tags,
   Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -29,6 +30,7 @@ import { MapsPage } from "./pages/MapsPage";
 import { SubmissionsPage } from "./pages/SubmissionsPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
 import { UsersPage } from "./pages/UsersPage";
+import { FacilityTypesPage } from "./pages/FacilityTypesPage";
 
 // ===========================================================================
 // v2 管理后台（A1-A14）。深蓝侧边栏 + 顶栏 + 嵌套路由；
@@ -38,6 +40,7 @@ import { UsersPage } from "./pages/UsersPage";
 const NAV = [
   { to: "/admin", end: true, label: "概览", icon: LayoutGrid },
   { to: "/admin/content", end: false, label: "内容管理", icon: FileText },
+  { to: "/admin/facility-types", end: false, label: "设施类型", icon: Tags },
   { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
   { to: "/admin/operations", end: false, label: "运营信息", icon: Megaphone },
   { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus, permission: "write:transit" },
@@ -53,6 +56,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/content/facilities/")) return "内容管理 · 设施编辑";
   if (pathname.startsWith("/admin/content/merchants/")) return "内容管理 · 商户编辑";
   if (pathname.startsWith("/admin/content")) return "内容管理";
+  if (pathname.startsWith("/admin/facility-types")) return "设施类型管理";
   if (pathname.startsWith("/admin/review")) return "审核中心";
   if (pathname.startsWith("/admin/operations/new")) return "新建运营事件 · 地图编辑器";
   if (pathname.endsWith("/edit") && pathname.startsWith("/admin/operations/")) return "运营事件 · 编辑几何";
@@ -225,6 +229,7 @@ export function AdminPage() {
         <Route path="content/places/:id" element={hasPermission("write:content") ? <PlaceEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="content/facilities/:id" element={hasPermission("write:content") ? <FacilityEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="content/merchants/:id" element={hasPermission("write:content") ? <MerchantEditorPage /> : <Navigate to="/admin/content" replace />} />
+        <Route path="facility-types" element={<FacilityTypesPage />} />
         <Route path="review" element={hasPermission("review:content") ? <ReviewPage /> : <Navigate to="/admin" replace />} />
         <Route path="operations" element={<OperationsPage />} />
         <Route path="operations/new" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />

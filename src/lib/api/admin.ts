@@ -64,8 +64,22 @@ export function listReferenceData<T = unknown>(signal?: AbortSignal): Promise<T>
   return apiFetch<T>("/api/admin/reference-data", { signal });
 }
 
-export function createFloor(body: Record<string, unknown>): Promise<{ id: string }> {
+export function createFloor(body: {
+  buildingPlaceId: string;
+  levelCode: string;
+  levelOrder: number;
+  displayName: string;
+  isPublic?: boolean;
+}): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/api/admin/floors", { method: "POST", body });
+}
+
+/** PATCH /api/admin/floors/:id — 楼层显示名 / 排序 / 是否对外可见。 */
+export function updateFloor(
+  floorId: string,
+  body: { displayName?: string; levelOrder?: number; isPublic?: boolean },
+): Promise<{ id: string; displayName: string; levelOrder: number; isPublic: number }> {
+  return apiFetch(`/api/admin/floors/${encodeURIComponent(floorId)}`, { method: "PATCH", body });
 }
 
 export function createSpace(body: Record<string, unknown>): Promise<{ id: string }> {
@@ -103,6 +117,25 @@ export function createPlaceRevision(placeId: string, body: Record<string, unknow
   });
 }
 
+/**
+ * PATCH /api/admin/places/:id — 结构字段（类型 / 校区 / 编码 / 别名）即时生效。
+ *
+ * 这些字段在修订表里没有对应列，因此不走「草稿 → 审核 → 发布」，提交即写库。
+ * 名称、简介、详细描述等正文字段仍旧只能经 createPlaceRevision。
+ */
+export function updatePlace(
+  placeId: string,
+  body: {
+    kindId?: string;
+    campusId?: string | null;
+    stableCode?: string | null;
+    buildingCode?: string | null;
+    aliases?: string[];
+  },
+): Promise<{ id: string; kindId: string; campusId: string | null; stableCode: string | null }> {
+  return apiFetch(`/api/admin/places/${encodeURIComponent(placeId)}`, { method: "PATCH", body });
+}
+
 // ---------------------------------------------------------------------------
 // Facilities + merchants
 // ---------------------------------------------------------------------------
@@ -126,6 +159,36 @@ export function createFacilityRevision(id: string, body: Record<string, unknown>
   });
 }
 
+/**
+ * PATCH /api/admin/facilities/:id — 挂接关系（类型 / 楼宇 / 楼层）即时生效。
+ * 与 updatePlace 同理：这些字段在修订表里没有对应列，不走审核流。
+ */
+export function updateFacility(
+  id: string,
+  body: {
+    facilityTypeId?: string;
+    hostPlaceId?: string | null;
+    floorId?: string | null;
+    indoorSpaceId?: string | null;
+    operationalStatus?: string;
+  },
+): Promise<{ id: string; facilityTypeId: string; hostPlaceId: string | null; floorId: string | null }> {
+  return apiFetch(`/api/admin/facilities/${encodeURIComponent(id)}`, { method: "PATCH", body });
+}
+
+/**
+ * PUT /api/admin/facilities/:id/location — 服务位置锚点 replace-all。
+ *
+ * `point` 是楼层图的 svg_viewbox 坐标，需同时给 mapVersionId；只给 locationHint
+ * 表示「无图纸，仅文字引导」；两者都不给即清空该设施的位置。
+ */
+export function replaceFacilityLocation(
+  id: string,
+  body: { point?: { x: number; y: number } | null; mapVersionId?: string | null; locationHint?: string | null },
+): Promise<{ id: string; removed: number; anchorId: string | null }> {
+  return apiFetch(`/api/admin/facilities/${encodeURIComponent(id)}/location`, { method: "PUT", body });
+}
+
 export function listMerchants<T = unknown>(signal?: AbortSignal): Promise<ListResponse<T>> {
   return apiFetch<ListResponse<T>>("/api/admin/merchants", { signal });
 }
@@ -142,6 +205,48 @@ export function createMerchantRevision(id: string, body: Record<string, unknown>
   return apiFetch<{ id: string }>(`/api/admin/merchants/${encodeURIComponent(id)}/revisions`, {
     method: "POST",
     body,
+  });
+}
+
+/**
+ * PATCH /api/admin/merchants/:id — 门店挂接关系（品牌 / 地点 / 楼层）即时生效。
+ */
+export function updateMerchant(
+  id: string,
+  body: {
+    organizationId?: string | null;
+    hostPlaceId?: string | null;
+    floorId?: string | null;
+    indoorSpaceId?: string | null;
+  },
+): Promise<{ id: string; organizationId: string | null; hostPlaceId: string | null; floorId: string | null }> {
+  return apiFetch(`/api/admin/merchants/${encodeURIComponent(id)}`, { method: "PATCH", body });
+}
+
+// ---------------------------------------------------------------------------
+// 管理端图片直传（POST /api/admin/media）
+// ---------------------------------------------------------------------------
+
+export interface AdminMediaUploadResult {
+  mediaId: string;
+  /** 可直接写进内容字段的公共读地址。 */
+  url: string;
+  byteSize: number;
+  contentType: string;
+  status: string;
+}
+
+/**
+ * POST /api/admin/media — 管理端图片直传，落 public scope 并立即可读。
+ *
+ * 与匿名投稿通道（POST /api/public/media → 隔离区 → 审核采纳才发布）不同：
+ * 管理员是可信方，无需隔离。返回的 url 就是内容里应当保存的地址。
+ */
+export function uploadAdminMedia(blob: Blob): Promise<AdminMediaUploadResult> {
+  return apiFetch<AdminMediaUploadResult>("/api/admin/media", {
+    method: "POST",
+    rawBody: blob,
+    contentType: blob.type || "image/jpeg",
   });
 }
 
@@ -504,5 +609,82 @@ export function updateAdminUser(
   return apiFetch<AdminUserRow & { sessionsRevoked: boolean }>(`/api/admin/users/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 设施类型（标签）维护（读 read:admin，写 write:content）
+// ---------------------------------------------------------------------------
+
+/** 一个类型下挂着的点位。楼宇名 / 楼层名由后端 join 出来。 */
+export interface FacilityTypeInstanceRow {
+  id: string;
+  facilityTypeId: string;
+  displayName: string;
+  lifecycleStatus: string;
+  operationalStatus: string;
+  hostPlaceId: string | null;
+  placeName: string | null;
+  floorId: string | null;
+  floorName: string | null;
+  floorLevelCode: string | null;
+  spaceName: string | null;
+  editorialStatus: string | null;
+}
+
+export interface FacilityTypeRow {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  iconKey: string | null;
+  status: string;
+  verificationIntervalDays: number | null;
+  createdAt: string;
+  updatedAt: string;
+  instanceCount: number;
+  instances: FacilityTypeInstanceRow[];
+}
+
+export interface FacilityTypesResponse {
+  items: FacilityTypeRow[];
+  /** 可选图标 key，界面据此渲染带预览的下拉。 */
+  iconKeys: string[];
+  categories: string[];
+}
+
+/** GET /api/admin/facility-types — 全部类型（含停用）+ 每类型的点位明细。 */
+export function listFacilityTypes(signal?: AbortSignal): Promise<FacilityTypesResponse> {
+  return apiFetch<FacilityTypesResponse>("/api/admin/facility-types", { signal });
+}
+
+export function createFacilityType(body: {
+  code: string;
+  name: string;
+  category?: string;
+  iconKey?: string | null;
+  verificationIntervalDays?: number | null;
+}): Promise<FacilityTypeRow> {
+  return apiFetch<FacilityTypeRow>("/api/admin/facility-types", { method: "POST", body });
+}
+
+/** PATCH /api/admin/facility-types/:id — code 不可改；status='disabled' 即停用。 */
+export function updateFacilityType(
+  id: string,
+  body: {
+    name?: string;
+    category?: string;
+    iconKey?: string | null;
+    status?: "active" | "disabled";
+    verificationIntervalDays?: number | null;
+  },
+): Promise<FacilityTypeRow> {
+  return apiFetch<FacilityTypeRow>(`/api/admin/facility-types/${encodeURIComponent(id)}`, { method: "PATCH", body });
+}
+
+/** DELETE /api/admin/facility-types/:id — 仅在没有任何点位引用时可用。 */
+export function deleteFacilityType(id: string): Promise<{ id: string; deleted: boolean }> {
+  return apiFetch<{ id: string; deleted: boolean }>(`/api/admin/facility-types/${encodeURIComponent(id)}`, {
+    method: "DELETE",
   });
 }

@@ -59,6 +59,31 @@ export interface ReleaseMerchant {
   contentHash: string;
 }
 
+/**
+ * 楼层骨架（floors 表的 lifecycle active 行）。楼层此前不进 manifest，客户端
+ * 只能绕过 release 直读 GET /api/public/places/:id 才拿得到楼层。
+ */
+export interface ReleaseFloor {
+  id: string;
+  buildingPlaceId: string;
+  levelCode: string;
+  levelOrder: number;
+  displayName: string;
+  isPublic: number;
+}
+
+/**
+ * 设施类型字典。设施行只带 facilityTypeId（形如 facility_type_printer），
+ * 真实业务代码（printer / power_bank / …）在这里，前端筛选按 code 匹配。
+ */
+export interface ReleaseFacilityType {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  iconKey: string | null;
+}
+
 /** Map version row joined with asset checksum/key. Columns are snake_case (no normalization applied). */
 export interface ReleaseMapVersion {
   id: string;
@@ -158,6 +183,9 @@ export interface ReleaseManifest {
   merchants: ReleaseMerchant[];
   maps: ReleaseMapVersion[];
   locations: ReleaseLocation[];
+  /** 早于本字段发布的 artifact 里没有这两项，读取端必须容忍缺失。 */
+  floors?: ReleaseFloor[];
+  facilityTypes?: ReleaseFacilityType[];
   transit: ReleaseTransit;
   searchDocuments: SearchDocument[];
   generatedAt: string;

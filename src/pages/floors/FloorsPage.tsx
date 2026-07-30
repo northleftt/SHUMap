@@ -6,21 +6,13 @@ import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { getPlace } from "../../lib/api/public";
-import type { PublicPlaceFacility, PublicPlaceFloor } from "../../lib/api/types";
+import type { PublicPlaceFacility, PublicPlaceFloor, ReleaseManifest } from "../../lib/api/types";
 import { facilityDotColor, facilityIcon } from "../../lib/facilityIcons";
 import { useAsyncData } from "../../lib/hooks/useAsyncData";
 import { facilityAnchorsForFloor, floorMapVersionsByFloor } from "../../lib/release/floorPlans";
 import { useRelease } from "../../lib/release/ReleaseContext";
-
-const KIND_LABELS: Record<string, string> = {
-  kind_building: "建筑",
-  kind_outdoor: "室外区域",
-  kind_service: "服务地点",
-  kind_transit: "交通站点",
-  kind_sports: "运动场馆",
-  kind_residence: "宿舍",
-  kind_other: "其他",
-};
+// 类目中文名只维护一份（此前这里有一张同样写错前缀的副本）。
+import { KIND_LABELS } from "../map/category";
 
 /** 设施位置描述：约定 content.locationDescription，兼容历史字段。 */
 function locationDescription(facility: PublicPlaceFacility): string {
@@ -48,6 +40,40 @@ function floorLabel(floor: PublicPlaceFloor): string {
   return floor.displayName?.trim() || floor.levelCode;
 }
 
+/**
+ * 楼层列表：优先用 release manifest 的 floors（发布态的权威骨架），缺失时回退到
+ * 详情接口。manifest 是内容的唯一发布源，但早于 floors 字段的 artifact 里没有它，
+ * 所以两条路都要留着。
+ */
+function resolveFloors(
+  manifest: ReleaseManifest | null,
+  placeId: string,
+  fallback: PublicPlaceFloor[],
+): PublicPlaceFloor[] {
+  const fromManifest = (manifest?.floors ?? [])
+    .filter((floor) => floor.buildingPlaceId === placeId && floor.isPublic !== 0)
+    .map((floor) => ({
+      id: floor.id,
+      levelCode: floor.levelCode,
+      levelOrder: floor.levelOrder,
+      displayName: floor.displayName,
+    }));
+  if (!fromManifest.length) return fallback;
+  return fromManifest.sort((a, b) => a.levelOrder - b.levelOrder);
+}
+
+/**
+ * 采集上来的楼层照片：审核采纳时按「楼层编号 → 已发布照片地址」写进
+ * place content.floorMedia（floors 表没有照片列，也不该为此加列）。
+ */
+function floorMediaOf(content: Record<string, unknown>, levelCode: string): string[] {
+  const media = content.floorMedia;
+  if (!media || typeof media !== "object" || Array.isArray(media)) return [];
+  const urls = (media as Record<string, unknown>)[levelCode];
+  if (!Array.isArray(urls)) return [];
+  return urls.filter((url): url is string => typeof url === "string" && url.trim().length > 0);
+}
+
 type ViewMode = "list" | "plan";
 
 /**
@@ -68,9 +94,12 @@ export function FloorsPage() {
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
 
   const data = state.status === "ready" ? state.data : undefined;
-  const floors = useMemo(() => data?.floors ?? [], [data]);
-  const facilities = useMemo(() => data?.facilities ?? [], [data]);
   const manifest = release?.manifest ?? null;
+  const floors = useMemo(
+    () => resolveFloors(manifest, placeId, data?.floors ?? []),
+    [manifest, placeId, data],
+  );
+  const facilities = useMemo(() => data?.facilities ?? [], [data]);
   const planByFloor = useMemo(() => floorMapVersionsByFloor(manifest), [manifest]);
 
   // 默认选中一层（levelOrder 最小且非地下）
@@ -139,6 +168,8 @@ export function FloorsPage() {
 
   const notes = floorNotes(data.place.content);
   const kindLabel = KIND_LABELS[data.place.kindId] ?? "建筑";
+  const selectedFloor = floors.find((floor) => floor.id === selectedFloorId) ?? null;
+  const floorPhotos = selectedFloor ? floorMediaOf(data.place.content, selectedFloor.levelCode) : [];
   const SelectedIcon = selectedFacility ? facilityIcon(selectedFacility.typeCode) : null;
 
   function switchFloor(floorId: string) {
@@ -217,6 +248,21 @@ export function FloorsPage() {
               <div className="mt-1 whitespace-pre-line text-body font-medium leading-relaxed text-primary">
                 {notes}
               </div>
+            </div>
+          ) : null}
+
+          {/* 本层实拍（采集照片，仅列表版） */}
+          {effectiveMode === "list" && floorPhotos.length > 0 ? (
+            <div className="scrollbar-hidden mt-3 flex gap-2 overflow-x-auto px-4">
+              {floorPhotos.map((url, index) => (
+                <img
+                  alt={`${selectedFloor ? floorLabel(selectedFloor) : ""} 实拍图 ${index + 1}`}
+                  className="h-28 w-40 shrink-0 rounded-xl object-cover"
+                  key={url}
+                  loading={index === 0 ? "eager" : "lazy"}
+                  src={url}
+                />
+              ))}
             </div>
           ) : null}
 

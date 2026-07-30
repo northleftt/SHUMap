@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import type { MerchantMenuItem } from "../../lib/types";
-import type { MerchantDetailResponse, MerchantListItem, PlaceListItem, ReferenceDataResponse } from "../adminTypes";
+import type { MerchantDetailResponse, MerchantListItem, PlaceListItem, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   EditorialPill,
   ErrorBanner,
@@ -47,18 +47,20 @@ export function MerchantEditorPage() {
   const navigate = useNavigate();
 
   const { state } = useAsyncData(async (signal) => {
-    const [ref, places, merchants, detail] = await Promise.all([
+    const [ref, spaces, places, merchants, detail] = await Promise.all([
       admin.listReferenceData<ReferenceDataResponse>(signal),
+      admin.listSpaces<SpacesResponse>(signal),
       admin.listAdminPlaces<PlaceListItem>(signal),
       isNew ? Promise.resolve({ items: [] as MerchantListItem[] }) : admin.listMerchants<MerchantListItem>(signal),
       isNew ? Promise.resolve(null) : admin.getMerchant<MerchantDetailResponse>(id, signal),
     ]);
-    return { ref, places: places.items, merchants: merchants.items, detail };
+    return { ref, spaces, places: places.items, merchants: merchants.items, detail };
   }, [id, isNew]);
 
   const [name, setName] = useState("");
   const [organizationId, setOrganizationId] = useState("");
   const [hostPlaceId, setHostPlaceId] = useState("");
+  const [floorId, setFloorId] = useState("");
   const [businessType, setBusinessType] = useState("");
   const [openingHours, setOpeningHours] = useState("");
   const [phone, setPhone] = useState("");
@@ -77,6 +79,7 @@ export function MerchantEditorPage() {
     if (!item) return;
     setName(String(item.displayName ?? ""));
     setHostPlaceId(item.hostPlaceId ? String(item.hostPlaceId) : "");
+    setFloorId(item.floorId ? String(item.floorId) : "");
     setBusinessType(String(item.businessType ?? ""));
     setOrganizationId(item.organizationId ? String(item.organizationId) : "");
     const detail = state.data!.detail?.merchant;
@@ -112,6 +115,7 @@ export function MerchantEditorPage() {
   const data = state.data!;
   const item = isNew ? null : data.merchants.find((m) => m.id === id) ?? null;
   const reviewLocked = item?.editorialStatus === "in_review";
+  const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
 
   function updateMenuItem(index: number, patch: Partial<MerchantMenuItem>) {
     setMenu((items) => items.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
@@ -142,6 +146,7 @@ export function MerchantEditorPage() {
         const created = await admin.createMerchant({
           organizationId: organizationId || undefined,
           hostPlaceId: hostPlaceId || undefined,
+          floorId: floorId || undefined,
           displayName: name.trim(),
           businessType: businessType.trim() || undefined,
           openingHours: openingHours.trim() ? { text: openingHours.trim() } : undefined,
@@ -151,6 +156,12 @@ export function MerchantEditorPage() {
         });
         revisionId = created.revisionId;
       } else {
+        // 挂接关系先落库（即时生效），再提交正文修订（走审核）。
+        await admin.updateMerchant(id, {
+          organizationId: organizationId || null,
+          hostPlaceId: hostPlaceId || null,
+          floorId: floorId || null,
+        });
         const created = await admin.createMerchantRevision(id, {
           displayName: name.trim(),
           businessType: businessType.trim() || undefined,
@@ -184,11 +195,10 @@ export function MerchantEditorPage() {
         </div>
         <div className="space-y-4 p-5">
           <div>
-            <p className="mb-3 text-emphasis">门店信息（merchant_outlets）</p>
+            <p className="mb-3 text-emphasis">门店信息</p>
             <div className="grid grid-cols-2 gap-3">
               <SelectField
                 label="所属品牌"
-                disabled={!isNew}
                 onChange={setOrganizationId}
                 options={data.ref.organizations.map((o) => ({ value: o.id, label: o.name }))}
                 placeholder="选择品牌 / 组织"
@@ -196,11 +206,17 @@ export function MerchantEditorPage() {
               />
               <SelectField
                 label="所在地点"
-                disabled={!isNew}
-                onChange={setHostPlaceId}
+                onChange={(value) => { setHostPlaceId(value); setFloorId(""); }}
                 options={data.places.map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
                 placeholder="选择地点"
                 value={hostPlaceId}
+              />
+              <SelectField
+                label="所在楼层"
+                onChange={setFloorId}
+                options={floors.map((f) => ({ value: f.id, label: f.displayName }))}
+                placeholder={hostPlaceId ? (floors.length ? "选择楼层" : "该地点暂无楼层") : "先选地点"}
+                value={floorId}
               />
               <Field label="分类" onChange={setBusinessType} placeholder="如 咖啡轻食" value={businessType} />
               <Field label="营业时间" onChange={setOpeningHours} placeholder="如 08:00 - 20:00" value={openingHours} />
@@ -217,8 +233,12 @@ export function MerchantEditorPage() {
             placeholder="不指定"
             value={sourceId}
           />
-          <InfoNote>品牌信息（LOGO、连锁门店）在商户库维护；本页编辑的是门店 outlet —— 与地点/楼层绑定，前端复用 POI 详情页展示。</InfoNote>
-          {!isNew ? <InfoNote tone="info">所属品牌和所在地点属于门店结构字段，当前页面仅支持在新建门店时设置。</InfoNote> : null}
+          <InfoNote>品牌的统一信息（标识、连锁关系）在品牌库维护；本页编辑的是单个门店，与所在地点和楼层绑定。</InfoNote>
+          {!isNew ? (
+            <InfoNote tone="info">
+              所属品牌、所在地点和所在楼层保存后立即生效；名称、营业时间、菜单等需提交审核通过并发布后对用户可见。
+            </InfoNote>
+          ) : null}
           {reviewLocked ? <InfoNote tone="warning">当前修订正在审核，处理完成后才能继续编辑。</InfoNote> : null}
           <ErrorBanner message={error} />
           <div className="flex gap-3">
@@ -245,7 +265,7 @@ export function MerchantEditorPage() {
         >
           <div className="space-y-3">
             {menu.length === 0 ? (
-              <InfoNote>菜单为商户的可选扩展字段（content.menu），保存后随发布进入 release manifest，在 POI 详情的商户视图展示。</InfoNote>
+              <InfoNote>菜单为选填内容，提交审核并发布后在门店详情中展示。</InfoNote>
             ) : (
               menu.map((entry, index) => (
                 <div key={index} className="space-y-2 rounded-lg border border-line p-3">

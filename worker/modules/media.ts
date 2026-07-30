@@ -55,6 +55,57 @@ export async function createPublicMediaUpload(request: Request, env: Env): Promi
   return json({ mediaId, byteSize: bytes.byteLength, contentType, status: "quarantined" }, { status: 201 });
 }
 
+/** 管理端直传上限比匿名通道宽一些，但仍只接受位图。 */
+const MAX_ADMIN_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+/**
+ * POST /api/admin/media — 管理端图片直传（raw body），落盘即公开可读。
+ *
+ * 与匿名 POST /api/public/media 的区别：管理员是可信方，不需要「隔离 → 审核采纳
+ * → 提升」这一路，所以对象直接写 `public/media/` 前缀、行记 bucket_scope='public'
+ * / status='published'，返回的路径立刻能被 GET /api/public/media/:id 读到。
+ *
+ * 仍保留的防线：声明类型白名单 + 魔术字节校验（声明与实际字节必须一致），
+ * 因此 SVG 之类可携带脚本的类型永远进不来。调用点已要求 write:content 会话。
+ */
+export async function createAdminMediaUpload(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+): Promise<Response> {
+  const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (!PUBLIC_UPLOAD_TYPES.has(contentType)) {
+    throw new HttpError(415, "unsupported_media_type", "Only image/jpeg, image/png and image/webp are accepted");
+  }
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > MAX_ADMIN_UPLOAD_BYTES) {
+    throw new HttpError(413, "payload_too_large", "Each image must be at most 8 MiB");
+  }
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength === 0) throw new HttpError(400, "validation_error", "Image body is empty");
+  if (bytes.byteLength > MAX_ADMIN_UPLOAD_BYTES) {
+    throw new HttpError(413, "payload_too_large", "Each image must be at most 8 MiB");
+  }
+  if (sniffImageType(bytes) !== contentType) {
+    throw new HttpError(415, "unsupported_media_type", "Image bytes do not match the declared image type");
+  }
+
+  const mediaId = makeId("media");
+  const objectKey = `${PUBLIC_MEDIA_PREFIX}${mediaId}.${extensionOf(contentType)}`;
+  const digest = await sha256(bytes);
+  const now = isoNow();
+  await env.SHUMAP_BUCKET.put(objectKey, bytes, {
+    httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" },
+    customMetadata: { scope: "public", uploadedBy: principal.userId },
+  });
+  await env.DB.prepare(
+    `insert into media_assets(id,bucket_scope,object_key,original_name,content_type,byte_size,sha256,status,uploaded_by,created_at,approved_at)
+     values(?,'public',?,null,?,?,?,'published',?,?,?)`,
+  ).bind(mediaId, objectKey, contentType, bytes.byteLength, digest, principal.userId, now, now).run();
+
+  return json({ mediaId, url: publicMediaPath(mediaId), byteSize: bytes.byteLength, contentType, status: "published" }, { status: 201 });
+}
+
 /**
  * GET /api/public/media/:id — 只服务已发布的公共对象。三个条件（scope/status/前缀）
  * 任一不满足即 404，隔离区与私有底图因此不可能从公共侧被读到。

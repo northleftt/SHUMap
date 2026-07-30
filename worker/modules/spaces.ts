@@ -33,6 +33,39 @@ export async function createFloor(request: Request, env: Env, principal: Session
   return json({ id }, { status: 201 });
 }
 
+/**
+ * PATCH /api/admin/floors/:id — 楼层显示名 / 排序 / 是否对外可见。
+ *
+ * 楼层不进修订流（floors 没有修订表），改动即时生效并记审计。level_code 是
+ * 楼层在同一楼内的唯一键，且已被设施/锚点按 id 引用，这里不允许改。
+ */
+export async function updateFloor(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  floorId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    "select id,building_place_id,level_code,level_order,display_name,is_public from floors where id=?",
+    [floorId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Floor does not exist");
+  const body = await readJson<Record<string, unknown>>(request);
+  const displayName = body.displayName === undefined
+    ? String(before.display_name)
+    : requiredString(body.displayName, "displayName", 100);
+  const levelOrderInput = body.levelOrder === undefined ? null : optionalNumber(body.levelOrder, "levelOrder");
+  const levelOrder = levelOrderInput === null ? Number(before.level_order) : levelOrderInput;
+  const isPublic = body.isPublic === undefined ? Number(before.is_public) : body.isPublic === false ? 0 : 1;
+  const now = isoNow();
+  await env.DB.prepare("update floors set display_name=?,level_order=?,is_public=?,updated_at=? where id=?")
+    .bind(displayName, levelOrder, isPublic, now, floorId).run();
+  await audit(env, principal, "floor.update", "floor", floorId, requestId, before, { displayName, levelOrder, isPublic });
+  return json({ id: floorId, displayName, levelOrder, isPublic });
+}
+
 export async function createSpace(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
   const body = await readJson<Record<string, unknown>>(request);
   const floorId = requiredString(body.floorId, "floorId", 100);

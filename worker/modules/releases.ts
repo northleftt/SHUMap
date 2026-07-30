@@ -166,13 +166,22 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
     all(env.DB, "select * from transit_trips where status='active'"), all(env.DB, "select * from transit_stop_times order by trip_id,stop_sequence"),
   ]);
 
+  // 楼层与设施类型进 manifest：客户端楼层视图/设施筛选此前只能绕过 release 直读
+  // GET /api/public/places/:id，导致「地图数据只来自 release」的约定有个缺口。
+  // 设施的实时状态（operational_status）仍旧走那个接口，这里只发布静态骨架。
+  const [floors, facilityTypes] = await Promise.all([
+    all(env.DB, `select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
+      display_name as displayName,is_public as isPublic from floors where lifecycle_status='active' order by building_place_id,level_order`),
+    all(env.DB, "select id,code,name,category,icon_key as iconKey from facility_types order by category,name"),
+  ]);
+
   const searchDocuments = buildSearchDocuments(releaseId, places, facilities, merchants, locations);
   const manifest: ReleaseManifest = {
     schemaVersion: 2,
     release: { id: releaseId, version, createdAt },
     campuses,
     places: places.map(normalizeJsonFields), facilities: facilities.map(normalizeJsonFields), merchants: merchants.map(normalizeJsonFields),
-    maps, locations,
+    maps, locations, floors, facilityTypes,
     transit: { stops, routes, patterns, patternStops, calendars, exceptions, trips, stopTimes },
     searchDocuments,
     generatedAt: isoNow(),

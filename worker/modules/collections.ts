@@ -3,6 +3,7 @@ import { all, first } from "../lib/db";
 import { HttpError, json, readJsonLimited } from "../lib/http";
 import { enforcePublicRateLimit } from "../lib/public-rate-limit";
 import { isoNow, jsonString, makeId, objectValue, requiredString } from "../lib/values";
+import { activeFacilityTypeCodes } from "./facility-types";
 import { filterAttachablePhotos, linkSubmissionPhotoStatements, normalizePhotoIds } from "./media";
 
 const LOCK_TTL_MS = 24 * 60 * 60 * 1000;
@@ -15,7 +16,6 @@ const MAX_ENTRANCE_PHOTOS = 3;
 const MAX_FLOOR_PHOTOS = 2;
 /** 一次采集提交最多关联的照片总数。 */
 const MAX_COLLECTION_PHOTOS = 12;
-const FACILITY_CODES = new Set(["restroom", "elevator", "drinking_water", "printer", "study_area", "vending_machine", "power_bank"]);
 
 interface CollectionBody {
   deviceId?: unknown;
@@ -148,7 +148,7 @@ export async function saveCollectionTask(request: Request, env: Env, buildingId:
   await enforcePublicRateLimit(request, env, "collection-save", 180);
   const body = await readJsonLimited<CollectionBody>(request, MAX_BODY_BYTES);
   const deviceId = deviceIdFrom(request, body);
-  const payload = validatePayload(body.payload);
+  const payload = validatePayload(body.payload, await activeFacilityTypeCodes(env));
   const now = isoNow();
   await env.DB.prepare(
     `update collection_tasks set payload_json=?,lock_expires_at=?,updated_at=?
@@ -166,7 +166,7 @@ export async function submitCollectionTask(request: Request, env: Env, buildingI
   await enforcePublicRateLimit(request, env, "collection-submit", 20);
   const body = await readJsonLimited<CollectionBody>(request, MAX_BODY_BYTES);
   const deviceId = deviceIdFrom(request, body);
-  const payload = validatePayload(body.payload);
+  const payload = validatePayload(body.payload, await activeFacilityTypeCodes(env));
   const row = await getRow(env, buildingId);
   if (!row) throw new HttpError(404, "not_found", "Collection task does not exist");
   if (row.deviceId !== deviceId) throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
@@ -205,7 +205,12 @@ export async function submitCollectionTask(request: Request, env: Env, buildingI
   return json({ task: publicTask(submitted, deviceId), submissionId }, { status: 201 });
 }
 
-function validatePayload(value: unknown): Record<string, unknown> {
+/**
+ * 采集正文校验。`facilityCodes` 是当前启用中的设施类型编码集合（来自 facility_types 表，
+ * 由 facility-types.ts 带缓存提供）——停用的类型不再接受新提交，但既有草稿里的旧编码
+ * 会在这里被拒，志愿者需要改成仍然启用的类型。
+ */
+function validatePayload(value: unknown, facilityCodes: Set<string>): Record<string, unknown> {
   const payload = objectValue(value, "payload");
   const allowed = new Set(["openHours", "phone", "organization", "floors", "photoMediaIds"]);
   for (const key of Object.keys(payload)) {
@@ -243,7 +248,7 @@ function validatePayload(value: unknown): Record<string, unknown> {
       const facility = objectValue(rawFacility, `floors[${floorIndex}].facilities[${facilityIndex}]`);
       const facilityId = requiredString(facility.id, "facility.id", 100);
       const typeCode = requiredString(facility.typeCode, "facility.typeCode", 50);
-      if (!FACILITY_CODES.has(typeCode)) throw new HttpError(400, "validation_error", `Unsupported facility type: ${typeCode}`);
+      if (!facilityCodes.has(typeCode)) throw new HttpError(400, "validation_error", `Unsupported facility type: ${typeCode}`);
       const name = typeof facility.name === "string" ? facility.name.trim() : "";
       const locationText = typeof facility.locationText === "string" ? facility.locationText.trim() : "";
       if (name.length > 200 || locationText.length > 500) throw new HttpError(400, "validation_error", "Facility text is too long");

@@ -1,10 +1,11 @@
 import { ClipboardList, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SheetModal } from "../../components/ui/SheetModal";
+import { listPublicFacilityTypes } from "../../lib/api/public";
 import { facilityIcon } from "../../lib/facilityIcons";
 import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
@@ -19,18 +20,41 @@ import {
 const MAX_ENTRANCE_PHOTOS = 3;
 const MAX_FLOOR_PHOTOS = 2;
 
-const FACILITY_TYPE_OPTIONS = [
-  { code: "restroom", label: "卫生间" },
-  { code: "elevator", label: "电梯" },
-  { code: "drinking_water", label: "饮水机" },
-  { code: "printer", label: "打印机" },
-  { code: "study_area", label: "研习空间" },
-  { code: "vending_machine", label: "售货机" },
-  { code: "power_bank", label: "充电宝" },
-];
+/**
+ * 可选设施类型来自 GET /api/public/facility-types（只回启用中的类型），
+ * 名称与后台「设施类型」维护界面完全一致；后台停用某个类型后这里立刻不再出现。
+ * 取不到时留空，让志愿者只填其余字段，避免提交一批服务端会拒绝的类型编码。
+ */
+interface FacilityTypeOption {
+  code: string;
+  label: string;
+}
 
-function facilityTypeLabel(code: string): string {
-  return FACILITY_TYPE_OPTIONS.find((option) => option.code === code)?.label ?? code;
+let facilityTypeCache: FacilityTypeOption[] | null = null;
+
+function useFacilityTypeOptions() {
+  const [options, setOptions] = useState<FacilityTypeOption[]>(facilityTypeCache ?? []);
+
+  useEffect(() => {
+    if (facilityTypeCache) return;
+    const controller = new AbortController();
+    listPublicFacilityTypes(controller.signal)
+      .then((response) => {
+        facilityTypeCache = response.items.map((item) => ({ code: item.code, label: item.name }));
+        setOptions(facilityTypeCache);
+      })
+      .catch(() => {
+        // 类型表拉不到时保持空列表：下面的「添加设施」会提示稍后再试。
+      });
+    return () => controller.abort();
+  }, []);
+
+  const labelFor = useCallback(
+    (code: string) => options.find((option) => option.code === code)?.label ?? code,
+    [options],
+  );
+
+  return { options, labelFor };
 }
 
 let facilitySeq = 0;
@@ -103,10 +127,14 @@ function FloorDetailModal({
   floor,
   onSave,
   onClose,
+  typeOptions,
+  typeLabelFor,
 }: {
   floor: CollectedFloor | null;
   onSave: (floor: CollectedFloor) => void;
   onClose: () => void;
+  typeOptions: FacilityTypeOption[];
+  typeLabelFor: (code: string) => string;
 }) {
   const [draft, setDraft] = useState<CollectedFloor | null>(floor);
   const [addingType, setAddingType] = useState(false);
@@ -163,7 +191,7 @@ function FloorDetailModal({
                 <div className="flex items-center gap-2.5">
                   <Icon size={17} className="shrink-0 text-primary" />
                   <span className="flex-1 text-body font-semibold text-ink">
-                    {facility.name || facilityTypeLabel(facility.typeCode)}
+                    {facility.name || typeLabelFor(facility.typeCode)}
                   </span>
                   <button
                     type="button"
@@ -191,27 +219,33 @@ function FloorDetailModal({
         </div>
 
         {addingType ? (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {FACILITY_TYPE_OPTIONS.map((option) => (
-              <button
-                key={option.code}
-                type="button"
-                className="rounded-full bg-primary-container px-3.5 py-2 text-aux font-medium text-primary active:opacity-80"
-                onClick={() => {
-                  setDraft({
-                    ...draft,
-                    facilities: [
-                      ...draft.facilities,
-                      { id: nextLocalId("fac"), typeCode: option.code, name: "", locationText: "" },
-                    ],
-                  });
-                  setAddingType(false);
-                }}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          typeOptions.length ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {typeOptions.map((option) => (
+                <button
+                  key={option.code}
+                  type="button"
+                  className="rounded-full bg-primary-container px-3.5 py-2 text-aux font-medium text-primary active:opacity-80"
+                  onClick={() => {
+                    setDraft({
+                      ...draft,
+                      facilities: [
+                        ...draft.facilities,
+                        { id: nextLocalId("fac"), typeCode: option.code, name: "", locationText: "" },
+                      ],
+                    });
+                    setAddingType(false);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-3 rounded-2xl bg-page px-4 py-3 text-aux text-sub">
+              设施种类暂时读取不到，请检查网络后重新进入本页。
+            </p>
+          )
         ) : (
           <button
             type="button"
@@ -256,6 +290,7 @@ export function CollectionFormPage() {
   const navigate = useNavigate();
   const { release } = useRelease();
   const { getTask, saveDraft, submitCollection, error } = useCollectionTasks();
+  const { options: typeOptions, labelFor: typeLabelFor } = useFacilityTypeOptions();
 
   const building = useMemo(
     () => release?.buildings.find((b) => b.poiKey === buildingId) ?? null,
@@ -359,7 +394,7 @@ export function CollectionFormPage() {
               <div className="min-w-0 flex-1">
                 <div className="text-body font-semibold text-ink">{floor.levelCode}</div>
                 <div className="mt-0.5 truncate text-aux text-sub">
-                  已记录：{floor.facilities.map((f) => f.name || facilityTypeLabel(f.typeCode)).join("，") || "—"}
+                  已记录：{floor.facilities.map((f) => f.name || typeLabelFor(f.typeCode)).join("，") || "—"}
                 </div>
               </div>
               <ClipboardList size={17} className="shrink-0 text-sub" />
@@ -456,6 +491,8 @@ export function CollectionFormPage() {
             floors: task.floors.map((item) => (item.id === floor.id ? floor : item)),
           })
         }
+        typeLabelFor={typeLabelFor}
+        typeOptions={typeOptions}
       />
     </div>
   );
