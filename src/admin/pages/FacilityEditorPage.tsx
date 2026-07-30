@@ -240,9 +240,6 @@ export function FacilityEditorPage() {
             onDone={(message) => { setNotice(message); reload(); }}
           />
         )}
-        <Panel title="修订历史">
-          <InfoNote tone="info">保存时会保留当前修订中未在表单展示的扩展字段。</InfoNote>
-        </Panel>
       </div>
     </div>
   );
@@ -446,7 +443,7 @@ function ServicePositionPanel({
             </GhostButton>
           ) : null}
         </div>
-        <InfoNote tone="info">位置标注保存后立即生效，随下次发布出现在用户端楼层图上。</InfoNote>
+        <InfoNote tone="info">位置标注保存后，会出现在用户看到的楼层图上。</InfoNote>
         <ErrorBanner message={error} />
       </div>
     </Panel>

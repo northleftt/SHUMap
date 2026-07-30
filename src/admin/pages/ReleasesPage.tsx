@@ -21,8 +21,33 @@ import {
 } from "../components/primitives";
 
 // ---------------------------------------------------------------------------
-// A5 发布中心（当前版本 + 发布表单 + A13 校验报告 + 回滚）
+// 发布中心（当前版本 + 发布表单 + 校验报告 + 回滚）
 // ---------------------------------------------------------------------------
+
+/** 地图版本生命周期状态的中文文案。 */
+const MAP_STATUS_LABEL: Record<string, string> = {
+  published: "当前使用",
+  ready: "就绪",
+  importing: "导入中",
+  archived: "已归档",
+  draft: "草稿",
+};
+
+/** 校验统计项的中文文案；未列出的键不展示。 */
+const COUNT_LABEL: Record<string, string> = {
+  places: "地点",
+  facilities: "设施",
+  merchants: "商户",
+  maps: "地图版本",
+  locations: "位置",
+};
+
+function countsSummary(counts: Record<string, number>): string {
+  return Object.entries(counts)
+    .filter(([key]) => key in COUNT_LABEL)
+    .map(([key, value]) => `${COUNT_LABEL[key]} ${value}`)
+    .join(" · ");
+}
 
 export function ReleasesPage() {
   const { hasPermission } = useAuth();
@@ -110,9 +135,8 @@ export function ReleasesPage() {
             </div>
             <div className="text-right">
               <p className="text-body text-ink">
-                {release.places.length} 地点 · {release.facilities.length} 设施 · {release.merchants.length} 商户 · {release.maps.length} 地图版本 · {release.searchDocuments.length} 搜索文档
+                {release.places.length} 地点 · {release.facilities.length} 设施 · {release.merchants.length} 商户 · {release.maps.length} 地图版本
               </p>
-              <p className="mt-1 font-mono text-label text-sub">{release.release.id}</p>
             </div>
           </div>
         ) : (
@@ -129,7 +153,7 @@ export function ReleasesPage() {
               <Field label="摘要" onChange={setSummary} placeholder="本次发布说明" value={summary} />
             </div>
             <div>
-              <p className="mb-2 text-label text-sub">地图版本（留空 = 使用全部已发布地图版本）</p>
+              <p className="mb-2 text-label text-sub">地图版本（不选则使用全部已发布的地图版本）</p>
               <div className="grid grid-cols-2 gap-2">
                 {data.maps.map((mapVersion) => {
                   const checked = selectedMapIds.includes(mapVersion.id);
@@ -151,7 +175,8 @@ export function ReleasesPage() {
                         type="checkbox"
                       />
                       <span className="min-w-0 truncate">
-                        {mapVersion.versionLabel} <span className="text-sub">({mapVersion.lifecycleStatus})</span>
+                        {mapVersion.versionLabel}{" "}
+                        <span className="text-sub">（{MAP_STATUS_LABEL[mapVersion.lifecycleStatus] ?? "未知状态"}）</span>
                       </span>
                     </label>
                   );
@@ -160,7 +185,7 @@ export function ReleasesPage() {
               </div>
             </div>
 
-            {/* A13 校验报告 */}
+            {/* 校验报告 */}
             {result ? (
               result.status === "active" ? (
                 <div className="rounded-lg bg-success-bg p-4">
@@ -169,7 +194,7 @@ export function ReleasesPage() {
                   </p>
                   {result.validation ? (
                     <p className="mt-1.5 text-aux text-success">
-                      {Object.entries(result.validation.counts).map(([k, v]) => `${k} ${v}`).join(" · ")}
+                      {countsSummary(result.validation.counts)}
                     </p>
                   ) : null}
                   {result.validation && result.validation.warnings.length > 0 ? (
@@ -197,7 +222,7 @@ export function ReleasesPage() {
                       </p>
                     ))}
                   </div>
-                  <p className="mt-2 text-label text-sub">修复后重新校验；warnings 记录后可继续</p>
+                  <p className="mt-2 text-label text-sub">修复以上错误后可重新发布</p>
                 </div>
               )
             ) : null}
@@ -222,16 +247,15 @@ export function ReleasesPage() {
                 </div>
               ) : null}
             </div>
-            <p className="px-5 py-3 text-label text-sub">历史版本列表接口暂未提供；回滚可指定任意已知 release ID。</p>
           </Panel>
 
           {canRollback ? (
             <Panel title="回滚">
               <div className="space-y-3">
-                <p className="text-body text-sub">输入目标 release ID，将其重新置为当前生效版本。请谨慎操作，回滚会立即影响线上用户端内容。</p>
+                <p className="text-body text-sub">回滚会立即影响所有用户看到的内容，请谨慎操作。</p>
                 <div className="flex items-end gap-3">
                   <div className="flex-1">
-                    <Field label="目标 Release ID" onChange={setRollbackId} placeholder="release_..." value={rollbackId} />
+                    <Field label="目标版本" onChange={setRollbackId} placeholder="输入要回滚到的版本编号" value={rollbackId} />
                   </div>
                   <GhostButton danger disabled={busy || !rollbackId.trim()} onClick={doRollback}>回滚</GhostButton>
                 </div>
@@ -242,9 +266,6 @@ export function ReleasesPage() {
         </div>
       </div>
 
-      <InfoNote tone="info">
-        发布流程：内容修订 → 审核通过 → 发布新版本（自动校验 + 生成搜索文档与 manifest）→ KV 切换 current_release 即时生效 · 失败可一键回滚至任意历史版本
-      </InfoNote>
     </div>
   );
 }

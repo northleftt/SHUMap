@@ -121,7 +121,7 @@ export function MapsPage() {
         coordinateSpaceType: "svg_viewbox",
         coordinateSpace: {},
       });
-      setProgress(`导入任务已创建（${job.status}）。导入为异步队列处理，完成后底图版本状态更新为 ready。`);
+      setProgress("已提交导入，正在后台处理，完成后版本会显示为就绪。");
       setFile(null);
       setVersionLabel("");
       reload();
@@ -160,7 +160,7 @@ export function MapsPage() {
                       {versionTarget(version)} · {version.versionLabel}
                     </p>
                     <p className="mt-0.5 text-aux text-sub">
-                      {version.floorId ? "楼层图" : "校区图"} · {version.coordinateSpaceType} · {version.featureCount} 要素
+                      {version.floorId ? "楼层图" : "校区图"} · {version.featureCount} 个图形
                     </p>
                     <div className="mt-1.5 flex items-center gap-2">
                       <Pill tone={meta.tone}>{meta.label}</Pill>
@@ -172,7 +172,6 @@ export function MapsPage() {
             })}
             {visible.length === 0 ? <div className="p-5"><EmptyState label="暂无底图版本，请先上传 SVG" /></div> : null}
           </div>
-          <p className="px-5 pb-4 text-label text-sub">map_versions · coordinate_space_type / 要素 = map_features</p>
         </Panel>
 
         {/* 上传新版本 */}
@@ -185,7 +184,6 @@ export function MapsPage() {
             >
               <Upload size={22} />
               <span className="text-body font-medium">{file ? file.name : "拖拽校园 SVG 地图到此处，或点击选择文件"}</span>
-              <span className="text-label">上传走 upload-intents → R2，导入走 import-jobs</span>
               <input
                 accept=".svg,image/svg+xml"
                 className="hidden"
@@ -246,7 +244,7 @@ export function MapsPage() {
             </PrimaryButton>
             {progress ? <InfoNote tone="info">{progress}</InfoNote> : null}
             <ErrorBanner message={error} />
-            <InfoNote>导入完成 = 新版本 ready；随下次发布（A5）生效，旧版本自动归档。</InfoNote>
+            <InfoNote>导入完成后新版本进入就绪状态，发布后对用户生效。</InfoNote>
           </div>
         </Panel>
       </div>

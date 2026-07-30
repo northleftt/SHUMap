@@ -53,6 +53,14 @@ function safeParse(value: string): Record<string, unknown> {
   }
 }
 
+/** 移动端反馈类型的中文文案。 */
+const FEEDBACK_TYPE_LABELS: Record<string, string> = {
+  correction: "信息纠错",
+  new_place: "新增地点",
+  shuttle: "校车问题",
+  other: "其他",
+};
+
 /** 提取 payload 中可逐字段采纳的文本字段。 */
 function payloadFields(payload: Record<string, unknown>): Array<{ key: string; label: string; value: string }> {
   const fields: Array<{ key: string; label: string; value: string }> = [];
@@ -61,7 +69,9 @@ function payloadFields(payload: Record<string, unknown>): Array<{ key: string; l
   const summary = payload.summary ?? detail?.summary;
   const feedbackType = payload.feedbackType;
   const collection = payload.collection as Record<string, unknown> | undefined;
-  if (typeof feedbackType === "string" && feedbackType) fields.push({ key: "feedbackType", label: "反馈类型", value: feedbackType });
+  if (typeof feedbackType === "string" && feedbackType) {
+    fields.push({ key: "feedbackType", label: "反馈类型", value: FEEDBACK_TYPE_LABELS[feedbackType] ?? "其他" });
+  }
   if (typeof summary === "string" && summary) fields.push({ key: "summary", label: "摘要", value: summary });
   if (typeof description === "string" && description) fields.push({ key: "description", label: "问题描述", value: description });
   if (collection && typeof collection === "object") {
@@ -70,10 +80,6 @@ function payloadFields(payload: Record<string, unknown>): Array<{ key: string; l
       if (typeof value === "string" && value) fields.push({ key: `collection.${key}`, label, value });
     }
     if (Array.isArray(collection.floors)) fields.push({ key: "collection.floors", label: "楼层采集", value: `${collection.floors.length} 层` });
-  }
-  for (const [key, value] of Object.entries(payload)) {
-    if (["detail", "collection", "description", "summary", "feedbackType", "photos"].includes(key)) continue;
-    if (typeof value === "string" && value) fields.push({ key, label: key, value });
   }
   return fields;
 }
@@ -120,7 +126,7 @@ function SubmissionPhotos({
             className="relative h-24 w-24 overflow-hidden rounded-lg border border-line"
             key={photo.mediaId}
             onClick={() => setZoomed(photo.mediaId)}
-            title={`${photo.bucketScope} / ${photo.status}`}
+            title={photo.bucketScope === "public" ? "已公开" : "待采纳"}
             type="button"
           >
             <img alt="用户提交照片" className="h-full w-full object-cover" src={admin.adminMediaContentUrl(photo.mediaId)} />
@@ -130,9 +136,7 @@ function SubmissionPhotos({
           </button>
         ))}
       </div>
-      <p className="mt-1.5 text-label text-sub">
-        照片在采纳前存放于隔离区，公共接口不可读；采纳后复制到公共前缀并写入地点修订的照片区。
-      </p>
+      <p className="mt-1.5 text-label text-sub">照片将在采纳后对外展示。</p>
 
       {zoomed ? (
         <div
@@ -254,7 +258,6 @@ export function SubmissionsPage() {
             })}
             {visible.length === 0 ? <div className="p-5"><EmptyState label="该状态下暂无提交" /></div> : null}
           </div>
-          <p className="px-5 pb-4 font-mono text-label text-sub">targetType / targetId / submitter / status</p>
         </Panel>
 
         {/* 详情 */}
@@ -322,13 +325,13 @@ export function SubmissionsPage() {
                     <GhostButton danger disabled={busy} onClick={() => decide("reject")}>驳回</GhostButton>
                     <GhostButton disabled={busy} onClick={() => decide("partial")}>部分采纳</GhostButton>
                     <PrimaryButton disabled={busy} onClick={() => decide("accept")}>
-                      {busy ? "处理中…" : canGenerateRevision ? "全部采纳并生成修订" : "全部采纳"}
+                      {busy ? "处理中…" : "全部采纳"}
                     </PrimaryButton>
                   </div>
                   <p className="text-label leading-relaxed text-sub">
                     {canGenerateRevision
-                      ? "采纳后会基于当前线上内容生成保留原字段的地点修订，并直接进入审核队列。"
-                      : "处理结果会写入审核记录；当前反馈缺少可直接应用的结构化字段。"}
+                      ? "采纳后会生成一份待审核的内容改动，通过审核后生效。"
+                      : "处理意见会记录下来，本条反馈没有可直接套用到内容里的信息。"}
                   </p>
                 </>
               ) : (

@@ -445,11 +445,10 @@ export function PlaceEditorPage() {
               ))}
               {revisions.length === 0 ? <p className="py-4 text-body text-sub">暂无修订记录</p> : null}
             </div>
-            <p className="px-5 pb-4 text-label text-sub">提交审核并通过后，新修订将自动取代当前线上版本</p>
           </Panel>
         ) : (
           <Panel title="提示">
-            <InfoNote tone="info">新地点保存后为草稿状态，提交审核通过并发布新版本后对线上可见。</InfoNote>
+            <InfoNote tone="info">保存后提交审核，通过后对用户可见。</InfoNote>
           </Panel>
         )}
       </div>

@@ -384,7 +384,7 @@ export function OperationCreatePage() {
   const unit = vb.w / 40;
 
   const statusText = (() => {
-    const coords = cursor ? `x ${cursor[0]} · y ${cursor[1]}（svg_viewbox）｜ ` : "";
+    const coords = cursor ? `x ${cursor[0]} · y ${cursor[1]} ｜ ` : "";
     if (mode === "point") return `${coords}单击地图放置事件位置点，Esc 退出`;
     if (mode === "area") {
       return draftReady
@@ -427,7 +427,7 @@ export function OperationCreatePage() {
                 {event?.severity ? ` · ${SEVERITY_LABELS[event.severity] ?? event.severity}` : ""}
                 {event?.startsAt ? ` · ${fmtDay(event.startsAt)} 起` : ""}
               </p>
-              <p className="mt-1.5 text-label text-sub">本页仅保存几何；标题 / 时间 / 关联对象请在事件详情页修改。</p>
+              <p className="mt-1.5 text-label text-sub">标题、时间等信息请在事件详情页修改。</p>
             </div>
           ) : (
             <>
@@ -510,7 +510,7 @@ export function OperationCreatePage() {
                   <div className="flex items-center gap-2 text-body">
                     <MapPin size={15} style={{ color: POINT_COLOR }} />
                     <span className="font-medium">事件位置</span>
-                    <span className="text-sub">Point · x {point.x} · y {point.y}</span>
+                    <span className="text-sub">x {point.x} · y {point.y}</span>
                   </div>
                   <button className="text-sub hover:text-error" onClick={() => setPoint(null)} type="button">
                     <Trash2 size={15} />
@@ -523,7 +523,7 @@ export function OperationCreatePage() {
                   <div className="flex items-center gap-2 text-body">
                     <Hexagon size={15} style={{ color: AREA_COLOR }} />
                     <span className="font-medium">影响区域</span>
-                    <span className="text-sub">Polygon · {area.vertices.length} 顶点 · 跨度 {shapeExtent(area.vertices)}</span>
+                    <span className="text-sub">{area.vertices.length} 顶点 · 跨度 {shapeExtent(area.vertices)}</span>
                   </div>
                   <button className="text-sub hover:text-error" onClick={() => setArea(null)} type="button">
                     <Trash2 size={15} />
@@ -536,7 +536,7 @@ export function OperationCreatePage() {
                   <div className="flex items-center gap-2 text-body">
                     <Route size={15} style={{ color: PATH_COLOR }} />
                     <span className="font-medium">绕行路径</span>
-                    <span className="text-sub">LineString · {path.vertices.length} 顶点 · 长 {Math.round(pathLength(path.vertices))}</span>
+                    <span className="text-sub">{path.vertices.length} 顶点 · 长 {Math.round(pathLength(path.vertices))}</span>
                   </div>
                   <button className="text-sub hover:text-error" onClick={() => setPath(null)} type="button">
                     <Trash2 size={15} />
@@ -588,8 +588,8 @@ export function OperationCreatePage() {
             </div>
 
             <p className="mt-2 text-label leading-relaxed text-sub">
-              位置随事件保存，发布后移动端可见；坐标存 svg_viewbox。事件位置（Point）、影响区域（Polygon）、绕行路径（LineString）各一份，重画自动替换。
-              {editing ? "保存即整体替换该事件的几何：画布上留下的就是最终结果，全部删除则清空几何。" : null}
+              事件位置、影响区域、绕行路径各可标注一处，重新绘制会覆盖原有标注。
+              {editing ? "保存后画布上留下的内容即最终结果，全部删除则清空标注。" : null}
             </p>
 
             {/* 校区必须显式命中后端 campuses 行，匹配不到就阻断保存 */}
@@ -597,7 +597,7 @@ export function OperationCreatePage() {
               <div className="flex items-center justify-between gap-2 text-label">
                 <span className="text-sub">校区绑定</span>
                 {campusRow ? (
-                  <span className="text-ink">{campusRow.name}<span className="text-sub"> · {campusRow.id}</span></span>
+                  <span className="text-ink">{campusRow.name}</span>
                 ) : (
                   <span className="text-error">未匹配到「{campus.label}」</span>
                 )}
@@ -605,9 +605,9 @@ export function OperationCreatePage() {
               <div className="mt-1.5 flex items-center justify-between gap-2 text-label">
                 <span className="text-sub">地图版本</span>
                 {mapVersion ? (
-                  <span className="text-ink">{mapVersion.versionLabel}<span className="text-sub"> · {mapVersion.lifecycleStatus}</span></span>
+                  <span className="text-ink">{mapVersion.versionLabel}</span>
                 ) : (
-                  <span className="text-sub">该校区暂无 ready / published 版本</span>
+                  <span className="text-sub">该校区暂无可用的地图版本</span>
                 )}
               </div>
             </div>

@@ -303,9 +303,6 @@ export function MerchantEditorPage() {
             ) : null}
           </div>
         </Panel>
-        <Panel title="修订历史">
-          <InfoNote tone="info">保存时会保留当前修订中未在表单展示的扩展字段。</InfoNote>
-        </Panel>
       </div>
     </div>
   );

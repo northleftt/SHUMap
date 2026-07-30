@@ -43,6 +43,19 @@ interface TodoItem {
   at: string;
 }
 
+/** 用户提交的目标类型 → 中文，避免界面上出现原始编码。 */
+const TARGET_TYPE_LABELS: Record<string, string> = {
+  place: "地点",
+  new_place: "新地点",
+  facility: "设施",
+  merchant_outlet: "商户",
+  transit_stop: "校车站点",
+};
+
+function targetTypeLabel(targetType: string): string {
+  return TARGET_TYPE_LABELS[targetType] ?? "其他";
+}
+
 export function OverviewPage() {
   const { state } = useAsyncData<OverviewData>(async (signal) => {
     const [spaces, places, facilities, merchants, submissions, operations, release] = await Promise.all([
@@ -88,7 +101,7 @@ export function OverviewPage() {
     ...data.operations
       .filter((e) => e.editorialStatus === "draft" || e.editorialStatus === "in_review")
       .map((e): TodoItem => ({ key: `o:${e.id}`, type: "运营", title: e.title, at: e.createdAt })),
-    ...pendingSubmissions.map((s): TodoItem => ({ key: `s:${s.id}`, type: "提交", title: `${s.targetType} · ${s.targetId ?? "新地点"}`, at: s.createdAt })),
+    ...pendingSubmissions.map((s): TodoItem => ({ key: `s:${s.id}`, type: "提交", title: `${targetTypeLabel(s.targetType)}反馈`, at: s.createdAt })),
     ...inReviewMerchants.map((m): TodoItem => ({ key: `m:${m.id}`, type: "商户", title: String(m.displayName ?? m.id), at: String(m.updatedAt ?? "") })),
   ]
     .sort((a, b) => (a.at > b.at ? -1 : 1))
@@ -102,7 +115,7 @@ export function OverviewPage() {
     ...data.submissions.slice(0, 4).map((s) => ({
       key: `sub:${s.id}`,
       dot: "bg-primary",
-      text: `${s.submitterName || "用户"} 提交了「${s.targetType}」反馈`,
+      text: `${s.submitterName || "用户"} 提交了「${targetTypeLabel(s.targetType)}」反馈`,
       at: s.createdAt,
     })),
     ...data.operations.slice(0, 2).map((e) => ({

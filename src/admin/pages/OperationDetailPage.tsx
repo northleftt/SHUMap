@@ -196,16 +196,11 @@ export function OperationDetailPage() {
                     <Icon size={15} className="shrink-0 text-primary" />
                     <span className="font-medium">{meta.label}</span>
                     <span className="truncate text-sub">
-                      {location.geometryType}
-                      {(() => {
-                        const size = geometrySummary(location.geometryJson);
-                        return size ? ` · ${size}` : "";
-                      })()}
+                      {geometrySummary(location.geometryJson)}
                     </span>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">
-                    <Pill>{campus?.name ?? (location.campusId ? location.campusId : "未绑定校区")}</Pill>
-                    <Pill tone={location.crs === "svg_viewbox" ? "info" : "warning"}>{location.crs ?? "无 CRS"}</Pill>
+                    <Pill>{campus?.name ?? "未绑定校区"}</Pill>
                   </div>
                 </div>
               );
@@ -249,7 +244,7 @@ export function OperationDetailPage() {
               {busy ? "发布中…" : ended ? "事件已结束" : "发布进展"}
             </PrimaryButton>
             <InfoNote tone="info">
-              进展随事件公开：移动端 M6 详情与 M8 摘要卡展示最新一条；「恢复」类型进展会自动建议结束事件。
+              发布后用户可在事件详情看到最新进展。
             </InfoNote>
           </div>
         </Panel> : null}
@@ -286,10 +281,10 @@ export function OperationDetailPage() {
               </div>
             </div>
             {updates.length === 0 ? (
-              <p className="text-aux text-sub">尚无人工进展；最新进展会同步显示在移动端事件详情顶部。</p>
+              <p className="text-aux text-sub">尚无进展记录。</p>
             ) : null}
             <InfoNote tone="warning">
-              「延期」类型进展会要求填写新的预计恢复时间并更新事件的 expected_ends_at；「恢复」类型发布后事件自动标记为已解决（resolved_at）。
+              发布「延期」进展需填写新的预计恢复时间；发布「恢复」进展后事件会标记为已结束。
             </InfoNote>
           </div>
         </Panel>
