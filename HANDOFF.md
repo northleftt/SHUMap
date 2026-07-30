@@ -1,45 +1,37 @@
 # SHUMap v2 交接文档
 
-> 更新于 2026-07-22。面向下一个接手的 agent / 开发者，汇总当前进展、已验证事实和剩余缺口。
+> 更新于 2026-07-30。五个工作流(W-A~W-E)已全部合并进 main,本地回归全绿(typecheck / 55 测试 / build)。**尚未部署**。
 
-## 总体状态
+## 本轮完成(2026-07-30,commit 0e73fe7..632e3ec)
 
-v2 重构稿(`前端设计稿/v2重构稿.sketch`)的前端实现 **M1-M13 + D1/D2 + A1-A14 全部完成并提交**,接生产 API(shumap.wangyixuan163.workers.dev)。
+- **W-A 发布/审核闭环**:422 校验报告可达(ApiError 带 body)、release 激活把选中 map versions 提升为 `published` + 默认发布接受 ready、采纳提交产出的修订直接 `in_review` 入审核队列、运营事件驳回 note 落库(migration 0004)、清理过期兜底
+- **W-B 几何编辑闭环**:`PUT /api/admin/operations/:id/locations`(replace-all,单事务,校验先行)、`GET /api/admin/map-features`、SVG 导入现在写 geometry_json/bbox_json(含 `<g>` 包裹解析、曲线端点采样并标记 `metadata_json.approximated`、label 从 text/tspan 提取)、`operations/:id/edit` 编辑路由 + 几何回显、提交带 mapVersionId、校区匹配失败阻断保存
+- **W-C 照片/媒体链路**:`POST /api/public/media`(匿名,2MiB 上限,magic-byte 嗅探,30 次/10 分钟/IP)→ quarantine → 审核采纳时 R2 拷贝到 `public/media/` 发布(migration 0005);反馈/采集三处照片槽位真上传(客户端压缩);审核端看图(`GET /api/admin/media/:id/content`);照片经修订→发布流进 M2;M2 照片轮播(scroll-snap + 真分页点)
+- **W-D 商户链路**:manifest.merchants 按 hostPlaceId 归组进楼宇、M2 详情商户区块 + 同 sheet 商户视图(菜单/档口号/人均)、A12 菜单子表编辑、桌面端商户面板;**顺带修复**:商户/设施因无 anchor 导致 campusId=null 被搜索静默过滤(现继承 host place 的 campus)
+- **W-E M5 楼层平面图**:`GET /api/public/maps/:mapVersionId/asset`(仅 active release 成员可读,类型白名单+nosniff+sandbox CSP)、A10 支持楼层图上传(floor_svg + floor_id)、FloorsPage 列表/平面图切换 + 设施锚点徽章 + 无图纸回退列表;SVG 注入前经 `sanitizeSvg` 白名单净化;修复 assertExists 对 buildings(place_id 主键)的 500
 
-## 已完成
+浏览器冒烟(本地 wrangler + 真实链路数据):M5 平面图渲染/徽章选中/缩放/无图回退零 console 错误;W-B/W-C 各自做过本地鉴权往返(21/21 与 7 步回环)。
 
-- **Phase 0-1(移动端 M1-M13)**:设计令牌(Tailwind 4 `@theme`)、共享原语、响应式壳、地图/POI/校车/楼层/运营事件/事件叠加层/我的/反馈/采集,commit `e6e344d`
-- **Phase 2(桌面端 D1/D2)**:自适应三栏布局,commit `68ff17d`
-- **Phase 3(管理后台 A1-A14)**:`src/admin/` 嵌套路由重构 + v2 tokens,commit `81b2ebe`
-- **采集任务后端 + 审核流补全**(另一个 agent):migrations `0002_collection_tasks.sql`、`0003_public_api_guards.sql`,`collectionTasks.ts` 重写,commit `786aa29`、`065028a`
-- **vite dev server 预览修复**:`host: true` + `allowedHosts: true`,commit `b225837`
+## 部署清单(下次 `npm run deploy:cloudflare` 前)
 
-## 已验证的线上事实(2026-07-20 实测)
+1. **先 apply 两个新 migration**:`npm run db:migrate:remote`(0004_operational_event_review_note、0005_submission_photos;按惯例注意 migrations-apply 触发器拆分问题)
+2. 部署后生产验证:发布一个 release(验证 map version 提升 published + 默认发布)、上传一张照片走完采纳流、`/api/public/operations` 缓存 30s(排查带 cache-buster)
+3. 管理后台凭证向用户索取,不要翻 seed
 
-- 生产 `/api/public/places/:id` 已返回 `floors` ✅
-- 生产 `POST /api/admin/operations/:id/updates` 已部署(401 而非 404)✅
-- `worker/modules/facilities.ts` / `merchants.ts` 列表已带 `currentRevisionId` ✅
-- 后端 `GeometryType = Point | LineString | Polygon`,locations 存 GeoJSON 不限制类型 ✅
-- 移动端 M8 叠加层三种几何都会渲染(Polygon 填充+虚线描边、LineString 虚线+端点)✅
+## Backlog(各工作流报告的遗留,按值得做的顺序)
 
-## 剩余缺口
-
-1. ~~**A6 运营事件编辑器:围合区域/道路绘制**~~ **已完成(2026-07-22,未提交)**:`OperationCreatePage.tsx` 重写为点/区域/路径三模式绘制(单击加顶点、回起点/双击/回车闭合、Backspace 撤销、Esc 取消、实时预览),分别存 `event_location`(Point)/`impact_area`(Polygon)/`route_shape`(LineString) 三种 role,几何样式与 M8 叠加层一致。待手动验收
-2. **运营事件实时上图修复(2026-07-22,未提交未部署)**:此前 M8 叠加层几何取自 release manifest 快照,新建事件不发版不上图。已改为 `/api/public/operations` 联表 live 下发 locations(`operations.ts`),前端 `buildEventOverlayItems(activeEvents)` 直接用事件自带几何(`MapEventOverlay.tsx` 签名已变)
-3. **图层浮卡(2026-07-22,未提交)**:Layers 按钮常驻,点开浮卡 = 事件开关(角标) + 8 类高亮 chips;高亮与搜索快速筛选共享 `activeFilter`,浮卡入口走 `handleFilterHighlight` 不弹抽屉;浮卡 z-40 压过底部抽屉。商户/设施独立标记层暂无数据支撑,未做
-4. ~~**`/api/analytics/events` 生产 404**~~ **已自行恢复(2026-07-22 实测)**:生产现返回 204,前后端 payload 校验一致(`map_view`/`poi_view`),无需改动
-5. **设计稿对照验收未做**(task #9):用户手动验收;对照图在 `tmp/sketch-preview/*.png`
-
-> 注:1-3 已于 2026-07-22 部署上线(含叠加层按 campusId 过滤、叠加图形点击修复——手势层 pointer capture 会吞图形 click,命中检测走 `data-overlay-event-id` + `onTapOverlayEvent`),生产已实测事件上图+点选弹卡;代码**未提交**。踩过的坑:`/api/public/operations` 响应带 `cache-control: public, max-age=30`,部署后浏览器/代理会拿旧响应,排查时先加 cache-buster 确认。
+- 校验失败的 release 会留孤儿 release_items/search_documents(W-A)
+- 隔离区照片无清理 cron;防滥用仅 IP 限速;照片采纳全有全无、无逐张选择(W-C)
+- 商户链路未用真实发布数据端到端验证;商户视图不显示楼层;桌面商户面板需对照 D1 设计稿过目(W-D)
+- A11 设施编辑器仍不能编辑 service_position 锚点(M5 徽章数据要靠它才能长出来)——建议下一轮做
+- 曲线要素为端点采样近似(metadata_json.approximated 可查);shape_hash 未写(W-B)
+- submission 决定因唯一索引不可复审;运营事件 reject 后端不强制 note(W-A)
+- A5 发布中心仍无历史列表接口,回滚要手输 release ID
+- M2 照片区、M6 进展时间线、M10 收藏列表页/关于/设置、M12 下拉刷新等审查时发现的半成品(见 2026-07-30 审查报告)
 
 ## 环境备忘
 
-- **Lody 预览白屏已定位为 Lody 自身问题**:其页面 CSP `default-src 'self'` 无 `frame-src`,拦掉了嵌入 `http://127.0.0.1:5173` 的预览 iframe(console 有 169 次 Framing 违规 + 181 次 postMessage origin 'null' 失败)。应用侧无问题,验收用 Chrome 直开 `http://127.0.0.1:5173/map`
-- 生产部署命令:`npm run deploy:cloudflare`;edge 限制:PBKDF2 ≤100k 迭代;migrations 需拆分 apply
-- 管理后台账号需向用户索取,不要从 seed 脚本翻凭证
-
-## 数据/mock 边界
-
-- 收藏/最近查看/我的反馈记录 = localStorage(`src/lib/storage/`)
-- 采集任务已从 mock 切换为真实后端(migration 0002)
-- 照片上传仅 UI(submissions 限 64KiB JSON)
+- Lody 预览白屏是 Lody 自身 CSP frame-src 问题,验收用 Chrome 直开
+- 本地验证:`npx wrangler d1 migrations apply shumap-v2 --local`;`ADMIN_BOOTSTRAP_SECRET` 要用 `--var` 传(wrangler.jsonc 的 secrets.required 会过滤 .dev.vars)
+- edge 限制:PBKDF2 ≤100k 迭代
+- 收藏/最近查看/我的反馈 = localStorage;反馈状态仍无公共查询端点
