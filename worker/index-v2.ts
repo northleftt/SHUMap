@@ -11,7 +11,7 @@ import { createPublicMediaUpload, getAdminMediaContent, getPublicMedia } from ".
 import { createMerchant, createMerchantRevision, getMerchant, listMerchants } from "./modules/merchants";
 import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
-import { getCurrentRelease, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
+import { getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
 import { createDataSource, createFloor, createOrganization, createSpace, listCampusesAndSpaces, listReferenceData } from "./modules/spaces";
@@ -79,6 +79,8 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "POST" && path === "/api/public/media") return createPublicMediaUpload(request, env);
   const media = match(path, "/api/public/media/:id");
   if (method === "GET" && media) return getPublicMedia(env, media.id);
+  const mapAsset = match(path, "/api/public/maps/:mapVersionId/asset");
+  if (method === "GET" && mapAsset) return getPublicMapAsset(env, mapAsset.mapVersionId);
 
   if (path.startsWith("/api/admin/")) {
     return routeAdmin(request, env, requestId, path, method);

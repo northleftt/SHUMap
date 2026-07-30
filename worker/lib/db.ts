@@ -21,6 +21,15 @@ export async function batch(db: D1Database, statements: D1PreparedStatement[]): 
   if (statements.length) await db.batch(statements);
 }
 
+/**
+ * Tables whose primary key is not literally `id`. `buildings` is a 1:1 extension
+ * of `places`, so its key is `place_id`; without this the existence check itself
+ * fails with "no such column: id" (a 500) instead of validating the reference.
+ */
+const PRIMARY_KEY_COLUMNS: Record<string, string> = {
+  buildings: "place_id",
+};
+
 export async function assertExists(
   db: D1Database,
   table: string,
@@ -29,6 +38,7 @@ export async function assertExists(
 ): Promise<void> {
   if (!id) return;
   if (!/^[a-z_]+$/.test(table)) throw new Error("Unsafe table name");
-  const row = await first<{ id: string }>(db, `select id from ${table} where id = ?`, [id]);
+  const keyColumn = PRIMARY_KEY_COLUMNS[table] ?? "id";
+  const row = await first<Record<string, unknown>>(db, `select ${keyColumn} from ${table} where ${keyColumn} = ?`, [id]);
   if (!row) throw new Error(`${label} does not exist`);
 }

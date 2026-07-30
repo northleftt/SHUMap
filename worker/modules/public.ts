@@ -50,6 +50,56 @@ export async function getVersionedRelease(env: Env, releaseId: string): Promise<
   });
 }
 
+/** 允许经公共底图通道流出的类型；其余（PDF/CAD/GeoJSON 源文件等）一律 404。 */
+const MAP_ASSET_CONTENT_TYPES: Record<string, string> = {
+  "image/svg+xml": "image/svg+xml; charset=utf-8",
+  "image/png": "image/png",
+  "image/jpeg": "image/jpeg",
+  "image/webp": "image/webp",
+};
+
+/**
+ * GET /api/public/maps/:mapVersionId/asset — 楼层/校区底图的公共读端。
+ *
+ * 唯一放行条件：该 map version 是**当前 active release** 的成员
+ * （release_map_versions ⋈ releases.status='active'）。因此导入完成但未发布的
+ * 版本、被 superseded 的版本都读不到。底图对象仍留在原 private key，不做
+ * 公共拷贝；这里只是按 release 成员资格代理读取，并额外要求媒体行处于
+ * private/public scope 且已 approved/published——隔离区对象因此不可能经此泄漏。
+ * 响应强制 nosniff + sandbox CSP，避免 SVG 被当作可执行文档直接导航。
+ */
+export async function getPublicMapAsset(env: Env, mapVersionId: string): Promise<Response> {
+  const row = await first<{ object_key: string; content_type: string; sha256: string; bucket_scope: string; status: string }>(
+    env.DB,
+    `select me.object_key,me.content_type,me.sha256,me.bucket_scope,me.status
+       from release_map_versions rmv
+       join releases rel on rel.id=rmv.release_id and rel.status='active'
+       join map_versions mv on mv.id=rmv.map_version_id
+       join map_assets ma on ma.id=mv.map_asset_id
+       join media_assets me on me.id=ma.media_asset_id
+      where rmv.map_version_id=?`,
+    [mapVersionId],
+  );
+  if (!row) throw new HttpError(404, "not_found", "Map asset is not part of the current release");
+  if (!["private", "public"].includes(row.bucket_scope) || !["approved", "published"].includes(row.status)) {
+    throw new HttpError(404, "not_found", "Map asset is not readable");
+  }
+  const contentType = MAP_ASSET_CONTENT_TYPES[row.content_type.toLowerCase()];
+  if (!contentType) throw new HttpError(404, "not_found", "Map asset is not a renderable image");
+  const object = await env.SHUMAP_BUCKET.get(row.object_key);
+  if (!object) throw new HttpError(404, "not_found", "Map object is missing");
+  return new Response(await object.arrayBuffer(), {
+    headers: {
+      "content-type": contentType,
+      "content-disposition": "inline",
+      "cache-control": "public, max-age=604800, immutable",
+      "etag": `"${row.sha256}"`,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    },
+  });
+}
+
 export async function publicSearch(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const query = normalize(url.searchParams.get("q") ?? "");

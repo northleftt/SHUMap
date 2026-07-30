@@ -28,6 +28,22 @@ export function getRelease(releaseId: string, signal?: AbortSignal): Promise<Rel
   return apiFetch<ReleaseManifest>(`/api/public/releases/${encodeURIComponent(releaseId)}`, { signal });
 }
 
+/**
+ * GET /api/public/maps/:mapVersionId/asset — 底图源文件（SVG/位图）。
+ * 仅当该 map version 属于当前 active release 时可读，否则 404。
+ * 返回的是相对路径，交给 <img>/fetch 使用，不经 apiFetch（响应不是 JSON）。
+ */
+export function mapAssetUrl(mapVersionId: string): string {
+  return `/api/public/maps/${encodeURIComponent(mapVersionId)}/asset`;
+}
+
+/** 取底图 SVG 源码（内联渲染需要 DOM，因此取文本而非用 <img>）。 */
+export async function fetchMapAssetSvg(mapVersionId: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(mapAssetUrl(mapVersionId), { credentials: "omit", signal });
+  if (!response.ok) throw new Error(`底图读取失败（${response.status}）`);
+  return response.text();
+}
+
 /** GET /api/public/search — published search over the active release. */
 export function search(
   params: { q: string; campusId?: string | null; type?: string | null },
