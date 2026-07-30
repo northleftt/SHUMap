@@ -9,6 +9,7 @@ import { facilityIcon } from "../../lib/facilityIcons";
 import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import {
+  isLockExpired,
   useCollectionTasks,
   type CollectedFacility,
   type CollectedFloor,
@@ -303,9 +304,9 @@ export function CollectionFormPage() {
     );
   }
 
-  const lockExpired = task.status === "collecting"
-    && Boolean(task.lockExpiresAt)
-    && new Date(task.lockExpiresAt!).getTime() <= Date.now();
+  const lockExpired = isLockExpired(task, Date.now());
+  // 别人正在采这栋楼：本机只读，且看不到对方的草稿正文（服务器只把草稿回给持有者）。
+  const lockedByOther = task.status === "collecting" && !task.owned && !lockExpired;
   const readOnly = task.status !== "collecting" || !task.owned || lockExpired;
 
   const field = (
@@ -404,11 +405,13 @@ export function CollectionFormPage() {
         {/* 操作 */}
         {readOnly ? (
           <p className="mt-6 text-center text-aux text-sub">
-            {lockExpired
-              ? "采集锁已过期，请返回列表重新领取"
-              : task.status === "needs_recollection"
-                ? "审核要求补充采集，请返回列表领取任务"
-                : `已于 ${task.submittedAt ? new Date(task.submittedAt).toLocaleDateString("zh-CN") : "—"} 提交，状态：${task.status === "accepted" ? "已采纳" : "待审核"}`}
+            {lockedByOther
+              ? `${task.assignee ?? "其他志愿者"} 正在采集这栋楼，暂时无法编辑`
+              : lockExpired
+                ? "领取已超时，请返回列表重新领取"
+                : task.status === "needs_recollection"
+                  ? "审核要求补充采集，请返回列表领取任务"
+                  : `已于 ${task.submittedAt ? new Date(task.submittedAt).toLocaleDateString("zh-CN") : "—"} 提交，状态：${task.status === "accepted" ? "已采纳" : "待审核"}`}
           </p>
         ) : (
           <>

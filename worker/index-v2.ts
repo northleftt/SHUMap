@@ -15,7 +15,8 @@ import { getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPl
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
 import { createDataSource, createFloor, createOrganization, createSpace, listCampusesAndSpaces, listReferenceData } from "./modules/spaces";
-import { createCalendar, createPattern, createRoute, createStop, createTrip, listTransit, publicJourneys } from "./modules/transit";
+import { createUser, listUsers, updateUser } from "./modules/users";
+import { createCalendar, createPattern, createRoute, createStop, createTrip, deleteTrip, listTransit, publicJourneys, replacePatternStops, updateTrip } from "./modules/transit";
 
 export { ReleaseCoordinator } from "./modules/releases";
 
@@ -274,6 +275,20 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     principal = await requireSession(request, env, "write:transit");
     return createTrip(request, env, principal, requestId);
   }
+  const patternStops = match(path, "/api/admin/transit/patterns/:id/stops");
+  if (method === "PUT" && patternStops) {
+    principal = await requireSession(request, env, "write:transit");
+    return replacePatternStops(request, env, principal, patternStops.id, requestId);
+  }
+  const transitTrip = match(path, "/api/admin/transit/trips/:id");
+  if (method === "PUT" && transitTrip) {
+    principal = await requireSession(request, env, "write:transit");
+    return updateTrip(request, env, principal, transitTrip.id, requestId);
+  }
+  if (method === "DELETE" && transitTrip) {
+    principal = await requireSession(request, env, "write:transit");
+    return deleteTrip(env, principal, transitTrip.id, requestId);
+  }
 
   if (method === "GET" && path === "/api/admin/submissions") {
     await requireSession(request, env, "read:admin");
@@ -283,6 +298,20 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && submissionReview) {
     principal = await requireSession(request, env, "review:content");
     return reviewSubmission(request, env, principal, submissionReview.id);
+  }
+
+  if (method === "GET" && path === "/api/admin/users") {
+    await requireSession(request, env, "manage:users");
+    return listUsers(env);
+  }
+  if (method === "POST" && path === "/api/admin/users") {
+    principal = await requireSession(request, env, "manage:users");
+    return createUser(request, env, principal, requestId);
+  }
+  const adminUser = match(path, "/api/admin/users/:id");
+  if (method === "PATCH" && adminUser) {
+    principal = await requireSession(request, env, "manage:users");
+    return updateUser(request, env, principal, adminUser.id, requestId);
   }
 
   if (method === "POST" && path === "/api/admin/releases") {

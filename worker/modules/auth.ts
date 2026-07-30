@@ -140,17 +140,23 @@ function expiredSessionCookie(): string {
   return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
 }
 
-function normalizeEmail(email: string): string {
+/** Exported so account management writes the exact same normalized form as login reads. */
+export function normalizeEmail(email: string): string {
   const normalized = email.toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new HttpError(400, "validation_error", "Invalid email address");
   return normalized;
 }
 
-function validatePassword(password: string): void {
+export function validatePassword(password: string): void {
   if (password.length < 12) throw new HttpError(400, "weak_password", "Password must be at least 12 characters");
 }
 
-async function hashPassword(password: string): Promise<string> {
+/**
+ * Single source of truth for the stored credential format
+ * (`pbkdf2-sha256$iterations$salt$dk`). Account management reuses this rather
+ * than re-deriving, so the 100k-iteration edge ceiling stays in one place.
+ */
+export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   // Cloudflare edge runtime caps WebCrypto PBKDF2 at 100k iterations
   // (higher values throw). Local workerd tolerates more, so keep this at

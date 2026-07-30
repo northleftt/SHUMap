@@ -1,4 +1,4 @@
-import { ArrowDownUp, ChevronDown, MapPin, Undo2 } from "lucide-react";
+import { ArrowDownUp, ChevronDown, MapPin, Navigation, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
@@ -7,6 +7,7 @@ import { SheetModal } from "../../components/ui/SheetModal";
 import type { TransitStop } from "../../lib/api/types";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useNow } from "../../lib/hooks/useNow";
+import { MapAppSheet, type MapTarget } from "../../lib/nav";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import {
   BUCKET_LABELS,
@@ -189,6 +190,23 @@ function DatePicker({
   );
 }
 
+/**
+ * 时间线上每站右侧的轻量导航入口：一个文字链接，点了弹「用哪个地图打开」。
+ * 站点名本身就是校区名，所以调起的是校区级坐标标记点。
+ */
+function StopNavLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="-mr-1 flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-label font-medium text-primary active:bg-primary-container"
+      onClick={onClick}
+    >
+      <Navigation size={11} />
+      导航
+    </button>
+  );
+}
+
 /** M7 预览内容（移动端 SheetModal / 桌面端常驻侧卡共用）。 */
 function TripPreviewContent({
   schedule,
@@ -201,124 +219,109 @@ function TripPreviewContent({
   toStop: TransitStop | null;
   onClose: () => void;
 }) {
-  const navigate = useNavigate();
   const { release } = useRelease();
+  const [navTarget, setNavTarget] = useState<MapTarget | null>(null);
 
   const preview = useMemo(
     () => (release ? buildTripPreview(release.manifest, schedule) : null),
     [schedule, release],
   );
 
-  const goPoi = (stop: TransitStop | null) => {
-    if (!release) return;
-    const poiKey = stopToPoiKey(stop ?? undefined, release.buildings);
-    if (poiKey) {
-      onClose();
-      navigate(`/map?poi=${encodeURIComponent(poiKey)}`);
-    }
-  };
-
   const boarding = preview?.stops.find((stop) => stop.role === "boarding");
   const alightingStops = preview?.stops.filter((stop) => stop.role !== "boarding") ?? [];
 
   return (
-    <div className="px-5 pb-8 pt-1">
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-card">{schedule.departureTime} 班车</h2>
+    <div className="px-5 pb-6 pt-1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-card text-ink">{schedule.departureTime} 班车</h2>
           <p className="mt-1 text-aux text-sub">
-            {fromStop?.name} → {toStop?.name}
-            {"  "}
-            {schedule.isReservation ? "预约车" : "非预约车"}
+            {[
+              fromStop && toStop ? `${fromStop.name} → ${toStop.name}` : null,
+              schedule.isReservation ? "预约车" : "非预约车",
+              preview && preview.durationMinutes !== null ? `约 ${preview.durationMinutes} 分钟` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
         </div>
         <button
           type="button"
           aria-label="关闭"
-          className="grid h-8 w-8 place-items-center rounded-full bg-page text-sub"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-page text-sub"
           onClick={onClose}
         >
           ✕
         </button>
       </div>
 
-      <div className="mt-5 flex gap-4">
-        {/* 时间线 */}
-        <div className="min-w-0 flex-1">
-          {boarding ? (
-            <div className="flex gap-3">
-              <div className="flex flex-col items-center">
-                <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-primary" />
-                <span className="w-px flex-1 bg-slate-300" />
-              </div>
-              <div className="pb-1">
-                <div className="text-body font-medium text-ink">{boarding.stopName} · 上车</div>
-                <div className="mt-0.5 text-label text-sub">
-                  {boarding.time ? `${boarding.time} 发车` : "时间未发布"}
-                </div>
-                {preview && preview.durationMinutes !== null ? (
-                  <div className="mt-2 text-label text-sub">约 {preview.durationMinutes} 分钟</div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
+      {/* 站点时间线：每行「校区名 · 上/下车」+ 发车时间，右侧轻量导航链接 */}
+      <div className="mt-4">
+        {boarding ? (
           <div className="flex gap-3">
             <div className="flex flex-col items-center">
-              <span className="mt-1.5 h-2.5 w-2.5 rounded-full bg-success" />
+              <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+              <span className="mt-1 w-px flex-1 bg-line" />
             </div>
-            <div className="min-w-0">
-              {alightingStops.map((stop, index) => (
-                <div key={stop.stopId} className={index > 0 ? "mt-2.5" : ""}>
-                  <div className="text-body font-medium text-ink">
+            <div className="flex min-w-0 flex-1 items-start justify-between gap-2 pb-3">
+              <div className="min-w-0">
+                <div className="truncate text-body font-medium text-ink">{boarding.stopName} · 上车</div>
+                <div className="mt-1 text-label text-sub">
+                  {boarding.time ? `${boarding.time} 发车` : "发车时间待定"}
+                </div>
+              </div>
+              <StopNavLink onClick={() => setNavTarget({ campus: boarding.stopName })} />
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex gap-3">
+          <div className="flex flex-col items-center">
+            <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
+          </div>
+          <div className="min-w-0 flex-1">
+            {alightingStops.map((stop, index) => (
+              <div
+                key={stop.stopId}
+                className={`flex items-start justify-between gap-2 ${index > 0 ? "mt-2" : ""}`}
+              >
+                <div className="min-w-0">
+                  <div className="truncate text-body font-medium text-ink">
                     {stop.stopName}
                     {stop.role === "alighting" && alightingStops.length > 1 ? ` · 下车点${index + 1}` : " · 下车"}
                   </div>
                   {stop.time ? (
-                    <div className="mt-0.5 text-label text-sub">
+                    <div className="mt-1 text-label text-sub">
                       {stop.time} {stop.timeLabel ?? ""}
                     </div>
                   ) : null}
                 </div>
-              ))}
-              {alightingStops.length === 0 ? (
-                <div className="text-body text-sub">下车点信息未发布</div>
-              ) : null}
-            </div>
+                <StopNavLink onClick={() => setNavTarget({ campus: stop.stopName })} />
+              </div>
+            ))}
+            {alightingStops.length === 0 ? (
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 text-body font-medium text-ink">
+                  {toStop?.name ?? "终点"} · 下车
+                </div>
+                {toStop ? <StopNavLink onClick={() => setNavTarget({ campus: toStop.name })} /> : null}
+              </div>
+            ) : null}
           </div>
-        </div>
-
-        {/* 右侧操作 */}
-        <div className="flex w-[104px] shrink-0 flex-col gap-2.5">
-          <button
-            type="button"
-            className="flex items-center justify-center gap-1 rounded-full bg-primary py-2.5 text-aux font-medium text-white active:bg-primary-pressed disabled:opacity-40"
-            disabled={!fromStop}
-            onClick={() => goPoi(fromStop)}
-          >
-            <MapPin size={13} />
-            查看上车点
-          </button>
-          <button
-            type="button"
-            className="flex items-center justify-center gap-1 rounded-full bg-primary py-2.5 text-aux font-medium text-white active:bg-primary-pressed disabled:opacity-40"
-            disabled={!toStop}
-            onClick={() => goPoi(toStop)}
-          >
-            <MapPin size={13} />
-            查看下车点
-          </button>
         </div>
       </div>
 
       {schedule.isReservation ? (
         <button
           type="button"
-          className="mt-6 w-full rounded-full bg-primary py-3 text-body font-semibold text-white active:bg-primary-pressed"
+          className="mt-5 w-full rounded-full bg-primary py-3 text-body font-semibold text-white active:bg-primary-pressed"
           onClick={() => window.open(schedule.bookingUrl ?? BOOKING_SITE_URL, "_blank")}
         >
           预约此班次
         </button>
       ) : null}
+
+      <MapAppSheet target={navTarget} onClose={() => setNavTarget(null)} />
     </div>
   );
 }
@@ -335,8 +338,10 @@ function TripPreviewSheet({
   toStop: TransitStop | null;
   onClose: () => void;
 }) {
+  // 内容精简后 0.55 会留大片空白：标题 + 两站时间线约 200px，预约车多一个 CTA。
+  const height = schedule?.isReservation ? 0.42 : 0.34;
   return (
-    <SheetModal open={schedule !== null} onClose={onClose} initialHeight={0.55}>
+    <SheetModal open={schedule !== null} onClose={onClose} initialHeight={height}>
       {schedule ? (
         <TripPreviewContent schedule={schedule} fromStop={fromStop} toStop={toStop} onClose={onClose} />
       ) : null}
@@ -553,10 +558,7 @@ export function ShuttlePage() {
             {/* 上下车点 */}
             {fromStop && toStop && fromStop.id !== toStop.id ? (
               <div className="mt-5">
-                <SectionHeader
-                  title="上下车点说明"
-                  action={<span className="text-label">点位可跳地图 ›</span>}
-                />
+                <SectionHeader title="上下车点" />
                 <div className="mt-2.5 rounded-2xl bg-surface px-5 py-1.5 shadow-card">
                   {[
                     { label: "上车点", stop: fromStop },

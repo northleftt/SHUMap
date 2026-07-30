@@ -1,6 +1,5 @@
-import { Crosshair, Layers, X } from "lucide-react";
+import { Crosshair, Layers, Maximize2, Minimize2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { MapCanvas, type MapViewWindow } from "../../components/map/MapCanvas";
 import { MapEventOverlay, buildEventOverlayItems } from "../../components/map/MapEventOverlay";
 import { useSheetDrag } from "../../components/sheet/useSheetDrag";
@@ -8,10 +7,10 @@ import { SearchInput } from "../../components/ui/SearchInput";
 import { SeverityIcon, severityOf } from "../../components/ui/SeverityBanner";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useOperations } from "../../lib/hooks/useOperations";
-import { useRelease } from "../../lib/release/ReleaseContext";
 import { CampusSwitcher } from "./CampusSwitcher";
 import { DesktopMapPanel, PoiMapCard } from "./DesktopMapPanel";
 import { LayerPanel } from "./LayerPanel";
+import { OperationDetailSheet } from "./OperationDetailSheet";
 import { PoiDetailSheet } from "./PoiDetailSheet";
 import { SearchHomeSheet } from "./SearchHomeSheet";
 import { useMapPageState, CAMPUS_ID_BY_KEY, type MapSheetMode } from "./useMapPageState";
@@ -25,8 +24,6 @@ const TAB_BAR_PX = 64;
 export function MapPage() {
   const state = useMapPageState();
   const { activeEvents } = useOperations();
-  const { release } = useRelease();
-  const navigate = useNavigate();
   const breakpoint = useBreakpoint();
   const isMobile = breakpoint === "mobile";
 
@@ -46,6 +43,8 @@ export function MapPage() {
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
   const [viewWindow, setViewWindow] = useState<MapViewWindow | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  // 事件详情卡（摘要卡「查看详情」入口）；存 id 而非布尔，换事件后不会残留展开态
+  const [detailEventId, setDetailEventId] = useState<string | null>(null);
   // 几何坐标是各校区的 svg_viewbox，只渲染当前校区的事件（campusId 为空视为通用）
   const overlayItems = useMemo(
     () =>
@@ -56,9 +55,10 @@ export function MapPage() {
       ),
     [activeEvents, state.selectedCampus],
   );
-  const selectedEvent = selectedEventId
-    ? (overlayItems.find((item) => item.event.id === selectedEventId)?.event ?? null)
-    : null;
+  const eventById = (id: string | null) =>
+    id ? (overlayItems.find((item) => item.event.id === id)?.event ?? null) : null;
+  const selectedEvent = eventById(selectedEventId);
+  const detailEvent = eventById(detailEventId);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -93,6 +93,20 @@ export function MapPage() {
   });
 
   const sheetTop = topForMode(state.sheetMode) + dragOffset;
+
+  // 全屏/恢复浮钮：复用 sheetMode 档位，收起 = 最小态（地图全屏）。
+  // poi 详情态不提供（该位置是关闭按钮）；搜索/筛选生效时恢复回 results 档。
+  const restoreMode: MapSheetMode = state.searchActive ? "results" : "home";
+  const sheetToggle =
+    state.sheetMode === "poi"
+      ? null
+      : state.sheetMode === "collapsed"
+        ? { collapsed: true, target: restoreMode, label: "恢复卡片" }
+        : { collapsed: false, target: "collapsed" as MapSheetMode, label: "全屏地图" };
+  // 贴在卡片上缘之上。results 档卡片顶边很高（96px），此时上方只剩右侧控件列的空间，
+  // 于是横向左移一格避让回中/图层，而不是压到卡片里挡住搜索框。
+  const sheetToggleTop = Math.max(16, sheetTop - 56);
+  const sheetToggleRight = sheetToggleTop < 120 ? 68 : 16;
 
   // 必须 memo：新对象每次渲染都会触发 MapCanvas 的定位 effect → setViewWindow 死循环
   const selectionFocusBounds = useMemo(
@@ -224,10 +238,7 @@ export function MapPage() {
               <button
                 type="button"
                 className="text-aux font-medium text-primary"
-                onClick={() => {
-                  const placeTarget = selectedEvent.targets?.find((t) => t.targetType === "place");
-                  if (placeTarget) navigate(`/places/${placeTarget.targetId}/operations`);
-                }}
+                onClick={() => setDetailEventId(selectedEvent.id)}
               >
                 查看详情 ›
               </button>
@@ -243,13 +254,13 @@ export function MapPage() {
           </div>
         ) : null}
 
-        {/* release 空态/错误 */}
+        {/* 地图内容不可用时的空态/错误 */}
         {state.releaseStatus === "empty" || state.releaseStatus === "error" ? (
           <div className="pointer-events-none absolute inset-x-0 top-1/2 z-20 flex -translate-y-1/2 justify-center px-8">
             <div className="pointer-events-auto max-w-[300px] rounded-2xl bg-surface px-5 py-4 text-center shadow-floating">
-              <p className="text-emphasis">{state.releaseStatus === "empty" ? "地图内容尚未发布" : "地图内容加载失败"}</p>
+              <p className="text-emphasis">{state.releaseStatus === "empty" ? "地图内容暂未上线" : "地图内容加载失败"}</p>
               <p className="mt-1.5 text-aux leading-relaxed text-sub">
-                {state.releaseStatus === "empty" ? "当前没有已发布的地图版本，请稍后再试或联系管理员发布。" : "请检查网络后重试。"}
+                {state.releaseStatus === "empty" ? "校园地图正在准备中，请稍后再来看看。" : "请检查网络后重试。"}
               </p>
             </div>
           </div>
@@ -283,6 +294,19 @@ export function MapPage() {
               />
             </div>
           </div>
+        ) : null}
+
+        {/* 全屏/恢复浮钮：贴在卡片上缘右侧，跟随卡片顶边移动 */}
+        {isMobile && sheetToggle ? (
+          <button
+            type="button"
+            aria-label={sheetToggle.label}
+            className="absolute z-40 grid h-11 w-11 place-items-center rounded-full bg-surface text-ink shadow-floating"
+            style={{ top: sheetToggleTop, right: sheetToggleRight }}
+            onClick={() => state.setSheetMode(sheetToggle.target)}
+          >
+            {sheetToggle.collapsed ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+          </button>
         ) : null}
 
         {/* 底部抽屉（移动端） */}
@@ -340,6 +364,13 @@ export function MapPage() {
             </div>
           </section>
         ) : null}
+
+        {/* 事件详情卡：摘要卡「查看详情」的落地面板，数据取自已选中的事件 */}
+        <OperationDetailSheet
+          event={detailEvent}
+          variant={isMobile ? "sheet" : "panel"}
+          onClose={() => setDetailEventId(null)}
+        />
       </div>
     </div>
   );

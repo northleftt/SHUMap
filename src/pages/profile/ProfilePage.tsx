@@ -10,6 +10,12 @@ import { useIdentity } from "../../lib/storage/identity";
 import { useRecents } from "../../lib/storage/recents";
 import { useSubmissionsLog, type LocalSubmissionStatus } from "../../lib/storage/submissionsLog";
 
+/**
+ * 身份/登录入口开关。当前公共端不做账号体系，资料卡与昵称编辑整体隐藏；
+ * 本地身份仍在后台保留，反馈署名与数据采集认领继续使用默认昵称。
+ */
+const SHOW_LOGIN: boolean = false;
+
 const SUBMISSION_STATUS: Record<LocalSubmissionStatus, { label: string; tone: StatusTone }> = {
   pending: { label: "已提交", tone: "warning" },
   accepted: { label: "已采纳", tone: "success" },
@@ -31,7 +37,7 @@ function IdentityEditor({ onClose }: { onClose: () => void }) {
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} />
       <div className="absolute inset-x-4 top-1/3 rounded-2xl bg-surface p-5 shadow-floating">
         <h3 className="text-card">编辑昵称</h3>
-        <p className="mt-1 text-aux text-sub">公共端暂无登录体系，昵称仅保存在本机</p>
+        <p className="mt-1 text-aux text-sub">昵称仅保存在本机</p>
         <input
           className="mt-3 w-full rounded-xl bg-page px-3.5 py-2.5 text-body text-ink outline-none"
           value={name}
@@ -106,24 +112,26 @@ export function ProfilePage() {
       <h1 className="px-5 pb-4 pt-6 text-title">我的</h1>
 
       {/* 资料卡 */}
-      <div className="mx-4 flex items-center gap-3.5 rounded-2xl bg-surface p-4 shadow-card">
-        <Avatar name={identity.name} size={52} />
-        <div className="min-w-0 flex-1">
-          <div className="text-card">{identity.name}</div>
-          <div className="mt-0.5 text-aux text-sub">学号 {identity.studentId} · 已登录</div>
+      {SHOW_LOGIN ? (
+        <div className="mx-4 flex items-center gap-3.5 rounded-2xl bg-surface p-4 shadow-card">
+          <Avatar name={identity.name} size={52} />
+          <div className="min-w-0 flex-1">
+            <div className="text-card">{identity.name}</div>
+            <div className="mt-0.5 text-aux text-sub">学号 {identity.studentId}</div>
+          </div>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-body font-medium text-primary"
+            onClick={() => setEditing(true)}
+          >
+            <Pencil size={13} />
+            编辑 ›
+          </button>
         </div>
-        <button
-          type="button"
-          className="flex items-center gap-1 text-body font-medium text-primary"
-          onClick={() => setEditing(true)}
-        >
-          <Pencil size={13} />
-          编辑 ›
-        </button>
-      </div>
+      ) : null}
 
       {/* 我的反馈 */}
-      <div className="mx-4 mt-5">
+      <div className={`mx-4 ${SHOW_LOGIN ? "mt-5" : ""}`}>
         <div className="flex items-center justify-between">
           <h2 className="text-emphasis">我的反馈</h2>
           <button type="button" className="text-aux text-sub" onClick={() => navigate("/feedback")}>
@@ -187,7 +195,7 @@ export function ProfilePage() {
         SHUMap v2.0 · 数据版本 {release ? release.version : "—"}
       </div>
 
-      {editing ? <IdentityEditor onClose={() => setEditing(false)} /> : null}
+      {SHOW_LOGIN && editing ? <IdentityEditor onClose={() => setEditing(false)} /> : null}
     </div>
   );
 }

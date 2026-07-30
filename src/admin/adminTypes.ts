@@ -225,12 +225,91 @@ export interface CampaignRow {
 // Transit
 // ---------------------------------------------------------------------------
 
+export interface TransitStopRow {
+  id: string;
+  placeId: string | null;
+  campusId: string | null;
+  code: string | null;
+  name: string;
+  status: string;
+}
+
+export interface TransitRouteRow {
+  id: string;
+  code: string | null;
+  name: string;
+  operatorId: string | null;
+  status: string;
+}
+
+export interface TransitPatternRow {
+  id: string;
+  routeId: string;
+  directionId: number;
+  name: string;
+  routeAnchorId: string | null;
+}
+
+export type TransitPickupType = "regular" | "reservation_only" | "none";
+export type TransitDropoffType = "regular" | "none";
+
+export interface TransitPatternStopRow {
+  patternId: string;
+  stopId: string;
+  stopSequence: number;
+  pickupType: string;
+  dropoffType: string;
+}
+
+/**
+ * 服务日历。`displayName` 由后端解析（导入数据的 name 是英文桶名），
+ * 界面一律显示 displayName。
+ */
+export interface ServiceCalendarRow {
+  id: string;
+  name: string;
+  displayName: string;
+  timezone: string;
+  validFrom: string;
+  validTo: string;
+  monday: number;
+  tuesday: number;
+  wednesday: number;
+  thursday: number;
+  friday: number;
+  saturday: number;
+  sunday: number;
+}
+
+export type TransitBookingPolicy = "required" | "optional" | "not_required";
+
+export interface TransitTripRow {
+  id: string;
+  patternId: string;
+  serviceCalendarId: string;
+  publicLabel: string | null;
+  bookingPolicy: string;
+  bookingUrl: string | null;
+  status: string;
+}
+
+export interface TransitStopTimeRow {
+  tripId: string;
+  stopId: string;
+  stopSequence: number;
+  arrivalTime: string | null;
+  departureTime: string | null;
+}
+
 export interface TransitResponse {
-  stops: Array<Record<string, unknown>>;
-  routes: Array<Record<string, unknown>>;
-  patterns: Array<Record<string, unknown>>;
-  calendars: Array<Record<string, unknown>>;
-  trips: Array<Record<string, unknown>>;
+  stops: TransitStopRow[];
+  routes: TransitRouteRow[];
+  patterns: TransitPatternRow[];
+  patternStops: TransitPatternStopRow[];
+  calendars: ServiceCalendarRow[];
+  exceptions: Array<Record<string, unknown>>;
+  trips: TransitTripRow[];
+  stopTimes: TransitStopTimeRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -256,4 +335,29 @@ export interface SubmissionRow {
   createdAt: string;
   reviewedAt: string | null;
   photos?: SubmissionPhotoRow[];
+}
+
+// ---------------------------------------------------------------------------
+// 账户管理（GET /api/admin/users）
+// ---------------------------------------------------------------------------
+
+export type AccountStatus = "active" | "disabled";
+
+export interface AccountRow {
+  id: string;
+  email: string;
+  displayName: string;
+  status: AccountStatus | string;
+  /** 已绑定角色，当前一个账户只分配一个。 */
+  roles: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 可选角色。assignable=false 的角色（拥有者）不出现在新建/改角色的下拉里。 */
+export interface AccountRoleOption {
+  id: string;
+  name: string;
+  permissions: string[];
+  assignable: boolean;
 }

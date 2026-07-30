@@ -9,6 +9,7 @@ import {
   Rocket,
   Search,
   SquareCheckBig,
+  Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -27,6 +28,7 @@ import { TransitPage } from "./pages/TransitPage";
 import { MapsPage } from "./pages/MapsPage";
 import { SubmissionsPage } from "./pages/SubmissionsPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
+import { UsersPage } from "./pages/UsersPage";
 
 // ===========================================================================
 // v2 管理后台（A1-A14）。深蓝侧边栏 + 顶栏 + 嵌套路由；
@@ -42,6 +44,7 @@ const NAV = [
   { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
   { to: "/admin/submissions", end: false, label: "用户提交", icon: Inbox, permission: "review:content" },
   { to: "/admin/releases", end: false, label: "发布中心", icon: Rocket, permission: "publish:release" },
+  { to: "/admin/users", end: false, label: "账户管理", icon: Users, permission: "manage:users" },
 ] as const;
 
 function titleFor(pathname: string): string {
@@ -59,6 +62,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/maps")) return "地图版本管理";
   if (pathname.startsWith("/admin/submissions")) return "用户提交 · 处理";
   if (pathname.startsWith("/admin/releases")) return "发布中心";
+  if (pathname.startsWith("/admin/users")) return "账户管理";
   return "概览";
 }
 
@@ -230,6 +234,7 @@ export function AdminPage() {
         <Route path="maps" element={hasPermission("write:maps") ? <MapsPage /> : <Navigate to="/admin" replace />} />
         <Route path="submissions" element={hasPermission("review:content") ? <SubmissionsPage /> : <Navigate to="/admin" replace />} />
         <Route path="releases" element={hasPermission("publish:release") ? <ReleasesPage /> : <Navigate to="/admin" replace />} />
+        <Route path="users" element={hasPermission("manage:users") ? <UsersPage /> : <Navigate to="/admin" replace />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
     ),

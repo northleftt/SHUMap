@@ -8,6 +8,7 @@ import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SeverityBanner, severityOf } from "../../components/ui/SeverityBanner";
 import { facilityIcon } from "../../lib/facilityIcons";
 import { useAsyncData } from "../../lib/hooks/useAsyncData";
+import { MapAppSheet, type MapTarget } from "../../lib/nav";
 import { useFavorites } from "../../lib/storage/favorites";
 import type { MapBuilding, MerchantSummary, PoiDetailData } from "../../lib/types";
 import { categoryLabel } from "./category";
@@ -26,7 +27,9 @@ export function PoiDetailSheet({
   initialMerchantId?: string | null;
 }) {
   const navigate = useNavigate();
-  const [navigationOpen, setNavigationOpen] = useState(false);
+  // 外部地图用「校区名 + 楼栋名」关键字定位，不依赖 release 里是否拾取过经纬度，
+  // 所以任何楼宇都能导航（旧实现缺坐标时按钮是禁用的）。
+  const [navTarget, setNavTarget] = useState<MapTarget | null>(null);
   const [openMerchantId, setOpenMerchantId] = useState<string | null>(initialMerchantId);
   const { isFavorite, toggleFavorite } = useFavorites();
   const favorite = isFavorite(building.poiKey);
@@ -55,14 +58,6 @@ export function PoiDetailSheet({
 
   const facts = building.detail.facts;
   const media = building.detail.media.filter((item) => item.url.trim());
-  const navigationOptions = building.navigationUrls
-    ? [
-        { label: "高德地图", url: building.navigationUrls.amap },
-        { label: "腾讯地图", url: building.navigationUrls.tencent },
-        { label: "百度地图", url: building.navigationUrls.baidu },
-        { label: "系统地图", url: building.navigationUrls.system },
-      ]
-    : [];
 
   // 商户详情不单设页面：在同一 sheet 内复用 M2 结构渲染
   if (openMerchant) {
@@ -93,38 +88,17 @@ export function PoiDetailSheet({
         >
           <Heart size={19} className={favorite ? "fill-primary text-primary" : "text-sub"} />
         </button>
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            disabled={!building.navigationUrls}
-            className={`flex h-10 items-center gap-1.5 rounded-full px-4 text-body font-semibold ${
-              building.navigationUrls ? "bg-primary text-white active:bg-primary-pressed" : "bg-line text-sub"
-            }`}
-            onClick={() => setNavigationOpen((open) => !open)}
-          >
-            <Navigation size={15} />
-            到这去
-          </button>
-          {navigationOpen && navigationOptions.length > 0 ? (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setNavigationOpen(false)} />
-              <div className="absolute right-0 top-12 z-20 w-[132px] overflow-hidden rounded-xl border border-line bg-surface shadow-floating">
-                {navigationOptions.map((option) => (
-                  <a
-                    key={option.label}
-                    className="block px-4 py-2.5 text-body font-medium text-ink no-underline active:bg-page"
-                    href={option.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    {option.label}
-                  </a>
-                ))}
-              </div>
-            </>
-          ) : null}
-        </div>
+        <button
+          type="button"
+          className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-primary px-4 text-body font-semibold text-white active:bg-primary-pressed"
+          onClick={() => setNavTarget({ campus: building.campusKey, placeName: building.name })}
+        >
+          <Navigation size={15} />
+          导航
+        </button>
       </div>
+
+      <MapAppSheet target={navTarget} onClose={() => setNavTarget(null)} />
 
       {/* 运营信息通栏横幅（severity 三色，无事件隐藏） */}
       {bannerEvent ? (

@@ -35,12 +35,17 @@ interface CollectionRow {
   submittedAt: string | null;
 }
 
+/**
+ * 采集进展对所有设备可见：状态、领取人昵称和时间戳是公开的协作信息，
+ * 任何志愿者都能看到「哪栋楼谁在采、采到哪一步」。
+ * 草稿正文与提交单号只回给持锁设备本身——它是尚未审核的私有内容。
+ */
 function publicTask(row: CollectionRow, deviceId: string | null) {
   const owned = Boolean(deviceId && row.deviceId === deviceId);
   return {
     buildingId: row.buildingId,
     status: row.status,
-    assignee: owned ? row.assignee : null,
+    assignee: row.assignee,
     owned,
     payload: owned ? parsePayload(row.payloadJson) : undefined,
     lockExpiresAt: row.lockExpiresAt,

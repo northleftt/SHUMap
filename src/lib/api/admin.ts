@@ -355,6 +355,30 @@ export function createTransitTrip(body: Record<string, unknown>): Promise<{ id: 
   return apiFetch<{ id: string }>("/api/admin/transit/trips", { method: "POST", body });
 }
 
+/**
+ * PUT /api/admin/transit/patterns/:id/stops — replace-all: the payload order
+ * becomes the new stop sequence, so add / remove / reorder all use this call.
+ */
+export function replaceTransitPatternStops(
+  patternId: string,
+  stops: Array<{ stopId: string; pickupType: string; dropoffType: string }>,
+): Promise<{ patternId: string }> {
+  return apiFetch<{ patternId: string }>(`/api/admin/transit/patterns/${encodeURIComponent(patternId)}/stops`, {
+    method: "PUT",
+    body: { stops },
+  });
+}
+
+export function updateTransitTrip(tripId: string, body: Record<string, unknown>): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/api/admin/transit/trips/${encodeURIComponent(tripId)}`, { method: "PUT", body });
+}
+
+export function deleteTransitTrip(tripId: string): Promise<{ id: string; status: string }> {
+  return apiFetch<{ id: string; status: string }>(`/api/admin/transit/trips/${encodeURIComponent(tripId)}`, {
+    method: "DELETE",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Submissions review
 // ---------------------------------------------------------------------------
@@ -429,4 +453,56 @@ export function publishRelease(body: PublishReleaseInput): Promise<PublishReleas
 
 export function rollbackRelease(releaseId: string, body: { reason?: string } = {}): Promise<unknown> {
   return apiFetch(`/api/admin/releases/${encodeURIComponent(releaseId)}/rollback`, { method: "POST", body });
+}
+
+// ---------------------------------------------------------------------------
+// 账户管理（requires manage:users）
+// ---------------------------------------------------------------------------
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  displayName: string;
+  status: string;
+  roles: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminRoleRow {
+  id: string;
+  name: string;
+  permissions: string[];
+  /** owner 不可在此界面分配。 */
+  assignable: boolean;
+}
+
+export interface AdminUsersResponse {
+  items: AdminUserRow[];
+  roles: AdminRoleRow[];
+}
+
+/** GET /api/admin/users — 账户列表 + 可分配角色。 */
+export function listAdminUsers(signal?: AbortSignal): Promise<AdminUsersResponse> {
+  return apiFetch<AdminUsersResponse>("/api/admin/users", { signal });
+}
+
+export function createAdminUser(body: {
+  email: string;
+  displayName: string;
+  password: string;
+  roleId: string;
+}): Promise<AdminUserRow> {
+  return apiFetch<AdminUserRow>("/api/admin/users", { method: "POST", body });
+}
+
+/** PATCH /api/admin/users/:id — 只提交需要变更的字段。 */
+export function updateAdminUser(
+  id: string,
+  body: { displayName?: string; status?: "active" | "disabled"; password?: string; roleId?: string },
+): Promise<AdminUserRow & { sessionsRevoked: boolean }> {
+  return apiFetch<AdminUserRow & { sessionsRevoked: boolean }>(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body,
+  });
 }
