@@ -462,19 +462,21 @@ create trigger validate_anchor_map_feature_insert
 before insert on location_anchors
 when new.map_feature_id is not null
 BEGIN
-  select CASE when not exists (
+  select raise(abort,'anchor map feature must belong to its map version')
+    WHERE not exists (
     select 1 from map_features f
      where f.id=new.map_feature_id and f.map_version_id=new.map_version_id
-  ) then raise(abort,'anchor map feature must belong to its map version') END;
+  );
 END;
 create trigger validate_anchor_map_feature_update
 before update of map_feature_id,map_version_id on location_anchors
 when new.map_feature_id is not null
 BEGIN
-  select CASE when not exists (
+  select raise(abort,'anchor map feature must belong to its map version')
+    WHERE not exists (
     select 1 from map_features f
      where f.id=new.map_feature_id and f.map_version_id=new.map_version_id
-  ) then raise(abort,'anchor map feature must belong to its map version') END;
+  );
 END;
 
 insert into media_assets(

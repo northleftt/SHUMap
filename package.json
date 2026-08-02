@@ -18,10 +18,11 @@
     "worker:dev": "npm run build && npx wrangler dev",
     "preview": "vite preview",
     "pick:coords": "node scripts/pick_coords_playwright.js",
-    "test": "npm run test:unit && npm run test:schema && npm run test:migrations",
+    "test": "npm run test:unit && npm run test:schema && npm run test:migrations && npm run test:split",
     "test:unit": "node --test tests/*.test.mjs",
     "test:schema": "node scripts/validate_v2_schema.mjs",
     "test:migrations": "node scripts/validate_migration_applicability.mjs",
+    "test:split": "node scripts/diagnose_split_completeness.mjs",
     "test:all": "npm run typecheck && npm test && npm run build"
   },
   "keywords": [],

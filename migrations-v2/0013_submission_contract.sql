@@ -109,18 +109,18 @@ update content_submissions
            json_set(
              f.value,
              '$.photoMediaIds',
-             case
+             CASE
                when json_type(f.value,'$.photoMediaIds') is null then json('[]')
                else json_extract(f.value,'$.photoMediaIds')
-             end
+             END
            ),
            '$.id',
-           case
+           CASE
              when json_type(f.value,'$.id')='text' then trim(json_extract(f.value,'$.id'))
              else json_extract(f.value,'$.id')
-           end,
+           END,
            '$.levelCode',
-           case
+           CASE
              when upper(trim(json_extract(f.value,'$.levelCode'))) glob 'B[0-9]*'
               and substr(upper(trim(json_extract(f.value,'$.levelCode'))),2) not glob '*[^0-9]*'
               and length(substr(upper(trim(json_extract(f.value,'$.levelCode'))),2)) between 1 and 2
@@ -147,44 +147,44 @@ update content_submissions
                                   length(upper(trim(json_extract(f.value,'$.levelCode'))))-1) as integer)
              when trim(json_extract(f.value,'$.levelCode'))='一层' then 'F1'
              else json_extract(f.value,'$.levelCode')
-           end,
+           END,
            '$.note',
-           case
+           CASE
              when json_type(f.value,'$.note')='text' then trim(json_extract(f.value,'$.note'))
              else json_extract(f.value,'$.note')
-           end,
+           END,
            '$.facilities',
-           case
+           CASE
              when json_type(f.value,'$.facilities')='array' then (
                select json_group_array(json(
                  json_set(
                    facility.value,
-                   '$.id',case
+                   '$.id',CASE
                      when json_type(facility.value,'$.id')='text'
                      then trim(json_extract(facility.value,'$.id'))
                      else json_extract(facility.value,'$.id')
-                   end,
-                   '$.typeCode',case
+                   END,
+                   '$.typeCode',CASE
                      when json_type(facility.value,'$.typeCode')='text'
                      then trim(json_extract(facility.value,'$.typeCode'))
                      else json_extract(facility.value,'$.typeCode')
-                   end,
-                   '$.name',case
+                   END,
+                   '$.name',CASE
                      when json_type(facility.value,'$.name')='text'
                      then trim(json_extract(facility.value,'$.name'))
                      else json_extract(facility.value,'$.name')
-                   end,
-                   '$.locationText',case
+                   END,
+                   '$.locationText',CASE
                      when json_type(facility.value,'$.locationText')='text'
                      then trim(json_extract(facility.value,'$.locationText'))
                      else json_extract(facility.value,'$.locationText')
-                   end
+                   END
                  )
                ))
                from json_each(f.value,'$.facilities') facility
              )
              else json_extract(f.value,'$.facilities')
-           end
+           END
          )
        ))
        from json_each(payload_json,'$.collection.floors') f
@@ -206,18 +206,18 @@ update collection_tasks
            json_set(
              f.value,
              '$.photoMediaIds',
-             case
+             CASE
                when json_type(f.value,'$.photoMediaIds') is null then json('[]')
                else json_extract(f.value,'$.photoMediaIds')
-             end
+             END
            ),
            '$.id',
-           case
+           CASE
              when json_type(f.value,'$.id')='text' then trim(json_extract(f.value,'$.id'))
              else json_extract(f.value,'$.id')
-           end,
+           END,
            '$.levelCode',
-           case
+           CASE
              when upper(trim(json_extract(f.value,'$.levelCode'))) glob 'B[0-9]*'
               and substr(upper(trim(json_extract(f.value,'$.levelCode'))),2) not glob '*[^0-9]*'
               and length(substr(upper(trim(json_extract(f.value,'$.levelCode'))),2)) between 1 and 2
@@ -244,44 +244,44 @@ update collection_tasks
                                   length(upper(trim(json_extract(f.value,'$.levelCode'))))-1) as integer)
              when trim(json_extract(f.value,'$.levelCode'))='一层' then 'F1'
              else json_extract(f.value,'$.levelCode')
-           end,
+           END,
            '$.note',
-           case
+           CASE
              when json_type(f.value,'$.note')='text' then trim(json_extract(f.value,'$.note'))
              else json_extract(f.value,'$.note')
-           end,
+           END,
            '$.facilities',
-           case
+           CASE
              when json_type(f.value,'$.facilities')='array' then (
                select json_group_array(json(
                  json_set(
                    facility.value,
-                   '$.id',case
+                   '$.id',CASE
                      when json_type(facility.value,'$.id')='text'
                      then trim(json_extract(facility.value,'$.id'))
                      else json_extract(facility.value,'$.id')
-                   end,
-                   '$.typeCode',case
+                   END,
+                   '$.typeCode',CASE
                      when json_type(facility.value,'$.typeCode')='text'
                      then trim(json_extract(facility.value,'$.typeCode'))
                      else json_extract(facility.value,'$.typeCode')
-                   end,
-                   '$.name',case
+                   END,
+                   '$.name',CASE
                      when json_type(facility.value,'$.name')='text'
                      then trim(json_extract(facility.value,'$.name'))
                      else json_extract(facility.value,'$.name')
-                   end,
-                   '$.locationText',case
+                   END,
+                   '$.locationText',CASE
                      when json_type(facility.value,'$.locationText')='text'
                      then trim(json_extract(facility.value,'$.locationText'))
                      else json_extract(facility.value,'$.locationText')
-                   end
+                   END
                  )
                ))
                from json_each(f.value,'$.facilities') facility
              )
              else json_extract(f.value,'$.facilities')
-           end
+           END
          )
        ))
        from json_each(payload_json,'$.floors') f
@@ -401,7 +401,7 @@ select created.entity_id,
    );
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from collection_referenced_facility_codes referenced
  where not exists(select 1 from facility_types ft where ft.code=referenced.code)
    and not exists(
@@ -445,7 +445,7 @@ update facility_types
 
 -- Validate the two top-level contracts before expanding nested rows.
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from content_submissions cs
  where json_type(cs.payload_json) is not 'object'
     or cs.target_type='place' and (
@@ -519,7 +519,7 @@ select case when count(*)=0 then 1 else 0 end
     );
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from collection_tasks ct
  where json_type(ct.payload_json) is not 'object'
     or (select count(*) from json_each(ct.payload_json))<>5
@@ -564,11 +564,11 @@ create table collection_contract_floors (
 );
 
 insert into collection_contract_floors(document_key,floor_index,value_type,floor_json)
-select d.document_key,f.key,f.type,case when f.type='object' then f.value else null end
+select d.document_key,f.key,f.type,CASE when f.type='object' then f.value else null END
   from collection_contract_documents d,json_each(d.collection_json,'$.floors') f;
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from collection_contract_floors f
  where f.value_type<>'object'
     or json_type(f.floor_json) is not 'object'
@@ -587,7 +587,7 @@ select case when count(*)=0 then 1 else 0 end
     )
     or substr(json_extract(f.floor_json,'$.levelCode'),2) glob '*[^0-9]*'
     or length(substr(json_extract(f.floor_json,'$.levelCode'),2)) not between 1 and
-       case when json_extract(f.floor_json,'$.levelCode') like 'B%' then 2 else 3 end
+       CASE when json_extract(f.floor_json,'$.levelCode') like 'B%' then 2 else 3 END
     or json_extract(f.floor_json,'$.levelCode')<>
        substr(json_extract(f.floor_json,'$.levelCode'),1,1)||
        cast(substr(json_extract(f.floor_json,'$.levelCode'),2) as integer)
@@ -600,7 +600,7 @@ select case when count(*)=0 then 1 else 0 end
     or json_array_length(f.floor_json,'$.photoMediaIds')>2;
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from (
     select document_key,json_extract(floor_json,'$.id') as identity
       from collection_contract_floors group by document_key,identity having count(*)>1
@@ -622,11 +622,11 @@ insert into collection_contract_facilities(
   document_key,floor_index,facility_index,value_type,facility_json
 )
 select f.document_key,f.floor_index,facility.key,facility.type,
-       case when facility.type='object' then facility.value else null end
+       CASE when facility.type='object' then facility.value else null END
   from collection_contract_floors f,json_each(f.floor_json,'$.facilities') facility;
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from collection_contract_facilities f
  where f.value_type<>'object'
     or json_type(f.facility_json) is not 'object'
@@ -652,7 +652,7 @@ select case when count(*)=0 then 1 else 0 end
     or length(json_extract(f.facility_json,'$.locationText'))>500;
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from (
     select document_key,json_extract(facility_json,'$.id') as identity
       from collection_contract_facilities group by document_key,identity having count(*)>1
@@ -696,7 +696,7 @@ select f.document_key,d.submission_id,'floor',f.floor_index,p.key,p.type,p.value
   join json_each(f.floor_json,'$.photoMediaIds') p;
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from collection_contract_photos p
  where p.value_type<>'text'
     or length(p.media_id)<>38
@@ -704,7 +704,7 @@ select case when count(*)=0 then 1 else 0 end
     or substr(lower(p.media_id),7) glob '*[^0-9a-f]*';
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from (
     select document_key,media_id
       from collection_contract_photos group by document_key,media_id having count(*)>1
@@ -715,7 +715,7 @@ select case when count(*)=0 then 1 else 0 end
 
 -- Once submitted, JSON references and relational media links are the same set.
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from content_submissions cs
  where json_extract(cs.payload_json,'$.submissionKind')='collection'
    and (
@@ -787,7 +787,7 @@ update submission_reviews
    set field_decisions_json=(
      select json_group_object(
        e.field_key,
-       case when submission_reviews.decision='accept' then 'adopt' else 'skip' end
+       CASE when submission_reviews.decision='accept' then 'adopt' else 'skip' END
      )
        from submission_expected_review_fields e
       where e.submission_id=submission_reviews.submission_id
@@ -801,7 +801,7 @@ update submission_reviews
 -- one key is removable: any other unexpected key would be a decision about
 -- something this migration cannot identify, so it aborts instead.
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from submission_reviews sr
   join json_each(sr.field_decisions_json) d
  where d.key<>'submissionKind'
@@ -820,7 +820,7 @@ update submission_reviews
    );
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from submission_reviews sr
   join content_submissions cs on cs.id=sr.submission_id
  where json_type(sr.field_decisions_json) is not 'object'
@@ -859,7 +859,7 @@ select case when count(*)=0 then 1 else 0 end
     or cs.reviewed_at is null;
 
 insert into submission_contract_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from content_submissions cs
  where cs.status in ('accepted','partially_accepted','rejected')
    and not exists(select 1 from submission_reviews sr where sr.submission_id=cs.id);
@@ -876,8 +876,9 @@ drop table submission_contract_guard;
 -- Collection documents retain their facility identity for their full lifetime.
 create trigger protect_collection_facility_type_delete
 before delete on facility_types
-begin
-  select case when exists (
+BEGIN
+  select raise(abort,'facility type is referenced by collection data')
+    WHERE exists (
     select 1
       from collection_tasks ct
       join json_each(ct.payload_json,'$.floors') floor
@@ -890,23 +891,24 @@ begin
       join json_each(floor.value,'$.facilities') facility
      where json_extract(cs.payload_json,'$.submissionKind')='collection'
        and json_extract(facility.value,'$.typeCode')=old.code
-  ) then raise(abort,'facility type is referenced by collection data') end;
-end;
+  );
+END;
 
 create trigger protect_facility_type_code_update
 before update of code on facility_types
 when new.code<>old.code
-begin
+BEGIN
   select raise(abort,'facility type code is immutable');
-end;
+END;
 
 -- Active collection workflows retain an enabled choice through review.
 -- Completed reviews keep disabled types as immutable history.
 create trigger protect_active_collection_facility_type_disable
 before update of status on facility_types
 when old.status='active' and new.status='disabled'
-begin
-  select case when exists (
+BEGIN
+  select raise(abort,'active collection workflow requires an active facility type')
+    WHERE exists (
     select 1
       from collection_tasks ct
       join json_each(ct.payload_json,'$.floors') floor
@@ -921,14 +923,15 @@ begin
      where cs.status in ('pending','in_review')
        and json_extract(cs.payload_json,'$.submissionKind')='collection'
        and json_extract(facility.value,'$.typeCode')=old.code
-  ) then raise(abort,'active collection workflow requires an active facility type') end;
-end;
+  );
+END;
 
 create trigger require_collection_task_facility_types_insert
 before insert on collection_tasks
 when new.status in ('collecting','needs_recollection')
-begin
-  select case when exists (
+BEGIN
+  select raise(abort,'editable collection data requires active facility types')
+    WHERE exists (
     select 1
       from json_each(new.payload_json,'$.floors') floor
       join json_each(floor.value,'$.facilities') facility
@@ -936,14 +939,15 @@ begin
        select 1 from facility_types type
         where type.code=json_extract(facility.value,'$.typeCode') and type.status='active'
      )
-  ) then raise(abort,'editable collection data requires active facility types') end;
-end;
+  );
+END;
 
 create trigger require_collection_task_facility_types_update
 before update of payload_json,status on collection_tasks
 when new.status in ('collecting','needs_recollection')
-begin
-  select case when exists (
+BEGIN
+  select raise(abort,'editable collection data requires active facility types')
+    WHERE exists (
     select 1
       from json_each(new.payload_json,'$.floors') floor
       join json_each(floor.value,'$.facilities') facility
@@ -951,14 +955,15 @@ begin
        select 1 from facility_types type
         where type.code=json_extract(facility.value,'$.typeCode') and type.status='active'
      )
-  ) then raise(abort,'editable collection data requires active facility types') end;
-end;
+  );
+END;
 
 create trigger require_collection_submission_facility_types_insert
 before insert on content_submissions
 when json_extract(new.payload_json,'$.submissionKind')='collection'
-begin
-  select case when exists (
+BEGIN
+  select raise(abort,'collection submission requires active facility types')
+    WHERE exists (
     select 1
      from json_each(new.payload_json,'$.collection.floors') floor
       join json_each(floor.value,'$.facilities') facility
@@ -966,14 +971,15 @@ begin
        select 1 from facility_types type
         where type.code=json_extract(facility.value,'$.typeCode') and type.status='active'
      )
-  ) then raise(abort,'collection submission requires active facility types') end;
-end;
+  );
+END;
 
 create trigger require_collection_submission_facility_types_update
 before update of payload_json on content_submissions
 when json_extract(new.payload_json,'$.submissionKind')='collection'
-begin
-  select case when exists (
+BEGIN
+  select raise(abort,'active collection submission requires active facility types')
+    WHERE exists (
     select 1
      from json_each(new.payload_json,'$.collection.floors') floor
       join json_each(floor.value,'$.facilities') facility
@@ -985,5 +991,5 @@ begin
             or type.status='active'
           )
      )
-  ) then raise(abort,'active collection submission requires active facility types') end;
-end;
+  );
+END;

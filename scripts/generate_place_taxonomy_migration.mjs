@@ -559,26 +559,30 @@ drop table entity_location_geometry_migration;
 drop table location_anchor_geometry_migration;
 
 -- A referenced feature and version must belong to the same imported map.
--- BEGIN/CASE/END are uppercase because wrangler's statement splitter opens a
--- compound statement case-insensitively but closes it only on uppercase END.
--- A lowercase body would glue every following statement onto this trigger.
+-- BEGIN/END are uppercase because wrangler's statement splitter opens a compound
+-- statement case-insensitively but closes it only on uppercase END. The guard is
+-- a WHERE clause rather than a CASE because D1's server-side splitter tracks
+-- BEGIN/END but not CASE: a CASE's own END; closes the trigger body early and the
+-- remote apply fails with "incomplete input".
 create trigger validate_anchor_map_feature_insert
 before insert on location_anchors
 when new.map_feature_id is not null
 BEGIN
-  select CASE when not exists (
+  select raise(abort,'anchor map feature must belong to its map version')
+    WHERE not exists (
     select 1 from map_features f
      where f.id=new.map_feature_id and f.map_version_id=new.map_version_id
-  ) then raise(abort,'anchor map feature must belong to its map version') END;
+  );
 END;
 create trigger validate_anchor_map_feature_update
 before update of map_feature_id,map_version_id on location_anchors
 when new.map_feature_id is not null
 BEGIN
-  select CASE when not exists (
+  select raise(abort,'anchor map feature must belong to its map version')
+    WHERE not exists (
     select 1 from map_features f
      where f.id=new.map_feature_id and f.map_version_id=new.map_version_id
-  ) then raise(abort,'anchor map feature must belong to its map version') END;
+  );
 END;
 
 insert into media_assets(

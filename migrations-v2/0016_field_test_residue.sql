@@ -23,7 +23,7 @@ create table field_test_residue_guard (
 -- floor a review creates from the same collection document would be 'F1', so
 -- 'F1' is the value this row would carry had it gone through review.
 insert into field_test_residue_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from floors
  where level_code not glob 'F[0-9]*'
    and level_code not glob 'B[0-9]*'
@@ -66,7 +66,7 @@ update floors
 -- and verified against a revision 0011 canonicalized itself.
 
 insert into field_test_residue_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from place_revisions
  where (
      structure_json='{}'
@@ -105,14 +105,14 @@ update place_revisions
 -- Final contracts. These hold on a database that never saw the residue as well,
 -- so the migration is a no-op wherever the rows do not exist.
 insert into field_test_residue_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from floors
  where (level_code not glob 'F[0-9]*' and level_code not glob 'B[0-9]*')
     or substr(level_code,2) glob '*[^0-9]*'
     or level_code<>substr(level_code,1,1)||cast(substr(level_code,2) as integer);
 
 insert into field_test_residue_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from place_revisions
  where structure_json='{}'
     or json_type(structure_json,'$.kindId') is not 'text'
@@ -123,14 +123,14 @@ select case when count(*)=0 then 1 else 0 end
     or json_type(content_json,'$.legacySvgElementId') is not null;
 
 insert into field_test_residue_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from place_revisions
  where json_type(content_json,'$.collectionFloors') is not null
     or json_type(content_json,'$.collectionSubmissionId') is not null;
 
 -- structure_json.kindId must agree with the relational kind it describes.
 insert into field_test_residue_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from place_revisions r
   join places p on p.id=r.place_id
  where json_extract(r.structure_json,'$.kindId')<>p.kind_id;

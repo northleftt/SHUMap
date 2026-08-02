@@ -20,13 +20,35 @@
 //   statement <= 100000 B    -> ok
 //   statement >  100000 B    -> SQLITE_TOOBIG
 //
-// Deliberately NOT checked: lowercase begin/case/end. Wrangler's splitter opens
-// a compound statement on /\s(BEGIN|CASE)\s$/i but closes it only on
+// The remote path is stricter still. `wrangler d1 migrations apply --remote`
+// does NOT use the local splitter: executeRemotely posts the whole file as one
+// {sql: ...} field to the D1 /query API, and the server splits it. That splitter
+// tracks BEGIN/END but not CASE, so a CASE inside a trigger body closes the body
+// early at the CASE's own `END;` and the trigger is cut in half —
+// "incomplete input: SQLITE_ERROR [code: 7500]".
+//
+// Measured on a throwaway remote D1, which rules out size as the cause:
+//   255 B file, trigger body with CASE            -> incomplete input
+//   458 KB file, no trigger                       -> applied fine
+//   trigger body `BEGIN SELECT 1; END;`           -> applied fine
+//   trigger body `SELECT RAISE(...) WHERE cond;`  -> applied fine
+//   trigger body `SELECT CASE WHEN ... END;`      -> incomplete input
+//   standalone CASE outside a trigger             -> applied fine
+//
+// So a guard trigger must be written as
+//   SELECT RAISE(ABORT,'message') WHERE <condition>;
+// rather than
+//   SELECT CASE WHEN <condition> THEN RAISE(ABORT,'message') END;
+// The two are equivalent: RAISE fires exactly when the WHERE holds.
+//
+// Deliberately NOT checked: lowercase begin/case/end. Wrangler's local splitter
+// opens a compound statement on /\s(BEGIN|CASE)\s$/i but closes it only on
 // /\sEND[;\s]$/ (case sensitive), so lowercase bodies glue following statements
-// together. Glued statements still execute in full — verified — so gluing is
-// only a problem when it pushes a statement past the size limit, which the size
-// rule already catches. 0001 ships lowercase bodies and is applied in
-// production; flagging the casing would demand editing an applied migration.
+// together. Glued statements still execute in full under miniflare — verified —
+// so locally gluing only matters when it pushes a statement past the size limit,
+// which the size rule already catches. 0001 ships lowercase bodies with CASE and
+// is already applied on both databases; flagging it would demand editing an
+// applied migration, so the CASE rule below skips migrations already applied.
 
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -48,6 +70,16 @@ const MAX_STATEMENT_BYTES = 100_000;
  * subqueries, so nesting a union does not evade it.
  */
 const MAX_COMPOUND_SELECT = 5;
+
+/**
+ * Migrations already recorded in d1_migrations on both the local and the remote
+ * database. Their text is frozen: rewriting an applied migration would not fix
+ * anything (it has already run) and would make the two databases disagree about
+ * what was applied. 0001 ships three CASE-in-trigger guards, which is why it had
+ * to be applied through `wrangler d1 execute --file` originally — the rule below
+ * exists so no *new* migration repeats that.
+ */
+const APPLIED_AND_FROZEN = new Set(["0001_architecture_v2.sql"]);
 
 const failures = [];
 
@@ -125,6 +157,32 @@ for (const name of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
 
   for (const match of code.matchAll(/\b(insert\s+into|update|delete\s+from)\s+sqlite_master\b/gi)) {
     record(match.index, "writing to sqlite_master is rejected by D1.");
+  }
+
+  // A CASE expression inside a trigger body cannot be applied remotely. The
+  // remote path posts the whole file unsplit to the D1 /query API, and that
+  // server-side splitter tracks BEGIN/END but not CASE, so the CASE's own END;
+  // closes the trigger body early and the statement is cut in half. Measured on
+  // a throwaway remote database: `BEGIN SELECT 1; END;` and
+  // `BEGIN SELECT RAISE(ABORT,'m') WHERE cond; END;` both apply, while
+  // `BEGIN SELECT CASE WHEN cond THEN RAISE(ABORT,'m') END; END;` fails with
+  // "incomplete input" at 255 bytes. Write the guard as a WHERE clause instead;
+  // it raises under exactly the same condition.
+  for (const match of APPLIED_AND_FROZEN.has(name) ? [] : code.matchAll(/\bcreate\s+trigger\b/gi)) {
+    const bodyStart = /\bBEGIN\b/i.exec(code.slice(match.index));
+    if (!bodyStart) continue;
+    const from = match.index + bodyStart.index;
+    // The body runs to the END; that closes it, which is the last END in the
+    // statement. Scan to the first `END;` that is followed by a statement break.
+    const rest = code.slice(from);
+    const bodyEnd = /\bEND\s*;/i.exec(rest);
+    const body = rest.slice(0, bodyEnd ? bodyEnd.index + bodyEnd[0].length : rest.length);
+    const caseInBody = /\bCASE\b/i.exec(body);
+    if (!caseInBody) continue;
+    record(
+      from + caseInBody.index,
+      "CASE inside a trigger body is cut in half by D1's server-side splitter (\"incomplete input\"). Rewrite as \"select raise(abort,'…') WHERE <condition>;\".",
+    );
   }
 
   // D1 caps a compound SELECT at MAX_COMPOUND_SELECT terms, inside subqueries

@@ -21,7 +21,7 @@ create table service_calendar_identity_guard (
 );
 
 insert into service_calendar_identity_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from service_calendar_identity_migration m
   join service_calendars old_calendar on old_calendar.id=m.old_id
   join service_calendars canonical on canonical.id=m.new_id
@@ -41,7 +41,7 @@ select case when count(*)=0 then 1 else 0 end
 -- its display name. Its exact dates and seven-day schedule identify the row
 -- without deriving calendar semantics from mutable text.
 insert into service_calendar_identity_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from service_calendars calendar
  where calendar.id='cal_weekday'
    and instr(lower(calendar.name),'legacy')>0
@@ -86,7 +86,7 @@ select m.new_id,e.service_date,e.exception_type,e.label
  );
 
 insert into service_calendar_identity_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from service_calendar_exceptions e
   join service_calendar_identity_migration m on m.old_id=e.calendar_id
   join service_calendar_exceptions canonical
@@ -107,7 +107,7 @@ delete from service_calendars
  where id in (select old_id from service_calendar_identity_migration);
 
 insert into service_calendar_identity_guard(valid)
-select case when count(*)=0 then 1 else 0 end
+select CASE when count(*)=0 then 1 else 0 END
   from service_calendars
  where instr(lower(id),'legacy')>0
     or instr(lower(name),'legacy')>0;
