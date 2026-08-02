@@ -71,16 +71,6 @@ const MAX_STATEMENT_BYTES = 100_000;
  */
 const MAX_COMPOUND_SELECT = 5;
 
-/**
- * Migrations already recorded in d1_migrations on both the local and the remote
- * database. Their text is frozen: rewriting an applied migration would not fix
- * anything (it has already run) and would make the two databases disagree about
- * what was applied. 0001 ships three CASE-in-trigger guards, which is why it had
- * to be applied through `wrangler d1 execute --file` originally — the rule below
- * exists so no *new* migration repeats that.
- */
-const APPLIED_AND_FROZEN = new Set(["0001_architecture_v2.sql"]);
-
 const failures = [];
 
 /** Blank out comments and string literals so keyword scanning sees only code. */
@@ -168,7 +158,7 @@ for (const name of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
   // `BEGIN SELECT CASE WHEN cond THEN RAISE(ABORT,'m') END; END;` fails with
   // "incomplete input" at 255 bytes. Write the guard as a WHERE clause instead;
   // it raises under exactly the same condition.
-  for (const match of APPLIED_AND_FROZEN.has(name) ? [] : code.matchAll(/\bcreate\s+trigger\b/gi)) {
+  for (const match of code.matchAll(/\bcreate\s+trigger\b/gi)) {
     const bodyStart = /\bBEGIN\b/i.exec(code.slice(match.index));
     if (!bodyStart) continue;
     const from = match.index + bodyStart.index;

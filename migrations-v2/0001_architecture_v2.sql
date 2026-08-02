@@ -669,32 +669,41 @@ create table jobs (
 create index idx_jobs_status on jobs(status, created_at);
 
 -- Deferred circular references that SQLite cannot declare before tables exist.
+--
+-- Each guard is a WHERE clause rather than a CASE expression. D1's server-side
+-- statement splitter tracks BEGIN/END but not CASE, so a CASE's own END; closes
+-- the trigger body early and the remote apply fails with "incomplete input".
+-- `select raise(abort,'m') where <cond>` raises under exactly the condition the
+-- CASE form did. See scripts/validate_migration_applicability.mjs.
 create trigger validate_place_current_revision
 before update of current_revision_id on places
 when new.current_revision_id is not null
-begin
-  select case when not exists (
+BEGIN
+  select raise(abort, 'current place revision must be an approved revision of the same place')
+   where not exists (
     select 1 from place_revisions r where r.id = new.current_revision_id and r.place_id = new.id and r.editorial_status = 'approved'
-  ) then raise(abort, 'current place revision must be an approved revision of the same place') end;
-end;
+  );
+END;
 
 create trigger validate_facility_current_revision
 before update of current_revision_id on facility_instances
 when new.current_revision_id is not null
-begin
-  select case when not exists (
+BEGIN
+  select raise(abort, 'current facility revision must be an approved revision of the same facility')
+   where not exists (
     select 1 from facility_revisions r where r.id = new.current_revision_id and r.facility_id = new.id and r.editorial_status = 'approved'
-  ) then raise(abort, 'current facility revision must be an approved revision of the same facility') end;
-end;
+  );
+END;
 
 create trigger validate_merchant_current_revision
 before update of current_revision_id on merchant_outlets
 when new.current_revision_id is not null
-begin
-  select case when not exists (
+BEGIN
+  select raise(abort, 'current merchant revision must be an approved revision of the same outlet')
+   where not exists (
     select 1 from merchant_revisions r where r.id = new.current_revision_id and r.outlet_id = new.id and r.editorial_status = 'approved'
-  ) then raise(abort, 'current merchant revision must be an approved revision of the same outlet') end;
-end;
+  );
+END;
 
 -- Canonical roles and taxonomies -------------------------------------------
 insert into roles(id, name, permissions_json, created_at) values
