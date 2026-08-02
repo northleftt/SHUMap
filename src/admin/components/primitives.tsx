@@ -81,23 +81,6 @@ export const EVENT_TYPE_LABELS: Record<string, string> = {
   notice: "通知",
 };
 
-export const KIND_LABELS: Record<string, string> = {
-  building: "建筑",
-  kind_building: "建筑",
-  outdoor: "室外区域",
-  kind_outdoor: "室外区域",
-  service: "服务地点",
-  kind_service: "服务地点",
-  transit: "交通站点",
-  kind_transit: "交通站点",
-  sports: "运动场馆",
-  kind_sports: "运动场馆",
-  residence: "宿舍",
-  kind_residence: "宿舍",
-  other: "其他",
-  kind_other: "其他",
-};
-
 // ---------------------------------------------------------------------------
 // 容器 / 表单
 // ---------------------------------------------------------------------------
@@ -309,9 +292,9 @@ export function EmptyState({ label }: { label: string }) {
   return <p className="rounded-lg bg-page px-4 py-8 text-center text-body text-sub">{label}</p>;
 }
 
-export function errorMessage(err: unknown, fallback: string): string {
+export function errorMessage(err: unknown, defaultMessage: string): string {
   if (err instanceof ApiError) return err.message;
-  return err instanceof Error ? err.message : fallback;
+  return err instanceof Error ? err.message : defaultMessage;
 }
 
 // ---------------------------------------------------------------------------
@@ -356,8 +339,13 @@ export function fmtRelative(iso: string | null | undefined): string {
 // 异步数据 hook（列表页共用）
 // ---------------------------------------------------------------------------
 
+export type AsyncDataState<T> =
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: "error"; message: string };
+
 export function useAsyncData<T>(loader: (signal: AbortSignal) => Promise<T>, deps: unknown[]) {
-  const [state, setState] = useState<{ status: "loading" | "ready" | "error"; data?: T; message?: string }>({ status: "loading" });
+  const [state, setState] = useState<AsyncDataState<T>>({ status: "loading" });
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { Map as MapIcon, Upload } from "lucide-react";
 import { useState } from "react";
 import * as admin from "../../lib/api/admin";
-import type { Floor, MapVersion, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
+import type { Floor, MapLifecycleStatus, MapVersion, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   Chip,
   EmptyState,
@@ -27,12 +27,12 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-const LIFECYCLE_META: Record<string, { label: string; tone: "ok" | "info" | "warning" | "neutral" }> = {
+const LIFECYCLE_META: Record<MapLifecycleStatus, { label: string; tone: "ok" | "info" | "warning" | "neutral" }> = {
   published: { label: "当前使用", tone: "ok" },
   ready: { label: "就绪", tone: "info" },
-  importing: { label: "导入中", tone: "warning" },
   archived: { label: "已归档", tone: "neutral" },
   draft: { label: "草稿", tone: "warning" },
+  rejected: { label: "已拒绝", tone: "neutral" },
 };
 
 export function MapsPage() {
@@ -58,12 +58,16 @@ export function MapsPage() {
   const [progress, setProgress] = useState("");
 
   if (state.status === "loading") return <LoadingState label="加载底图版本…" />;
-  if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
-  const data = state.data!;
+  if (state.status === "error") return <ErrorBanner message={state.message} />;
+  const data = state.data;
   const campuses = data.spaces.campuses;
   const buildings = data.spaces.buildings;
   const floors = data.spaces.floors;
-  const campusName = (id: string | null) => campuses.find((c) => c.id === id)?.name ?? "—";
+  const campusName = (id: string) => {
+    const campus = campuses.find((candidate) => candidate.id === id);
+    if (!campus) throw new Error(`底图版本引用了不存在的校区 ${id}`);
+    return campus.name;
+  };
   const floorById = new Map(floors.map((f) => [f.id, f]));
   const buildingByPlaceId = new Map(buildings.map((b) => [b.placeId, b]));
   const floorOptions: Floor[] = buildingPlaceId
@@ -73,18 +77,25 @@ export function MapsPage() {
   /** 楼层版本的 campus_id 为 null（schema 二选一约束），归属校区经楼宇解析。 */
   function versionCampusId(version: MapVersion): string | null {
     if (version.campusId) return version.campusId;
-    const floor = version.floorId ? floorById.get(version.floorId) : undefined;
-    if (!floor) return null;
-    return buildingByPlaceId.get(floor.buildingPlaceId)?.campusId ?? null;
+    if (!version.floorId) throw new Error(`底图版本 ${version.id} 没有校区或楼层目标`);
+    const floor = floorById.get(version.floorId);
+    if (!floor) throw new Error(`底图版本 ${version.id} 引用了不存在的楼层 ${version.floorId}`);
+    const building = buildingByPlaceId.get(floor.buildingPlaceId);
+    if (!building) throw new Error(`楼层 ${floor.id} 引用了不存在的楼宇 ${floor.buildingPlaceId}`);
+    if (!building.campusId) throw new Error(`楼宇 ${building.placeId} 没有校区`);
+    return building.campusId;
   }
 
   /** 列表主标题：校区图显示校区，楼层图显示「楼宇 · 楼层」。 */
   function versionTarget(version: MapVersion): string {
     if (version.campusId) return campusName(version.campusId);
-    const floor = version.floorId ? floorById.get(version.floorId) : undefined;
-    if (!floor) return "未知目标";
+    if (!version.floorId) throw new Error(`底图版本 ${version.id} 没有校区或楼层目标`);
+    const floor = floorById.get(version.floorId);
+    if (!floor) throw new Error(`底图版本 ${version.id} 引用了不存在的楼层 ${version.floorId}`);
     const building = buildingByPlaceId.get(floor.buildingPlaceId);
-    return `${building?.displayName ?? floor.buildingPlaceId} · ${floor.displayName || floor.levelCode}`;
+    if (!building) throw new Error(`楼层 ${floor.id} 引用了不存在的楼宇 ${floor.buildingPlaceId}`);
+    if (!building.displayName) throw new Error(`楼宇 ${building.placeId} 没有当前名称`);
+    return `${building.displayName} · ${floor.displayName}`;
   }
 
   const visible = data.maps.filter((m) => campusFilter === "all" || versionCampusId(m) === campusFilter);
@@ -99,6 +110,11 @@ export function MapsPage() {
     setProgress("");
     try {
       const bytes = await file.arrayBuffer();
+      const raw = new TextDecoder().decode(bytes);
+      const parsed = new DOMParser().parseFromString(raw, "image/svg+xml");
+      if (parsed.querySelector("parsererror") || parsed.documentElement.tagName.toLowerCase() !== "svg") {
+        throw new Error("文件不是有效的 SVG");
+      }
       const hash = await sha256Hex(bytes);
       setProgress("创建上传意图…");
       const intent = await admin.createMapUploadIntent({
@@ -118,8 +134,6 @@ export function MapsPage() {
         campusId: targetKind === "campus" ? campusId : null,
         floorId: targetKind === "floor" ? floorId : null,
         versionLabel: versionLabel.trim(),
-        coordinateSpaceType: "svg_viewbox",
-        coordinateSpace: {},
       });
       setProgress("已提交导入，正在后台处理，完成后版本会显示为就绪。");
       setFile(null);
@@ -149,7 +163,7 @@ export function MapsPage() {
         <Panel padded={false}>
           <div className="divide-y divide-line">
             {visible.map((version: MapVersion) => {
-              const meta = LIFECYCLE_META[version.lifecycleStatus] ?? { label: version.lifecycleStatus, tone: "neutral" as const };
+              const meta = LIFECYCLE_META[version.lifecycleStatus];
               return (
                 <div key={version.id} className="flex items-center gap-3 px-5 py-4">
                   <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary-container text-primary">
@@ -244,7 +258,6 @@ export function MapsPage() {
             </PrimaryButton>
             {progress ? <InfoNote tone="info">{progress}</InfoNote> : null}
             <ErrorBanner message={error} />
-            <InfoNote>导入完成后新版本进入就绪状态，发布后对用户生效。</InfoNote>
           </div>
         </Panel>
       </div>

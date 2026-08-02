@@ -1,5 +1,11 @@
 import { useState } from "react";
 import * as admin from "../../lib/api/admin";
+import {
+  submissionReviewFieldKeys,
+  type SubmissionFieldDecisions,
+  type SubmissionFieldKey,
+  type SubmissionPayload,
+} from "../../../shared/submission-contract";
 import type { SubmissionPhotoRow, SubmissionRow } from "../adminTypes";
 import {
   Chip,
@@ -45,14 +51,6 @@ const TARGET_TYPE_LABELS: Record<string, string> = {
   new_place: "新地点",
 };
 
-function safeParse(value: string): Record<string, unknown> {
-  try {
-    return JSON.parse(value) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
 /** 移动端反馈类型的中文文案。 */
 const FEEDBACK_TYPE_LABELS: Record<string, string> = {
   correction: "信息纠错",
@@ -62,24 +60,19 @@ const FEEDBACK_TYPE_LABELS: Record<string, string> = {
 };
 
 /** 提取 payload 中可逐字段采纳的文本字段。 */
-function payloadFields(payload: Record<string, unknown>): Array<{ key: string; label: string; value: string }> {
-  const fields: Array<{ key: string; label: string; value: string }> = [];
-  const detail = payload.detail as Record<string, unknown> | undefined;
-  const description = payload.description ?? detail?.description;
-  const summary = payload.summary ?? detail?.summary;
-  const feedbackType = payload.feedbackType;
-  const collection = payload.collection as Record<string, unknown> | undefined;
-  if (typeof feedbackType === "string" && feedbackType) {
-    fields.push({ key: "feedbackType", label: "反馈类型", value: FEEDBACK_TYPE_LABELS[feedbackType] ?? "其他" });
+function payloadFields(payload: SubmissionPayload): Array<{ key: SubmissionFieldKey; label: string; value: string }> {
+  if (payload.submissionKind === "feedback") {
+    return [
+      { key: "description", label: "问题描述", value: payload.description },
+    ];
   }
-  if (typeof summary === "string" && summary) fields.push({ key: "summary", label: "摘要", value: summary });
-  if (typeof description === "string" && description) fields.push({ key: "description", label: "问题描述", value: description });
-  if (collection && typeof collection === "object") {
-    for (const [key, label] of [["openHours", "开放时间"], ["phone", "联系电话"], ["organization", "所属单位"]] as const) {
-      const value = collection[key];
-      if (typeof value === "string" && value) fields.push({ key: `collection.${key}`, label, value });
-    }
-    if (Array.isArray(collection.floors)) fields.push({ key: "collection.floors", label: "楼层采集", value: `${collection.floors.length} 层` });
+  const fields: Array<{ key: SubmissionFieldKey; label: string; value: string }> = [];
+  for (const [key, label] of [["openHours", "开放时间"], ["phone", "联系电话"], ["organization", "所属单位"]] as const) {
+    const value = payload.collection[key];
+    if (value.length > 0) fields.push({ key: `collection.${key}`, label, value });
+  }
+  if (payload.collection.floors.length > 0) {
+    fields.push({ key: "collection.floors", label: "楼层采集", value: `${payload.collection.floors.length} 层` });
   }
   return fields;
 }
@@ -93,11 +86,13 @@ function payloadFields(payload: Record<string, unknown>): Array<{ key: string; l
 function SubmissionPhotos({
   photos,
   pending,
+  publishable,
   adopt,
   onAdoptChange,
 }: {
   photos: SubmissionPhotoRow[];
   pending: boolean;
+  publishable: boolean;
   adopt: boolean;
   onAdoptChange: (next: boolean) => void;
 }) {
@@ -108,7 +103,7 @@ function SubmissionPhotos({
     <div>
       <div className="mb-2 flex items-center gap-3">
         <p className="text-emphasis">提交照片（{photos.length}）</p>
-        {pending ? (
+        {pending && publishable ? (
           <label className="flex items-center gap-1.5 text-label text-sub">
             <input
               checked={adopt}
@@ -136,7 +131,9 @@ function SubmissionPhotos({
           </button>
         ))}
       </div>
-      <p className="mt-1.5 text-label text-sub">照片将在采纳后对外展示。</p>
+      <p className="mt-1.5 text-label text-sub">
+        {publishable ? "照片随地点修订通过后对外展示。" : "照片仅供审核核实，不进入公开内容。"}
+      </p>
 
       {zoomed ? (
         <div
@@ -154,7 +151,7 @@ function SubmissionPhotos({
 export function SubmissionsPage() {
   const [filter, setFilter] = useState<string>("todo");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [adopted, setAdopted] = useState<Set<string>>(new Set());
+  const [adopted, setAdopted] = useState<Set<SubmissionFieldKey>>(new Set());
   const [adoptPhotos, setAdoptPhotos] = useState(true);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -163,8 +160,8 @@ export function SubmissionsPage() {
   const { state, reload } = useAsyncData((signal) => admin.listSubmissions(signal), []);
 
   if (state.status === "loading") return <LoadingState label="加载用户提交…" />;
-  if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
-  const items = state.data!.items;
+  if (state.status === "error") return <ErrorBanner message={state.message} />;
+  const items = state.data.items;
 
   const countOf = (key: string) => {
     if (key === "all") return items.length;
@@ -178,20 +175,22 @@ export function SubmissionsPage() {
   });
 
   const selected = items.find((s) => s.id === selectedId) ?? null;
-  const selectedPayload = selected ? safeParse(selected.payloadJson) : {};
-  const fields = selected ? payloadFields(selectedPayload) : [];
-  const photos = selected?.photos ?? [];
+  const selectedPayload = selected?.payload ?? null;
+  const fields = selectedPayload ? payloadFields(selectedPayload) : [];
   const selectedMeta = selected ? (STATUS_META[selected.status] ?? STATUS_META.pending) : null;
   const selectedPending = selected ? selected.status === "pending" || selected.status === "in_review" : false;
-  const canGenerateRevision = selected?.targetType === "place" && (
-    selectedPayload.collection !== undefined || selectedPayload.detail !== undefined || selectedPayload.changes !== undefined
-  );
+  const canGenerateRevision = selected?.targetType === "place";
+  const photosPublishable = selected?.targetType === "place";
 
   function select(submission: SubmissionRow) {
     setSelectedId(submission.id);
     setNote("");
     setError("");
-    setAdopted(new Set(payloadFields(safeParse(submission.payloadJson)).map((f) => f.key)));
+    setAdopted(new Set(submissionReviewFieldKeys(
+      submission.payload,
+      submission.targetType,
+      submission.photos.length,
+    )));
     setAdoptPhotos(true);
   }
 
@@ -201,14 +200,22 @@ export function SubmissionsPage() {
     setBusy(true);
     setError("");
     try {
-      const fieldDecisions: Record<string, unknown> = Object.fromEntries(
-        fields.map((f) => [f.key, adopted.has(f.key) ? "adopt" : "skip"]),
+      if (!selectedPayload) throw new Error("提交正文缺失");
+      const reviewKeys = submissionReviewFieldKeys(selectedPayload, selected.targetType, selected.photos.length);
+      const fieldDecisions: SubmissionFieldDecisions = Object.fromEntries(
+        reviewKeys.map((key) => [key,
+          decision === "accept"
+            ? "adopt"
+            : decision === "reject"
+              ? "skip"
+              : key === "photos"
+                ? (adoptPhotos ? "adopt" : "skip")
+                : (adopted.has(key) ? "adopt" : "skip"),
+        ]),
       );
-      // photos 是给 worker 看的开关：partial 时只有 adopt 才把照片提升为公共可读。
-      if (photos.length) fieldDecisions.photos = adoptPhotos ? "adopt" : "skip";
       await admin.reviewSubmission(selected.id, {
         decision,
-        note: note.trim() || undefined,
+        note: note.trim() || null,
         fieldDecisions,
       });
       setSelectedId(null);
@@ -281,6 +288,11 @@ export function SubmissionsPage() {
 
               <div>
                 <p className="mb-2 text-emphasis">提交内容{selectedPending ? "（逐字段核对，勾选 = 采纳）" : ""}</p>
+                {selected.payload.submissionKind === "feedback" ? (
+                  <p className="mb-2 text-label text-sub">
+                    反馈类型：{FEEDBACK_TYPE_LABELS[selected.payload.feedbackType]}
+                  </p>
+                ) : null}
                 {fields.length > 0 ? (
                   <div className="divide-y divide-line rounded-lg border border-line">
                     {fields.map((field) => (
@@ -314,7 +326,8 @@ export function SubmissionsPage() {
                 adopt={adoptPhotos}
                 onAdoptChange={setAdoptPhotos}
                 pending={selectedPending}
-                photos={photos}
+                photos={selected.photos}
+                publishable={photosPublishable}
               />
 
               {selectedPending ? (

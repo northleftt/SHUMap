@@ -1,181 +1,102 @@
 # SHUMap
 
-SHUMap 是一个面向上海大学的移动端校园地图原型项目，当前重点覆盖：
+SHUMap 是上海大学校园地图与校园服务数据系统。前端使用 React、TypeScript 与 Vite，后端运行在 Cloudflare Workers，持久化层由 D1 与 R2 组成。
 
-- 校区地图浏览与 POI 搜索
-- 楼宇筛选与详情查看
-- 跨校区校车时刻查询
+## 数据模型
 
-项目目前基于 `Vite + React + TypeScript` 开发，并保留了设计稿、地图源文件、校车资料和数据处理脚本，方便继续迭代。
+当前数据统一使用 v2 架构：
 
-## 当前功能
+- `map_filter_categories` 保存地图筛选 chip。
+- `map_filter_members` 保存 chip 下的地点类型、设施类型或商户成员；一个成员只能归入一个 chip。
+- `place_kinds` 与 `places.kind_id` 保存地点分类。
+- `facility_types` 与 `facility_instances.facility_type_id` 保存设施分类和实例。
+- `place_revisions`、`facility_revisions`、`merchant_revisions` 保存完整内容与结构修订。
+- `map_features` 保存 SVG 元素解析结果，`location_anchors` 通过 `map_version_id` 和 `map_feature_id` 绑定地图要素。
+- `entity_locations` 负责地点、设施、商户、运营事件与交通站点的位置关联。
+- D1 的 active release 记录是唯一发布指针；R2 保存不可变发布产物和地图资产。
 
-### 1. 地图页
+`migrations-v2/0012_map_filter_integrity.sql` 在数据库层维持分类完整性。使用中的地点类型、设施类型和商户成员必须归入启用中的 chip。
 
-- 支持宝山、嘉定、延长三个校区切换
-- 直接读取 SVG 校园地图
-- 支持关键词搜索与分类筛选
-- 支持查看建筑详情
-- 已为部分楼宇准备高德导航坐标
-
-### 2. 校车页
-
-- 支持选择出发校区和到达校区
-- 根据日期自动切换工作日、周末、寒暑假时刻表
-- 当天会优先显示最近一班和后续班次
-
-### 3. 其他页面
-
-- `校外`
-- `我的`
-
-这两个入口目前还是占位页，后续可以继续接功能。
-
-## 技术栈
-
-- React 19
-- React Router 7
-- TypeScript
-- Vite
-- Tailwind CSS 4
-- Playwright
-- Python 脚本（用于楼宇数据提取和地理编码）
-
-## 快速开始
-
-### 安装依赖
+## 本地开发
 
 ```bash
 npm install
-```
-
-### 启动开发环境
-
-```bash
 npm run dev
 ```
 
-默认会启动本地 Vite 开发服务器。
-
-### 生产构建
+常用验证命令：
 
 ```bash
+npm run typecheck
+npm test
 npm run build
 ```
 
-如果你想本地模拟静态托管更稳妥的路由模式，也可以这样构建：
+本地应用 D1 迁移：
 
 ```bash
-VITE_ROUTER_MODE=hash npm run build
+npm run db:migrate:local
 ```
 
-### 本地预览构建结果
+生成可重复执行的 v2 种子 SQL：
 
 ```bash
-npm run preview
+npm run db:seed:v2
 ```
 
-## 网页部署
+`output/` 属于本地生成目录，不进入版本控制。
 
-项目构建后会输出到 `dist/`，可以直接部署到常见静态托管平台。
-
-- 默认构建：`npm run build`
-- 更适合静态托管的路由模式：`npm run build:edgeone`
-
-如果后面改成自定义域名、EdgeOne、Vercel、Netlify 或国内云厂商静态托管，也可以继续沿用当前项目；需要时只要调整构建环境变量即可。
-
-### EdgeOne Pages
-
-如果要快速发布一个更适合中国大陆访问的原型站，可以直接使用 EdgeOne Pages：
+`data/campus-map-assets.json` 是迁移内三张校区底图的正式资产清单。迁移生成器、R2 同步命令和发布校验共同使用其中的对象键、字节数与 SHA-256。先在本地校验源文件：
 
 ```bash
-npm run build:edgeone
+npm run maps:verify:canonical
 ```
 
-然后将构建产物 `dist/` 上传到 EdgeOne Pages，或使用官方 CLI 执行：
+完成数据库迁移前，将清单中的对象显式写入远程 R2：
 
 ```bash
-edgeone pages deploy ./dist -n shumap
+npm run maps:upload:canonical
 ```
 
-这个项目在 EdgeOne 上建议继续使用 `hash` 路由模式，能减少静态托管场景下的刷新路由问题。
+上传命令会在调用 Wrangler 前重新校验三个源文件，目标固定为 `shumap-assets/maps/campus/*.svg`。发布协调器还会逐个读取所选地图对象，核对 `media_assets.byte_size` 与 `sha256`；对象缺失或内容不一致时，release 保持 `validation_failed`。
 
-## 常用脚本
+## Cloudflare 资源
 
-### 坐标拾取
+`wrangler.jsonc` 声明以下绑定：
 
-用 Playwright 辅助人工补齐或修正楼宇坐标：
+- `DB`：D1 数据库
+- `SHUMAP_BUCKET`：R2 发布与媒体存储
+- `IMPORT_QUEUE`：地图导入队列
+- `RELEASE_COORDINATOR`：发布协调 Durable Object
+- `ASSETS`：前端构建产物
 
-```bash
-npm run pick:coords
-```
+生产发布前需要设置 `SESSION_PEPPER`。管理员初始化密钥按部署环境单独配置。
 
-它对应的脚本是 [scripts/pick_coords_playwright.js](/Users/wangyixuan/SHUMap/scripts/pick_coords_playwright.js)。
-
-### 高德地理编码
-
-批量给楼宇数据补坐标：
-
-```bash
-python3 scripts/geocode_buildings.py
-```
-
-如果需要使用高德 Web Service Key，可以在 [`.env.local`](/Users/wangyixuan/SHUMap/.env.local) 中设置：
-
-```bash
-AMAP_API_KEY=your_key_here
-```
-
-脚本也会读取 [AMAP_API_KEY.env.local](/Users/wangyixuan/SHUMap/AMAP_API_KEY.env.local)。
-
-### 从地图素材提取楼宇数据
-
-```bash
-python3 scripts/extract_buildings_from_svg.py
-```
-
-## 项目结构
+## 目录
 
 ```text
 SHUMap/
-├── src/                     前端源码
-│   ├── components/          地图底部面板、地图画布、底部导航
-│   ├── pages/               地图页、校车页、占位页
-│   ├── lib/                 地图数据、布局工具、类型定义
-│   └── utils/               校车时刻表处理逻辑
-├── data/                    楼宇数据、校车时刻表数据
-├── scripts/                 数据处理与辅助脚本
-├── 地图/                    校园地图 SVG/AI 源文件
-├── 前端设计稿/              设计稿与导出素材
-├── 校车时刻表/              校车相关 PDF 和照片资料
-└── README.md
+├── migrations-v2/          D1 v2 迁移
+├── scripts/                种子生成、校验和辅助脚本
+├── shared/                 前后端共享契约
+├── src/                    React 前端与管理后台
+├── tests/                  Node 与 SQLite 集成测试
+├── worker/                 Cloudflare Worker v2
+└── 地图/                   校园 SVG 源文件
 ```
 
-## 重要文件
+主要入口：
 
-- [src/App.tsx](/Users/wangyixuan/SHUMap/src/App.tsx)：应用路由入口
-- [src/pages/MapPage.tsx](/Users/wangyixuan/SHUMap/src/pages/MapPage.tsx)：校园地图主页面
-- [src/pages/ShuttlePage.tsx](/Users/wangyixuan/SHUMap/src/pages/ShuttlePage.tsx)：校车时刻页
-- [src/lib/mapData.ts](/Users/wangyixuan/SHUMap/src/lib/mapData.ts)：校区配置、筛选项、楼宇数据组装
-- [src/utils/shuttle.ts](/Users/wangyixuan/SHUMap/src/utils/shuttle.ts)：校车路线和时刻表查询逻辑
+- `src/App.tsx`：前端路由
+- `src/lib/release/mapData.ts`：发布地图数据解析
+- `worker/index-v2.ts`：Worker 路由
+- `scripts/generate_v2_seed.mjs`：统一种子生成器
+- `scripts/validate_v2_schema.mjs`：架构约束检查
 
-## Git 使用
+## 数据变更原则
 
-这个项目已经是一个独立 Git 仓库，并且已经连接了 GitHub 远程仓库。
-
-平时最常用的流程：
-
-```bash
-git status
-git add .
-git commit -m "feat: describe your change"
-git push
-```
-
-如果你不想一次提交所有文件，也可以只 `git add` 具体文件。
-
-## 备注
-
-- 仓库里保留了设计素材和参考资料，适合继续做原型迭代
-- 当前更偏移动端交互体验
-- `README` 会随着功能继续补充
+- 内容编辑通过修订、审核和发布链路生效。
+- 地图筛选来源只接受统一成员表。
+- 地图图形关联只接受 map feature 与 location anchor 链路。
+- 持久化 JSON 结构错误会直接中止请求或发布。
+- 发布产物具有大小上限，并通过流式 R2 读写处理。

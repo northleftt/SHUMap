@@ -1,4 +1,4 @@
-import type { Permission, SessionPrincipal } from "../domain/types";
+import { PERMISSIONS, type Permission, type SessionPrincipal } from "../domain/types";
 import type { Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
@@ -159,7 +159,10 @@ export async function updateUser(
         where ur.role_id = ? and u.status = 'active'`,
       [PROTECTED_ROLE],
     );
-    if ((owners?.count ?? 0) <= 1) {
+    if (!owners || !Number.isInteger(owners.count) || owners.count < 1) {
+      throw new Error("Could not determine the number of active owner accounts");
+    }
+    if (owners.count === 1) {
       throw new HttpError(409, "last_owner_protected", "The last active owner account cannot be disabled or demoted");
     }
   }
@@ -241,15 +244,29 @@ async function assertAssignableRole(env: Env, value: unknown): Promise<string> {
 }
 
 function splitRoleIds(value: string | null): string[] {
-  if (!value) return [];
-  return value.split(",").filter(Boolean);
+  if (value === null) return [];
+  const roleIds = value.split(",");
+  if (roleIds.some((roleId) => roleId.length === 0)) {
+    throw new Error("users.roleIds contains an empty role id");
+  }
+  if (new Set(roleIds).size !== roleIds.length) {
+    throw new Error("users.roleIds contains duplicate role ids");
+  }
+  return roleIds;
 }
 
 function parsePermissions(value: string): Permission[] {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? (parsed as Permission[]) : [];
-  } catch {
-    return [];
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("roles.permissions_json must contain an array");
+  const allowed = new Set<Permission>([...PERMISSIONS, "*"]);
+  const permissions = parsed.map((permission, index) => {
+    if (typeof permission !== "string" || !allowed.has(permission as Permission)) {
+      throw new Error(`roles.permissions_json[${index}] contains an unknown permission`);
+    }
+    return permission as Permission;
+  });
+  if (new Set(permissions).size !== permissions.length) {
+    throw new Error("roles.permissions_json contains duplicate permissions");
   }
+  return permissions;
 }

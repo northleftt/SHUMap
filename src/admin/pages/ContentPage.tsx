@@ -9,7 +9,6 @@ import {
   EditorialPill,
   EmptyState,
   ErrorBanner,
-  KIND_LABELS,
   LoadingState,
   Pill,
   Panel,
@@ -72,7 +71,7 @@ export function ContentPage() {
       ? data.places.map((p) => ({
           id: p.id,
           name: p.displayName ?? p.id,
-          type: KIND_LABELS[p.kindId] ?? p.kindId,
+          type: p.kindName,
           campus: campusName(p.campusId),
           status: p.editorialStatus ?? "draft",
           updatedAt: p.updatedAt,

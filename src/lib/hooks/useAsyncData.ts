@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
-export interface AsyncState<T> {
-  status: "loading" | "ready" | "error";
-  data?: T;
-  message?: string;
-}
+export type AsyncState<T> =
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: "error"; message: string };
 
 /** Shared async loader with abort handling + manual reload. Hoisted from admin. */
 export function useAsyncData<T>(loader: (signal: AbortSignal) => Promise<T>, deps: unknown[]) {

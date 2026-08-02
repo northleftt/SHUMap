@@ -1,4 +1,5 @@
 import type { D1Database, D1PreparedStatement, D1Value } from "../types/cloudflare";
+import { HttpError } from "./http";
 
 export async function all<T>(db: D1Database, sql: string, values: D1Value[] = []): Promise<T[]> {
   return (await statement(db, sql, values).all<T>()).results;
@@ -40,5 +41,5 @@ export async function assertExists(
   if (!/^[a-z_]+$/.test(table)) throw new Error("Unsafe table name");
   const keyColumn = PRIMARY_KEY_COLUMNS[table] ?? "id";
   const row = await first<Record<string, unknown>>(db, `select ${keyColumn} from ${table} where ${keyColumn} = ?`, [id]);
-  if (!row) throw new Error(`${label} does not exist`);
+  if (!row) throw new HttpError(400, "validation_error", `${label} does not exist`);
 }

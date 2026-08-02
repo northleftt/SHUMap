@@ -1,31 +1,34 @@
+import type { SessionPrincipal } from "../domain/types";
+import {
+  collectionPhotoMediaIds,
+  type CollectionPayload,
+} from "../../shared/submission-contract";
 import type { Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json, readJsonLimited } from "../lib/http";
 import { enforcePublicRateLimit } from "../lib/public-rate-limit";
-import { isoNow, jsonString, makeId, objectValue, requiredString } from "../lib/values";
+import { exactObject, isoNow, jsonString, makeId, requiredString } from "../lib/values";
+import { normalizeCollectionPayload, normalizeStoredCollectionPayload } from "../lib/submission-contracts";
 import { activeFacilityTypeCodes } from "./facility-types";
-import { filterAttachablePhotos, linkSubmissionPhotoStatements, normalizePhotoIds } from "./media";
+import { assertAttachablePhotos, linkSubmissionPhotoStatements } from "./media";
 
 const LOCK_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 48 * 1024;
-const MAX_FLOORS = 40;
-const MAX_FACILITIES_PER_FLOOR = 80;
-/** 大门照片（楼宇级）。 */
-const MAX_ENTRANCE_PHOTOS = 3;
-/** 每层平面图照片。 */
-const MAX_FLOOR_PHOTOS = 2;
 /** 一次采集提交最多关联的照片总数。 */
 const MAX_COLLECTION_PHOTOS = 12;
 
-interface CollectionBody {
-  deviceId?: unknown;
-  assigneeName?: unknown;
-  payload?: unknown;
-}
+const EMPTY_COLLECTION_PAYLOAD: CollectionPayload = {
+  openHours: "",
+  phone: "",
+  organization: "",
+  floors: [],
+  photoMediaIds: [],
+};
 
 interface CollectionRow {
   buildingId: string;
   deviceId: string;
+  assigneeUserId: string | null;
   assignee: string;
   status: "collecting" | "submitted" | "accepted" | "needs_recollection";
   payloadJson: string;
@@ -40,8 +43,8 @@ interface CollectionRow {
  * 任何志愿者都能看到「哪栋楼谁在采、采到哪一步」。
  * 草稿正文与提交单号只回给持锁设备本身——它是尚未审核的私有内容。
  */
-function publicTask(row: CollectionRow, deviceId: string | null) {
-  const owned = Boolean(deviceId && row.deviceId === deviceId);
+function publicTask(row: CollectionRow, userId: string) {
+  const owned = row.assigneeUserId === userId;
   return {
     buildingId: row.buildingId,
     status: row.status,
@@ -55,19 +58,12 @@ function publicTask(row: CollectionRow, deviceId: string | null) {
   };
 }
 
-function parsePayload(value: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
+function parsePayload(value: string): CollectionPayload {
+  return normalizeStoredCollectionPayload(value, "collection_tasks.payload_json");
 }
 
-function deviceIdFrom(request: Request, body?: CollectionBody): string {
-  const deviceId = requiredString(body?.deviceId ?? request.headers.get("x-shumap-device-id"), "deviceId", 120);
+function deviceIdFrom(value: unknown): string {
+  const deviceId = requiredString(value, "deviceId", 120);
   if (!/^device_[0-9a-f-]{36}$/i.test(deviceId)) {
     throw new HttpError(400, "validation_error", "Invalid deviceId");
   }
@@ -91,199 +87,121 @@ async function getRow(env: Env, buildingId: string): Promise<CollectionRow | nul
   return first<CollectionRow>(
     env.DB,
     `select building_place_id as buildingId,device_id as deviceId,assignee_name as assignee,status,
-            payload_json as payloadJson,lock_expires_at as lockExpiresAt,submission_id as submissionId,
+            assignee_user_id as assigneeUserId,payload_json as payloadJson,lock_expires_at as lockExpiresAt,submission_id as submissionId,
             updated_at as updatedAt,submitted_at as submittedAt
        from collection_tasks where building_place_id=?`,
     [buildingId],
   );
 }
 
-export async function listCollectionTasks(request: Request, env: Env): Promise<Response> {
+export async function listCollectionTasks(request: Request, env: Env, principal: SessionPrincipal): Promise<Response> {
   await enforcePublicRateLimit(request, env, "collection-list", 120);
-  const deviceId = request.headers.get("x-shumap-device-id");
   const rows = await all<CollectionRow>(
     env.DB,
     `select building_place_id as buildingId,device_id as deviceId,assignee_name as assignee,status,
-            payload_json as payloadJson,lock_expires_at as lockExpiresAt,submission_id as submissionId,
+            assignee_user_id as assigneeUserId,payload_json as payloadJson,lock_expires_at as lockExpiresAt,submission_id as submissionId,
             updated_at as updatedAt,submitted_at as submittedAt
        from collection_tasks order by updated_at desc`,
   );
-  return json({ items: rows.map((row) => publicTask(row, deviceId)) });
+  return json({ items: rows.map((row) => publicTask(row, principal.userId)) });
 }
 
-export async function claimCollectionTask(request: Request, env: Env, buildingId: string): Promise<Response> {
+export async function claimCollectionTask(request: Request, env: Env, principal: SessionPrincipal, buildingId: string): Promise<Response> {
   await enforcePublicRateLimit(request, env, "collection-claim", 30);
-  const body = await readJsonLimited<CollectionBody>(request, MAX_BODY_BYTES);
-  const deviceId = deviceIdFrom(request, body);
-  const assignee = requiredString(body.assigneeName, "assigneeName", 100);
+  const body = exactObject(await readJsonLimited<unknown>(request, MAX_BODY_BYTES), "collectionClaim", ["deviceId"]);
+  const deviceId = deviceIdFrom(body.deviceId);
+  const assignee = principal.displayName;
   await requireBuilding(env, buildingId);
 
   const now = isoNow();
   await env.DB.prepare(
-    `insert into collection_tasks(building_place_id,device_id,assignee_name,status,payload_json,lock_expires_at,created_at,updated_at)
-     values(?,?,?,'collecting','{}',?,?,?)
+    `insert into collection_tasks(building_place_id,device_id,assignee_name,assignee_user_id,status,payload_json,lock_expires_at,created_at,updated_at)
+     values(?,?,?,?,'collecting',?,?,?,?)
      on conflict(building_place_id) do update set
-       device_id=excluded.device_id,assignee_name=excluded.assignee_name,status='collecting',
+       device_id=excluded.device_id,assignee_name=excluded.assignee_name,assignee_user_id=excluded.assignee_user_id,status='collecting',
        lock_expires_at=excluded.lock_expires_at,updated_at=excluded.updated_at,
        submission_id=case when collection_tasks.status='needs_recollection' then null else collection_tasks.submission_id end,
        submitted_at=case when collection_tasks.status='needs_recollection' then null else collection_tasks.submitted_at end,
        reviewed_at=case when collection_tasks.status='needs_recollection' then null else collection_tasks.reviewed_at end
      where collection_tasks.status='needs_recollection'
         or (collection_tasks.status='collecting' and (
-          collection_tasks.device_id=excluded.device_id or collection_tasks.lock_expires_at<=excluded.updated_at
+          collection_tasks.assignee_user_id=excluded.assignee_user_id or collection_tasks.lock_expires_at<=excluded.updated_at
         ))`,
-  ).bind(buildingId, deviceId, assignee, lockExpiry(), now, now).run();
+  ).bind(buildingId, deviceId, assignee, principal.userId, jsonString(EMPTY_COLLECTION_PAYLOAD), lockExpiry(), now, now).run();
 
   const row = await getRow(env, buildingId);
-  if (!row || row.deviceId !== deviceId) {
+  if (!row || row.assigneeUserId !== principal.userId) {
     throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
   }
   if (row.status === "submitted" || row.status === "accepted") {
     throw new HttpError(409, "collection_submitted", "This collection has already been submitted");
   }
-  return json({ task: publicTask(row, deviceId) });
+  return json({ task: publicTask(row, principal.userId) });
 }
 
-export async function saveCollectionTask(request: Request, env: Env, buildingId: string): Promise<Response> {
+export async function saveCollectionTask(request: Request, env: Env, principal: SessionPrincipal, buildingId: string): Promise<Response> {
   await enforcePublicRateLimit(request, env, "collection-save", 180);
-  const body = await readJsonLimited<CollectionBody>(request, MAX_BODY_BYTES);
-  const deviceId = deviceIdFrom(request, body);
-  const payload = validatePayload(body.payload, await activeFacilityTypeCodes(env));
+  const body = exactObject(await readJsonLimited<unknown>(request, MAX_BODY_BYTES), "collectionSave", ["deviceId", "payload"]);
+  deviceIdFrom(body.deviceId);
+  const payload = normalizeCollectionPayload(body.payload, await activeFacilityTypeCodes(env));
   const now = isoNow();
   await env.DB.prepare(
     `update collection_tasks set payload_json=?,lock_expires_at=?,updated_at=?
-      where building_place_id=? and device_id=? and status='collecting' and lock_expires_at>?`,
-  ).bind(jsonString(payload), lockExpiry(), now, buildingId, deviceId, now).run();
+      where building_place_id=? and assignee_user_id=? and status='collecting' and lock_expires_at>?`,
+  ).bind(jsonString(payload), lockExpiry(), now, buildingId, principal.userId, now).run();
   const row = await getRow(env, buildingId);
   if (!row) throw new HttpError(404, "not_found", "Collection task does not exist");
-  if (row.deviceId !== deviceId) throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
+  if (row.assigneeUserId !== principal.userId) throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
   if (row.status !== "collecting") throw new HttpError(409, "invalid_state", "Only collecting tasks can be updated");
   if (!row.lockExpiresAt || row.lockExpiresAt <= now) throw new HttpError(409, "collection_lock_expired", "The collection lock has expired; claim it again before saving");
-  return json({ task: publicTask(row, deviceId) });
+  return json({ task: publicTask(row, principal.userId) });
 }
 
-export async function submitCollectionTask(request: Request, env: Env, buildingId: string): Promise<Response> {
+export async function submitCollectionTask(request: Request, env: Env, principal: SessionPrincipal, buildingId: string): Promise<Response> {
   await enforcePublicRateLimit(request, env, "collection-submit", 20);
-  const body = await readJsonLimited<CollectionBody>(request, MAX_BODY_BYTES);
-  const deviceId = deviceIdFrom(request, body);
-  const payload = validatePayload(body.payload, await activeFacilityTypeCodes(env));
+  const body = exactObject(await readJsonLimited<unknown>(request, MAX_BODY_BYTES), "collectionSubmit", ["deviceId", "payload"]);
+  deviceIdFrom(body.deviceId);
+  const payload = normalizeCollectionPayload(body.payload, await activeFacilityTypeCodes(env));
   const row = await getRow(env, buildingId);
   if (!row) throw new HttpError(404, "not_found", "Collection task does not exist");
-  if (row.deviceId !== deviceId) throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
+  if (row.assigneeUserId !== principal.userId) throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
   if ((row.status === "submitted" || row.status === "accepted") && row.submissionId) {
-    return json({ task: publicTask(row, deviceId), submissionId: row.submissionId });
+    return json({ task: publicTask(row, principal.userId), submissionId: row.submissionId });
   }
   if (row.status !== "collecting") throw new HttpError(409, "invalid_state", "Only collecting tasks can be submitted");
+  if (collectionPhotoMediaIds(payload).length === 0
+    && payload.openHours.length === 0
+    && payload.phone.length === 0
+    && payload.organization.length === 0
+    && payload.floors.length === 0) {
+    throw new HttpError(400, "validation_error", "Collection payload must contain collected information");
+  }
 
   const submissionId = makeId("submission");
   const now = isoNow();
-  // 采集草稿里的照片 id 可能已经被上一次提交占用（needs_recollection 后重交），
-  // 所以这里用宽松过滤：挂得上的挂，挂不上的静默丢弃，不让整次提交失败。
-  const photoMediaIds = await filterAttachablePhotos(env, collectionPhotoIds(payload), MAX_COLLECTION_PHOTOS);
+  const photoMediaIds = await assertAttachablePhotos(env, collectionPhotoMediaIds(payload), MAX_COLLECTION_PHOTOS);
   await env.DB.batch([
     env.DB.prepare(
-      `insert into content_submissions(id,target_type,target_id,payload_json,submitter_name,status,created_at)
-       select ?,'place',building_place_id,?,assignee_name,'pending',?
-         from collection_tasks
-        where building_place_id=? and device_id=? and status='collecting' and lock_expires_at>?`,
-    ).bind(submissionId, jsonString({ submissionKind: "collection", collection: payload }), now, buildingId, deviceId, now),
+      `insert into content_submissions(id,target_type,target_id,base_revision_id,payload_json,submitter_name,status,created_at)
+       select ?,'place',ct.building_place_id,p.current_revision_id,?,ct.assignee_name,'pending',?
+         from collection_tasks ct join places p on p.id=ct.building_place_id
+        where ct.building_place_id=? and ct.assignee_user_id=? and ct.status='collecting'
+          and ct.lock_expires_at>? and p.current_revision_id is not null`,
+    ).bind(submissionId, jsonString({ submissionKind: "collection", collection: payload }), now, buildingId, principal.userId, now),
     env.DB.prepare(
       `update collection_tasks set status='submitted',payload_json=?,lock_expires_at=null,submission_id=?,updated_at=?,submitted_at=?
-        where building_place_id=? and device_id=? and status='collecting' and lock_expires_at>?`,
-    ).bind(jsonString(payload), submissionId, now, now, buildingId, deviceId, now),
+        where building_place_id=? and assignee_user_id=? and status='collecting' and lock_expires_at>?`,
+    ).bind(jsonString(payload), submissionId, now, now, buildingId, principal.userId, now),
     ...linkSubmissionPhotoStatements(env, submissionId, photoMediaIds),
   ]);
   const submitted = await getRow(env, buildingId);
   if (!submitted) throw new HttpError(404, "not_found", "Collection task does not exist");
   if (submitted.submissionId !== submissionId) {
-    if (submitted.deviceId !== deviceId) throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
+    if (submitted.assigneeUserId !== principal.userId) throw new HttpError(409, "collection_locked", "This building is being collected by another volunteer");
     if (submitted.status === "submitted" && submitted.submissionId) {
-      return json({ task: publicTask(submitted, deviceId), submissionId: submitted.submissionId });
+      return json({ task: publicTask(submitted, principal.userId), submissionId: submitted.submissionId });
     }
     throw new HttpError(409, "collection_lock_expired", "The collection lock has expired; claim it again before submitting");
   }
-  return json({ task: publicTask(submitted, deviceId), submissionId }, { status: 201 });
-}
-
-/**
- * 采集正文校验。`facilityCodes` 是当前启用中的设施类型编码集合（来自 facility_types 表，
- * 由 facility-types.ts 带缓存提供）——停用的类型不再接受新提交，但既有草稿里的旧编码
- * 会在这里被拒，志愿者需要改成仍然启用的类型。
- */
-function validatePayload(value: unknown, facilityCodes: Set<string>): Record<string, unknown> {
-  const payload = objectValue(value, "payload");
-  const allowed = new Set(["openHours", "phone", "organization", "floors", "photoMediaIds"]);
-  for (const key of Object.keys(payload)) {
-    if (!allowed.has(key)) throw new HttpError(400, "validation_error", `Unknown collection field: ${key}`);
-  }
-  const result: Record<string, unknown> = {};
-  for (const [key, maximum] of [["openHours", 200], ["phone", 100], ["organization", 200]] as const) {
-    const raw = payload[key];
-    if (raw !== undefined && typeof raw !== "string") throw new HttpError(400, "validation_error", `${key} must be a string`);
-    const text = typeof raw === "string" ? raw.trim() : "";
-    if (text.length > maximum) throw new HttpError(400, "validation_error", `${key} is too long`);
-    result[key] = text;
-  }
-  const rawFloors = payload.floors ?? [];
-  if (!Array.isArray(rawFloors) || rawFloors.length > MAX_FLOORS) {
-    throw new HttpError(400, "validation_error", `floors must contain at most ${MAX_FLOORS} items`);
-  }
-  const levelCodes = new Set<string>();
-  result.floors = rawFloors.map((rawFloor, floorIndex) => {
-    const floor = objectValue(rawFloor, `floors[${floorIndex}]`);
-    const id = requiredString(floor.id, `floors[${floorIndex}].id`, 100);
-    const levelCode = requiredString(floor.levelCode, `floors[${floorIndex}].levelCode`, 50);
-    const normalizedLevelCode = levelCode.toLocaleLowerCase();
-    if (levelCodes.has(normalizedLevelCode)) throw new HttpError(400, "validation_error", `Duplicate floor: ${levelCode}`);
-    levelCodes.add(normalizedLevelCode);
-    const note = typeof floor.note === "string" ? floor.note.trim() : "";
-    if (note.length > 500) throw new HttpError(400, "validation_error", `floors[${floorIndex}].note is too long`);
-    // 楼层平面图照片：草稿里只存 media id，字节走 POST /api/public/media。
-    const floorPhotos = normalizePhotoIds(floor.photoMediaIds, MAX_FLOOR_PHOTOS);
-    if (!Array.isArray(floor.facilities) || floor.facilities.length > MAX_FACILITIES_PER_FLOOR) {
-      throw new HttpError(400, "validation_error", `floors[${floorIndex}].facilities is invalid`);
-    }
-    const facilityKeys = new Set<string>();
-    const facilities = floor.facilities.map((rawFacility, facilityIndex) => {
-      const facility = objectValue(rawFacility, `floors[${floorIndex}].facilities[${facilityIndex}]`);
-      const facilityId = requiredString(facility.id, "facility.id", 100);
-      const typeCode = requiredString(facility.typeCode, "facility.typeCode", 50);
-      if (!facilityCodes.has(typeCode)) throw new HttpError(400, "validation_error", `Unsupported facility type: ${typeCode}`);
-      const name = typeof facility.name === "string" ? facility.name.trim() : "";
-      const locationText = typeof facility.locationText === "string" ? facility.locationText.trim() : "";
-      if (name.length > 200 || locationText.length > 500) throw new HttpError(400, "validation_error", "Facility text is too long");
-      const facilityKey = `${typeCode}\u0000${name}\u0000${locationText}`;
-      if (facilityKeys.has(facilityKey)) throw new HttpError(400, "validation_error", "Duplicate facility on the same floor");
-      facilityKeys.add(facilityKey);
-      return { id: facilityId, typeCode, name, locationText };
-    });
-    return { id, levelCode, note, facilities, photoMediaIds: floorPhotos };
-  });
-  // 大门照片（楼宇级）。
-  result.photoMediaIds = normalizePhotoIds(payload.photoMediaIds, MAX_ENTRANCE_PHOTOS);
-  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > MAX_BODY_BYTES) {
-    throw new HttpError(413, "payload_too_large", "Collection payload must be at most 48 KiB");
-  }
-  return result;
-}
-
-/**
- * 一次采集里出现的所有照片 id：大门照片 + 每层平面图照片，按出现顺序。
- * validatePayload 已经保证结构与单处上限，这里只做扁平化。
- */
-function collectionPhotoIds(payload: Record<string, unknown>): string[] {
-  const ids: string[] = [];
-  const push = (value: unknown) => {
-    if (!Array.isArray(value)) return;
-    for (const raw of value) {
-      if (typeof raw === "string" && !ids.includes(raw)) ids.push(raw);
-    }
-  };
-  push(payload.photoMediaIds);
-  if (Array.isArray(payload.floors)) {
-    for (const floor of payload.floors) {
-      if (floor && typeof floor === "object") push((floor as Record<string, unknown>).photoMediaIds);
-    }
-  }
-  return ids.slice(0, MAX_COLLECTION_PHOTOS);
+  return json({ task: publicTask(submitted, principal.userId), submissionId }, { status: 201 });
 }

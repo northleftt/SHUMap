@@ -72,7 +72,7 @@ test("public write APIs have persistent guards and analytics has a v2 route", ()
   assert.match(worker, /\/api\/analytics\/events/);
   assert.match(collections, /readJsonLimited/);
   assert.match(collections, /collection_lock_expired/);
-  assert.match(collections, /select \?,'place',building_place_id/i);
+  assert.match(collections, /select \?,'place',ct\.building_place_id,p\.current_revision_id/i);
 });
 
 test("review queue is revision-based and collected floors are materialized", () => {
@@ -82,7 +82,12 @@ test("review queue is revision-based and collected floors are materialized", () 
   assert.match(reviews, /where r\.editorial_status='in_review'/);
   assert.match(reviews, /insert into floors/i);
   assert.match(reviews, /insert into facility_instances/i);
-  assert.match(submissions, /collectionSubmissionId/);
+  assert.match(reviews, /join content_submissions cs on cs\.id=sr\.submission_id/);
+  assert.match(reviews, /submissionPayload\.collection/);
+  assert.match(submissions, /structure_json/);
+  const page = fs.readFileSync(path.join(root, "src/admin/pages/ReviewPage.tsx"), "utf8");
+  assert.doesNotMatch(page, /collectionFloors|collectionSubmissionId|floorNotes/);
+  assert.doesNotMatch(page, /kind: "submission"/);
 });
 
 test("content editors reuse drafts and block writes while a revision is in review", () => {

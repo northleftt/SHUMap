@@ -2,28 +2,35 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { search as searchRelease } from "../../lib/api/public";
 import { recordAnalyticsEvent } from "../../lib/analytics";
-import { campusConfigs } from "../../lib/release/mapData";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import { useRecents } from "../../lib/storage/recents";
 import type { CampusKey, FilterKey, MapBuilding } from "../../lib/types";
 
 export type MapSheetMode = "collapsed" | "home" | "results" | "poi";
+export type MapSearchStatus = "idle" | "loading" | "ready" | "error";
 
-const EMPTY_BUILDINGS: MapBuilding[] = [];
-
-const CAMPUS_ID_BY_KEY: Record<CampusKey, string> = {
-  baoshan: "campus_baoshan",
-  jiading: "campus_jiading",
-  yanchang: "campus_yanchang",
-};
-
-export { CAMPUS_ID_BY_KEY };
+function filterMapBuildings(
+  buildings: MapBuilding[],
+  activeFilter: FilterKey | null,
+  searchOrder: string[] | null,
+): MapBuilding[] {
+  const matchesFilter = (building: MapBuilding) =>
+    activeFilter ? building.filterGroups.includes(activeFilter) : true;
+  if (searchOrder === null) return buildings.filter(matchesFilter);
+  const byId = new Map(buildings.map((building) => [building.id, building]));
+  return searchOrder.flatMap((id) => {
+    const building = byId.get(id);
+    return building && matchesFilter(building) ? [building] : [];
+  });
+}
 
 /** M1 地图页状态：校区/搜索/筛选/选中 POI/sheet 档位 + ?poi= 深链。 */
 export function useMapPageState() {
-  const { status: releaseStatus, release } = useRelease();
+  const releaseState = useRelease();
+  const releaseStatus = releaseState.status;
+  const release = releaseState.status === "ready" ? releaseState.release : null;
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedCampus, setSelectedCampus] = useState<CampusKey>("baoshan");
+  const [selectedCampus, setSelectedCampus] = useState<CampusKey | null>(null);
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterKey | null>(null);
   const [sheetMode, setSheetMode] = useState<MapSheetMode>("home");
@@ -31,26 +38,35 @@ export function useMapPageState() {
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
   const [selectedMerchantId, setSelectedMerchantId] = useState<string | null>(null);
   const [searchOrder, setSearchOrder] = useState<string[] | null>(null);
+  const [searchStatus, setSearchStatus] = useState<MapSearchStatus>("idle");
+  const [searchError, setSearchError] = useState("");
+  const [searchRequestVersion, setSearchRequestVersion] = useState(0);
   // 搜索命中的商户 → 其所在楼宇（商户不单设页面，落地到楼宇详情内的商户视图）
   const [merchantHitByPlace, setMerchantHitByPlace] = useState<Record<string, string>>({});
   const deepLinkAppliedRef = useRef(false);
   const { addRecent } = useRecents();
 
-  const buildings = release?.buildings ?? EMPTY_BUILDINGS;
-  const campus = campusConfigs.find((item) => item.key === selectedCampus) ?? campusConfigs[0];
+  const campuses = release ? release.campuses : null;
+  const buildings = release ? release.buildings : null;
+  const selectedCampusIndex = release && selectedCampus
+    ? release.campuses.findIndex((item) => item.key === selectedCampus)
+    : -1;
+  const campus = release ? release.campuses[selectedCampusIndex >= 0 ? selectedCampusIndex : 0] : null;
+  const activeCampusKey = campus ? campus.key : null;
+
   const campusBuildings = useMemo(
-    () => buildings.filter((building) => building.campusKey === selectedCampus),
-    [buildings, selectedCampus],
+    () => buildings ? buildings.filter((building) => building.campusKey === activeCampusKey) : null,
+    [activeCampusKey, buildings],
   );
   const buildingById = useMemo(() => {
     const map = new Map<string, MapBuilding>();
-    for (const building of buildings) map.set(building.id, building);
+    if (buildings) for (const building of buildings) map.set(building.id, building);
     return map;
   }, [buildings]);
 
   useEffect(() => {
-    recordAnalyticsEvent({ eventType: "map_view", campus: campus.label });
-  }, [campus.label]);
+    if (campus) recordAnalyticsEvent({ eventType: "map_view", campus: campus.label });
+  }, [campus]);
 
   // 服务端搜索（180ms 防抖）；结果仅作排序，渲染仍走 release 里的 building
   useEffect(() => {
@@ -58,10 +74,23 @@ export function useMapPageState() {
     if (!trimmed) {
       setSearchOrder(null);
       setMerchantHitByPlace({});
+      setSearchStatus("idle");
+      setSearchError("");
       return;
     }
     const controller = new AbortController();
-    const campusId = CAMPUS_ID_BY_KEY[selectedCampus];
+    if (!campus) {
+      setSearchOrder([]);
+      setMerchantHitByPlace({});
+      setSearchStatus("idle");
+      setSearchError("");
+      return;
+    }
+    setSearchOrder([]);
+    setMerchantHitByPlace({});
+    setSearchStatus("loading");
+    setSearchError("");
+    const campusId = campus.id;
     const timer = window.setTimeout(() => {
       searchRelease({ q: trimmed, campusId }, controller.signal)
         .then((response) => {
@@ -76,11 +105,15 @@ export function useMapPageState() {
           }
           setSearchOrder(order);
           setMerchantHitByPlace(merchantHits);
+          setSearchStatus("ready");
+          setSearchError("");
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (!controller.signal.aborted) {
             setSearchOrder([]);
             setMerchantHitByPlace({});
+            setSearchStatus("error");
+            setSearchError(error instanceof Error ? error.message : "搜索服务暂时不可用");
           }
         });
     }, 180);
@@ -88,21 +121,14 @@ export function useMapPageState() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query, selectedCampus]);
+  }, [campus, query, searchRequestVersion]);
 
   const filteredResults = useMemo(() => {
-    const matchesFilter = (building: MapBuilding) =>
-      activeFilter ? building.filterGroups.includes(activeFilter) : true;
-    if (searchOrder === null) return campusBuildings.filter(matchesFilter);
-    const ordered: MapBuilding[] = [];
-    for (const id of searchOrder) {
-      const building = campusBuildings.find((item) => item.id === id);
-      if (building && matchesFilter(building)) ordered.push(building);
-    }
-    return ordered;
+    if (!campusBuildings) return null;
+    return filterMapBuildings(campusBuildings, activeFilter, searchOrder);
   }, [activeFilter, campusBuildings, searchOrder]);
 
-  const selectedPoi = buildings.find((building) => building.poiKey === selectedPoiKey) ?? null;
+  const selectedPoi = buildings?.find((building) => building.poiKey === selectedPoiKey) ?? null;
 
   const openPoi = (
     poiKey: string,
@@ -119,7 +145,7 @@ export function useMapPageState() {
       meta: { source },
     });
     if (sheetMode !== "poi") setPreviousSheetMode(sheetMode === "collapsed" ? "home" : sheetMode);
-    if (building.campusKey !== selectedCampus) setSelectedCampus(building.campusKey);
+    if (building.campusKey !== activeCampusKey) setSelectedCampus(building.campusKey);
     setSelectedPoiKey(poiKey);
     // 搜索命中商户时直接落到该商户视图，否则展示楼宇详情
     const merchant = merchantId === undefined ? merchantHitByPlace[poiKey] ?? null : merchantId;
@@ -128,8 +154,8 @@ export function useMapPageState() {
     addRecent(poiKey);
   };
 
-  const openPoiBySvgId = (svgElementId: string) => {
-    const building = campusBuildings.find((item) => item.svgElementId === svgElementId);
+  const openPoiByFeatureId = (featureId: string) => {
+    const building = campusBuildings?.find((item) => item.mapFeatureId === featureId);
     if (building) openPoi(building.poiKey, "map_object", null);
   };
 
@@ -141,6 +167,10 @@ export function useMapPageState() {
 
   const handleQueryChange = (next: string) => {
     setQuery(next);
+    setSearchOrder(next.trim() ? [] : null);
+    setMerchantHitByPlace({});
+    setSearchStatus(next.trim() ? "loading" : "idle");
+    setSearchError("");
     setSelectedPoiKey(null);
     setSelectedMerchantId(null);
     setSheetMode(next.trim() ? "results" : "home");
@@ -150,7 +180,20 @@ export function useMapPageState() {
 
   const clearQuery = () => {
     setQuery("");
+    setSearchOrder(null);
+    setMerchantHitByPlace({});
+    setSearchStatus("idle");
+    setSearchError("");
     setSheetMode("home");
+  };
+
+  const retrySearch = () => {
+    if (!query.trim()) return;
+    setSearchOrder([]);
+    setMerchantHitByPlace({});
+    setSearchStatus("loading");
+    setSearchError("");
+    setSearchRequestVersion((version) => version + 1);
   };
 
   const handleFilterToggle = (filterKey: FilterKey) => {
@@ -168,6 +211,10 @@ export function useMapPageState() {
   const resetForCampus = (nextCampus: CampusKey) => {
     setSelectedCampus(nextCampus);
     setQuery("");
+    setSearchOrder(null);
+    setMerchantHitByPlace({});
+    setSearchStatus("idle");
+    setSearchError("");
     setActiveFilter(null);
     setSelectedPoiKey(null);
     setSelectedMerchantId(null);
@@ -177,7 +224,7 @@ export function useMapPageState() {
 
   // /map?poi=<placeId> 深链（M3 上下车点跳转）
   useEffect(() => {
-    if (deepLinkAppliedRef.current || buildings.length === 0) return;
+    if (deepLinkAppliedRef.current || !buildings) return;
     const poiParam = searchParams.get("poi");
     if (!poiParam) return;
     const building = buildingById.get(poiParam);
@@ -197,33 +244,61 @@ export function useMapPageState() {
 
   const searchActive = Boolean(query.trim()) || Boolean(activeFilter);
 
-  const matchedIds = useMemo(() => {
-    if (sheetMode === "poi" || !searchActive) return [];
-    return filteredResults.map((building) => building.svgElementId);
+  const matchedFeatureIds = useMemo(() => {
+    if (!filteredResults || sheetMode === "poi" || !searchActive) return [];
+    return filteredResults.map((building) => building.mapFeatureId);
   }, [filteredResults, searchActive, sheetMode]);
 
-  return {
-    releaseStatus,
-    campus,
-    selectedCampus,
-    campusBuildings,
+  const sharedState = {
     query,
     activeFilter,
     sheetMode,
     setSheetMode,
     selectedPoi,
     selectedMerchantId,
-    filteredResults,
     searchActive,
-    matchedIds,
+    searchStatus,
+    searchError,
+    matchedFeatureIds,
     openPoi,
-    openPoiBySvgId,
+    openPoiByFeatureId,
     closePoi,
     handleQueryChange,
     handleQueryFocus,
     clearQuery,
+    retrySearch,
     handleFilterToggle,
     handleFilterHighlight,
     resetForCampus,
+  };
+
+  if (releaseState.status !== "ready") {
+    return {
+      ...sharedState,
+      releaseStatus: releaseState.status,
+      releaseData: null,
+      campuses: null,
+      campus: null,
+      selectedCampus,
+      campusBuildings: null,
+      filteredResults: null,
+    };
+  }
+
+  const readyRelease = releaseState.release;
+  const readyCampusIndex = selectedCampus
+    ? readyRelease.campuses.findIndex((item) => item.key === selectedCampus)
+    : -1;
+  const readyCampus = readyRelease.campuses[readyCampusIndex >= 0 ? readyCampusIndex : 0];
+  const readyCampusBuildings = readyRelease.buildings.filter((building) => building.campusKey === readyCampus.key);
+  return {
+    ...sharedState,
+    releaseStatus: "ready" as const,
+    releaseData: readyRelease,
+    campuses: readyRelease.campuses,
+    campus: readyCampus,
+    selectedCampus: readyCampus.key,
+    campusBuildings: readyCampusBuildings,
+    filteredResults: filterMapBuildings(readyCampusBuildings, activeFilter, searchOrder),
   };
 }

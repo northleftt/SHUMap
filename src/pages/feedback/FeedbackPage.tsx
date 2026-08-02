@@ -2,17 +2,18 @@ import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Chip, ChipRow } from "../../components/ui/Chip";
+import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { createSubmission } from "../../lib/api/public";
-import type { SubmissionTargetType, TransitStop } from "../../lib/api/types";
+import type { FeedbackType, SubmissionTargetType } from "../../../shared/submission-contract";
+import type { TransitStop } from "../../lib/api/types";
 import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
+import type { LoadedRelease } from "../../lib/release/mapData";
 import { useIdentity } from "../../lib/storage/identity";
 import { useSubmissionsLog } from "../../lib/storage/submissionsLog";
-
-type FeedbackType = "correction" | "new_place" | "shuttle" | "other";
 
 const FEEDBACK_TYPES: Array<{ key: FeedbackType; label: string; targetType: SubmissionTargetType }> = [
   { key: "correction", label: "信息纠错", targetType: "place" },
@@ -26,8 +27,25 @@ const MAX_PHOTOS = 3;
 
 /** M11 用户反馈。照片经 POST /api/public/media 落隔离区，审核采纳后才公开。 */
 export function FeedbackPage() {
+  const releaseState = useRelease();
+  if (releaseState.status === "loading") {
+    return <div className="h-full bg-page"><LoadingState label="正在加载发布数据…" /></div>;
+  }
+  if (releaseState.status !== "ready") {
+    return (
+      <div className="h-full bg-page px-5 pt-16">
+        <EmptyState
+          title={releaseState.status === "empty" ? "反馈目标尚未发布" : "发布数据加载失败"}
+          subtitle={releaseState.status === "empty" ? "当前没有可关联的地点与站点" : "请检查网络后重试"}
+        />
+      </div>
+    );
+  }
+  return <ReadyFeedbackPage release={releaseState.release} />;
+}
+
+function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   const navigate = useNavigate();
-  const { release } = useRelease();
   const [identity] = useIdentity();
   const { addSubmission } = useSubmissionsLog();
 
@@ -42,8 +60,8 @@ export function FeedbackPage() {
   const [done, setDone] = useState(false);
   const uploads = usePhotoUploads(MAX_PHOTOS);
 
-  const buildings = useMemo(() => release?.buildings ?? [], [release]);
-  const transitStops = useMemo(() => release?.manifest.transit.stops ?? [], [release]);
+  const buildings = release.buildings;
+  const transitStops = release.manifest.transit.stops;
   const targetName = targetId
     ? type === "shuttle"
       ? (transitStops.find((stop) => stop.id === targetId)?.name ?? null)
@@ -68,10 +86,18 @@ export function FeedbackPage() {
     setError(null);
     const title = content.trim().split("\n")[0].slice(0, 30);
     try {
+      let baseRevisionId: string | null = null;
+      if (typeConfig.targetType === "place") {
+        const building = buildings.find((item) => item.poiKey === targetId);
+        if (!building) throw new Error("所选地点已不在当前发布版本中，请重新选择");
+        baseRevisionId = building.revisionId;
+      }
       const result = await createSubmission({
         targetType: typeConfig.targetType,
         targetId: targetRequired ? targetId : null,
+        baseRevisionId,
         payload: {
+          submissionKind: "feedback",
           feedbackType: type,
           description: content.trim(),
         },

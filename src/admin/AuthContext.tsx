@@ -16,8 +16,10 @@ interface AuthState {
 interface AuthContextValue {
   auth: AuthState | null;
   loading: boolean;
+  sessionError: string;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
 }
 
@@ -26,29 +28,43 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
 
-  // Resolve the current cookie session on mount. A 401 simply means "not logged in".
+  const resolveSession = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setSessionError("");
+    try {
+      const session = await getSession(signal);
+      if (signal?.aborted) return;
+      setAuth({ user: session.user, permissions: session.permissions });
+    } catch (error) {
+      if (signal?.aborted) return;
+      setAuth(null);
+      if (error instanceof ApiError && error.isUnauthorized) {
+        setSessionError("");
+      } else {
+        setSessionError(error instanceof Error ? error.message : "无法读取登录状态");
+      }
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  }, []);
+
+  // Resolve the current cookie session on mount. A 401 means there is no active session.
   useEffect(() => {
     const controller = new AbortController();
-    getSession(controller.signal)
-      .then((session) => setAuth({ user: session.user, permissions: session.permissions }))
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        if (error instanceof ApiError && error.isUnauthorized) {
-          setAuth(null);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
+    void resolveSession(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [resolveSession]);
+
+  const refresh = useCallback(() => resolveSession(), [resolveSession]);
 
   const login = useCallback(async (email: string, password: string) => {
     await apiLogin(email, password);
     // Login sets the cookie; fetch full session (incl. permissions).
     const session = await getSession();
     setAuth({ user: session.user, permissions: session.permissions });
+    setSessionError("");
   }, []);
 
   const logout = useCallback(async () => {
@@ -56,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await apiLogout();
     } finally {
       setAuth(null);
+      setSessionError("");
     }
   }, []);
 
@@ -68,8 +85,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ auth, loading, login, logout, hasPermission }),
-    [auth, loading, login, logout, hasPermission],
+    () => ({ auth, loading, sessionError, login, logout, refresh, hasPermission }),
+    [auth, loading, sessionError, login, logout, refresh, hasPermission],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

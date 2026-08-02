@@ -5,7 +5,7 @@ create table collection_tasks (
   device_id text not null,
   assignee_name text not null,
   status text not null check (status in ('collecting','submitted','accepted','needs_recollection')),
-  payload_json text not null default '{}' check (json_valid(payload_json)),
+  payload_json text not null default '{"openHours":"","phone":"","organization":"","floors":[],"photoMediaIds":[]}' check (json_valid(payload_json)),
   lock_expires_at text,
   submission_id text references content_submissions(id) on delete set null,
   created_at text not null,

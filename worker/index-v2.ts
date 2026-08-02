@@ -4,20 +4,33 @@ import { asErrorResponse, HttpError, json } from "./lib/http";
 import { handleBootstrap, handleLogin, handleLogout, handleSession, requireSession } from "./modules/auth";
 import { recordAnalyticsEvent } from "./modules/analytics";
 import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCollectionTask } from "./modules/collections";
-import { createFacilityHandler, createFacilityRevisionHandler, getFacility, listFacilities, replaceFacilityLocation, updateFacilityHandler } from "./modules/facilities";
+import { createFacilityHandler, createFacilityRevisionHandler, getFacility, listFacilities, publicFacilityStatus } from "./modules/facilities";
 import { createFacilityType, deleteFacilityType, listFacilityTypes, listPublicFacilityTypes, updateFacilityType } from "./modules/facility-types";
 import { processQueue } from "./modules/jobs";
 import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapVersions, uploadMapContent } from "./modules/maps";
 import { createAdminMediaUpload, createPublicMediaUpload, getAdminMediaContent, getPublicMedia } from "./modules/media";
-import { createMerchant, createMerchantRevision, getMerchant, listMerchants, updateMerchantHandler } from "./modules/merchants";
+import { createMerchant, createMerchantRevision, getMerchant, listMerchants } from "./modules/merchants";
 import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
-import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces, updatePlaceHandler } from "./modules/places";
-import { getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
+import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
+import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
 import { createDataSource, createFloor, createOrganization, createSpace, listCampusesAndSpaces, listReferenceData, updateFloor } from "./modules/spaces";
 import { createUser, listUsers, updateUser } from "./modules/users";
-import { createCalendar, createPattern, createRoute, createStop, createTrip, deleteTrip, listTransit, publicJourneys, replacePatternStops, updateTrip } from "./modules/transit";
+import {
+  createMapFilter,
+  createMapFilterMember,
+  createPlaceKind,
+  deleteMapFilter,
+  deleteMapFilterMember,
+  deletePlaceKind,
+  listMapFilters,
+  listPlaceKinds,
+  updateMapFilter,
+  updateMapFilterMember,
+  updatePlaceKind,
+} from "./modules/map-filters";
+import { createCalendar, createPattern, createRoute, createStop, createTrip, deleteTrip, listTransit, publicJourneys, publicTripStops, replacePatternStops, updateTrip } from "./modules/transit";
 
 export { ReleaseCoordinator } from "./modules/releases";
 
@@ -70,15 +83,30 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "GET" && path === "/api/public/operations") return listOperationalEvents(env, true);
   if (method === "GET" && path === "/api/public/campaigns") return listCampaigns(env, true);
   if (method === "GET" && path === "/api/public/transit/journeys") return publicJourneys(request, env);
+  const publicTrip = match(path, "/api/public/transit/trips/:tripId/stops");
+  if (method === "GET" && publicTrip) return publicTripStops(env, publicTrip.tripId);
   if (method === "POST" && path === "/api/public/submissions") return createSubmission(request, env);
   if (method === "GET" && path === "/api/public/facility-types") return listPublicFacilityTypes(env);
-  if (method === "GET" && path === "/api/public/collection-tasks") return listCollectionTasks(request, env);
+  if (method === "GET" && path === "/api/public/facility-status") return publicFacilityStatus(env);
+  if (method === "GET" && path === "/api/public/collection-tasks") {
+    const principal = await requireSession(request, env, "collect:data");
+    return listCollectionTasks(request, env, principal);
+  }
   const collectionClaim = match(path, "/api/public/collection-tasks/:id/claim");
-  if (method === "POST" && collectionClaim) return claimCollectionTask(request, env, collectionClaim.id);
+  if (method === "POST" && collectionClaim) {
+    const principal = await requireSession(request, env, "collect:data");
+    return claimCollectionTask(request, env, principal, collectionClaim.id);
+  }
   const collectionSubmit = match(path, "/api/public/collection-tasks/:id/submit");
-  if (method === "POST" && collectionSubmit) return submitCollectionTask(request, env, collectionSubmit.id);
+  if (method === "POST" && collectionSubmit) {
+    const principal = await requireSession(request, env, "collect:data");
+    return submitCollectionTask(request, env, principal, collectionSubmit.id);
+  }
   const collectionTask = match(path, "/api/public/collection-tasks/:id");
-  if (method === "PUT" && collectionTask) return saveCollectionTask(request, env, collectionTask.id);
+  if (method === "PUT" && collectionTask) {
+    const principal = await requireSession(request, env, "collect:data");
+    return saveCollectionTask(request, env, principal, collectionTask.id);
+  }
   if (method === "POST" && path === "/api/public/media") return createPublicMediaUpload(request, env);
   const media = match(path, "/api/public/media/:id");
   if (method === "GET" && media) return getPublicMedia(env, media.id);
@@ -140,10 +168,6 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return getPlace(env, place.id);
   }
-  if (method === "PATCH" && place) {
-    principal = await requireSession(request, env, "write:content");
-    return updatePlaceHandler(request, env, principal, place.id, requestId);
-  }
   const placeRevision = match(path, "/api/admin/places/:id/revisions");
   if (method === "POST" && placeRevision) {
     principal = await requireSession(request, env, "write:content");
@@ -162,15 +186,6 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "GET" && facility) {
     await requireSession(request, env, "read:admin");
     return getFacility(env, facility.id);
-  }
-  if (method === "PATCH" && facility) {
-    principal = await requireSession(request, env, "write:content");
-    return updateFacilityHandler(request, env, principal, facility.id, requestId);
-  }
-  const facilityLocation = match(path, "/api/admin/facilities/:id/location");
-  if (method === "PUT" && facilityLocation) {
-    principal = await requireSession(request, env, "write:content");
-    return replaceFacilityLocation(request, env, principal, facilityLocation.id, requestId);
   }
   const facilityRevision = match(path, "/api/admin/facilities/:id/revisions");
   if (method === "POST" && facilityRevision) {
@@ -210,10 +225,6 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return getMerchant(env, merchant.id);
   }
-  if (method === "PATCH" && merchant) {
-    principal = await requireSession(request, env, "write:content");
-    return updateMerchantHandler(request, env, principal, merchant.id, requestId);
-  }
   const merchantRevision = match(path, "/api/admin/merchants/:id/revisions");
   if (method === "POST" && merchantRevision) {
     principal = await requireSession(request, env, "write:content");
@@ -239,9 +250,62 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return listMapVersions(env);
   }
+  const adminMapAsset = match(path, "/api/admin/maps/:mapVersionId/asset");
+  if (method === "GET" && adminMapAsset) {
+    await requireSession(request, env, "read:admin");
+    return getAdminMapAsset(env, adminMapAsset.mapVersionId);
+  }
   if (method === "GET" && path === "/api/admin/map-features") {
     await requireSession(request, env, "read:admin");
     return listMapFeatures(request, env);
+  }
+  if (method === "GET" && path === "/api/admin/map-filters") {
+    await requireSession(request, env, "read:admin");
+    return listMapFilters(env);
+  }
+  if (method === "POST" && path === "/api/admin/map-filters") {
+    principal = await requireSession(request, env, "write:content");
+    return createMapFilter(request, env, principal, requestId);
+  }
+  if (method === "GET" && path === "/api/admin/place-kinds") {
+    await requireSession(request, env, "read:admin");
+    return listPlaceKinds(env);
+  }
+  if (method === "POST" && path === "/api/admin/place-kinds") {
+    principal = await requireSession(request, env, "write:content");
+    return createPlaceKind(request, env, principal, requestId);
+  }
+  const placeKind = match(path, "/api/admin/place-kinds/:id");
+  if (method === "PATCH" && placeKind) {
+    principal = await requireSession(request, env, "write:content");
+    return updatePlaceKind(request, env, principal, placeKind.id, requestId);
+  }
+  if (method === "DELETE" && placeKind) {
+    principal = await requireSession(request, env, "write:content");
+    return deletePlaceKind(env, principal, placeKind.id, requestId);
+  }
+  const mapFilter = match(path, "/api/admin/map-filters/:id");
+  if (method === "PATCH" && mapFilter) {
+    principal = await requireSession(request, env, "write:content");
+    return updateMapFilter(request, env, principal, mapFilter.id, requestId);
+  }
+  if (method === "DELETE" && mapFilter) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteMapFilter(env, principal, mapFilter.id, requestId);
+  }
+  const mapFilterMembers = match(path, "/api/admin/map-filters/:id/members");
+  if (method === "POST" && mapFilterMembers) {
+    principal = await requireSession(request, env, "write:content");
+    return createMapFilterMember(request, env, principal, mapFilterMembers.id, requestId);
+  }
+  const mapFilterMember = match(path, "/api/admin/map-filter-members/:id");
+  if (method === "PATCH" && mapFilterMember) {
+    principal = await requireSession(request, env, "write:content");
+    return updateMapFilterMember(request, env, principal, mapFilterMember.id, requestId);
+  }
+  if (method === "DELETE" && mapFilterMember) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteMapFilterMember(env, principal, mapFilterMember.id, requestId);
   }
   if (method === "POST" && path === "/api/admin/maps/upload-intents") {
     principal = await requireSession(request, env, "write:maps");

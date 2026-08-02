@@ -1,14 +1,14 @@
-// Shuttle schedule helpers. Schedules come from the v2 public transit API
-// (GET /api/public/transit/journeys); stop identity comes from the active
-// release manifest via ReleaseContext — shuttle data shares the same
-// release-gated content source as the rest of the app.
+// Shuttle schedule helpers. Schedules and stop sequences come from the v2 public
+// transit API (GET /api/public/transit/journeys, /transit/trips/:tripId/stops);
+// stop identity comes from the active release manifest via ReleaseContext —
+// stops carry geometry and are map data, the timetable is live.
 //
 // Trip identity (tripId), booking policy, and arrivalTime: null semantics are
 // preserved from the backend contract.
 
 import academicCalendarData from "../../../data/academic-calendar.json";
 import { publicApi } from "../api";
-import type { Journey, ReleaseManifest, TransitStop } from "../api/types";
+import type { Journey, TripStop } from "../api/types";
 
 export type DateBucket = "weekday" | "weekend" | "holiday" | "winterBreak" | "summerBreak";
 
@@ -159,6 +159,12 @@ export async function fetchSchedules(
   return response.journeys.map(journeyToScheduleItem);
 }
 
+/** 取某班次的停靠序列（M7 预览的数据源）。 */
+export async function fetchTripStops(tripId: string, signal?: AbortSignal): Promise<TripStop[]> {
+  const response = await publicApi.getTripStops(tripId, signal);
+  return response.stops;
+}
+
 /** Same departure time can carry both a 预约 and a 非预约 trip — merge for the grid. */
 export type ScheduleStatus = "reservation" | "nonReservation" | "mixed";
 
@@ -189,29 +195,11 @@ export function mergeSchedulesByTime(schedules: ScheduleItem[]): DisplaySchedule
 }
 
 // ---------------------------------------------------------------------------
-// M7 班次路线预览 — patternStops / stopTimes (light typing over manifest arrays)
+// M7 班次路线预览 — GET /api/public/transit/trips/:tripId/stops
+//
+// 停靠序列与时刻此前读 release manifest 里冻结的那一份。班次改了要立刻生效，
+// 所以这里和 journeys 一样走实时读；manifest 只留站点。
 // ---------------------------------------------------------------------------
-
-interface PatternStopRow {
-  pattern_id: string;
-  stop_id: string;
-  stop_sequence: number;
-  pickup_type: string;
-  dropoff_type: string;
-}
-
-interface StopTimeRow {
-  trip_id: string;
-  stop_id: string;
-  stop_sequence: number;
-  arrival_time: string | null;
-  departure_time: string | null;
-}
-
-interface TripRow {
-  id: string;
-  pattern_id: string;
-}
 
 export interface TripPreviewStop {
   stopId: string;
@@ -228,36 +216,22 @@ export interface TripPreviewStop {
  * Current data only carries the first departure time — later times are null.
  */
 export function buildTripPreview(
-  manifest: ReleaseManifest,
+  tripStops: TripStop[],
   schedule: ScheduleItem,
 ): { stops: TripPreviewStop[]; durationMinutes: number | null } {
-  const trips = manifest.transit.trips as unknown as TripRow[];
-  const trip = trips.find((row) => row.id === schedule.tripId);
-  if (!trip) return { stops: [], durationMinutes: null };
-
-  const stopNameById = new Map(manifest.transit.stops.map((stop) => [stop.id, stop.name]));
-  const patternStops = (manifest.transit.patternStops as unknown as PatternStopRow[])
-    .filter((row) => row.pattern_id === trip.pattern_id)
-    .sort((a, b) => a.stop_sequence - b.stop_sequence);
-  const stopTimes = (manifest.transit.stopTimes as unknown as StopTimeRow[]).filter(
-    (row) => row.trip_id === schedule.tripId,
-  );
-  const timeBySequence = new Map(stopTimes.map((row) => [row.stop_sequence, row]));
-
-  const inRange = patternStops.filter(
-    (row) => row.stop_sequence >= schedule.fromSequence && row.stop_sequence <= schedule.toSequence,
-  );
+  const inRange = tripStops
+    .filter((row) => row.stopSequence >= schedule.fromSequence && row.stopSequence <= schedule.toSequence)
+    .sort((a, b) => a.stopSequence - b.stopSequence);
 
   const stops: TripPreviewStop[] = inRange.map((row) => {
-    const time = timeBySequence.get(row.stop_sequence);
-    const isFirst = row.stop_sequence === schedule.fromSequence;
-    const isLast = row.stop_sequence === schedule.toSequence;
-    const depart = time?.departure_time ?? null;
-    const arrive = time?.arrival_time ?? null;
+    const isFirst = row.stopSequence === schedule.fromSequence;
+    const isLast = row.stopSequence === schedule.toSequence;
+    const depart = row.departureTime;
+    const arrive = row.arrivalTime;
     return {
-      stopId: row.stop_id,
-      stopName: stopNameById.get(row.stop_id) ?? row.stop_id,
-      sequence: row.stop_sequence,
+      stopId: row.stopId,
+      stopName: row.stopName,
+      sequence: row.stopSequence,
       role: isFirst ? "boarding" : isLast ? "alighting" : "intermediate",
       time: isFirst ? depart : (arrive ?? depart),
       timeLabel: isFirst ? (depart ? "发车" : null) : arrive || depart ? "到达" : null,
@@ -272,12 +246,4 @@ export function buildTripPreview(
       : null;
 
   return { stops, durationMinutes };
-}
-
-/** Resolve a transit stop to a map POI key: place_id first, then name match. */
-export function stopToPoiKey(stop: TransitStop | undefined, buildings: { poiKey: string; name: string }[]): string | null {
-  if (!stop) return null;
-  if (stop.place_id) return stop.place_id;
-  const byName = buildings.find((building) => building.name === stop.name);
-  return byName ? byName.poiKey : null;
 }

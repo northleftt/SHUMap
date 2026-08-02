@@ -2,36 +2,41 @@ import type { SessionPrincipal } from "../domain/types";
 import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, assertExists, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, makeId, objectValue, oneOf, optionalString, requiredString } from "../lib/values";
+import {
+  arrayValue,
+  booleanValue,
+  exactObject,
+  isoNow,
+  makeId,
+  oneOf,
+  optionalString,
+  partialObject,
+  requiredString,
+} from "../lib/values";
+import { normalizeLocationInputs } from "../lib/revision-contracts";
 import { audit } from "./audit";
-import { createLocation } from "./locations";
+import { planLocation } from "./locations";
 
 const PICKUP_TYPES = ["regular", "reservation_only", "none"] as const;
 const DROPOFF_TYPES = ["regular", "none"] as const;
 const BOOKING_POLICIES = ["required", "optional", "not_required"] as const;
 const MAX_PATTERN_STOPS = 40;
+const MAX_CALENDAR_EXCEPTIONS = 366;
+const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
-/**
- * Calendars imported from the shuttle timetable were seeded with the importer's
- * bucket key as their name ("legacy weekday"), which is not presentable. Resolve
- * a Chinese label from that key and fall back to the stored name for calendars
- * that an editor named, so renaming a row wins over this mapping.
- */
-const CALENDAR_LABELS: Record<string, string> = {
-  weekday: "工作日",
-  workday: "工作日",
-  weekend: "周末",
-  holiday: "节假日",
-  winterbreak: "寒假",
-  summerbreak: "暑假",
-};
-
-export function calendarDisplayName(row: { id: string; name: string }): string {
-  for (const candidate of [row.name.split(/[\s_-]+/).pop() ?? "", row.id.split(/[_-]/).pop() ?? ""]) {
-    const label = CALENDAR_LABELS[candidate.toLowerCase()];
-    if (label) return label;
+function dateValue(value: unknown, field: string): string {
+  const date = requiredString(value, field, 10);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) throw new HttpError(400, "validation_error", `${field} must be a date such as 2026-08-01`);
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  if (daysInMonth === undefined || day < 1 || day > daysInMonth) {
+    throw new HttpError(400, "validation_error", `${field} is not a valid calendar date`);
   }
-  return row.name;
+  return date;
 }
 
 /**
@@ -39,16 +44,11 @@ export function calendarDisplayName(row: { id: string; name: string }): string {
  * rows are `HH:MM`, so normalize to that shape instead of `HH:MM:SS`.
  */
 function timeValue(value: unknown, field: string): string | null {
-  if (value === undefined || value === null || value === "") return null;
+  if (value === null) return null;
   if (typeof value !== "string") throw new HttpError(400, "validation_error", `${field} must be a string`);
   const parsed = /^([01]\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(value.trim());
   if (!parsed) throw new HttpError(400, "validation_error", `${field} must be a time of day such as 07:30`);
   return `${parsed[1]}:${parsed[2]}`;
-}
-
-interface CalendarRow extends Record<string, unknown> {
-  id: string;
-  name: string;
 }
 
 export async function listTransit(env: Env): Promise<Response> {
@@ -57,7 +57,7 @@ export async function listTransit(env: Env): Promise<Response> {
     all(env.DB, "select id,code,name,operator_id as operatorId,status from transit_routes order by name"),
     all(env.DB, "select id,route_id as routeId,direction_id as directionId,name,route_anchor_id as routeAnchorId from transit_patterns order by route_id,direction_id"),
     all(env.DB, "select pattern_id as patternId,stop_id as stopId,stop_sequence as stopSequence,pickup_type as pickupType,dropoff_type as dropoffType from transit_pattern_stops order by pattern_id,stop_sequence"),
-    all<CalendarRow>(env.DB, "select id,name,timezone,valid_from as validFrom,valid_to as validTo,monday,tuesday,wednesday,thursday,friday,saturday,sunday from service_calendars order by valid_from desc,id"),
+    all(env.DB, "select id,name,timezone,valid_from as validFrom,valid_to as validTo,monday,tuesday,wednesday,thursday,friday,saturday,sunday from service_calendars order by valid_from desc,id"),
     all(env.DB, "select calendar_id as calendarId,service_date as serviceDate,exception_type as exceptionType,label from service_calendar_exceptions order by service_date"),
     all(env.DB, "select id,pattern_id as patternId,service_calendar_id as serviceCalendarId,public_label as publicLabel,booking_policy as bookingPolicy,booking_url as bookingUrl,status from transit_trips where status='active' order by id"),
     all(env.DB, "select trip_id as tripId,stop_id as stopId,stop_sequence as stopSequence,arrival_time as arrivalTime,departure_time as departureTime from transit_stop_times order by trip_id,stop_sequence"),
@@ -67,7 +67,7 @@ export async function listTransit(env: Env): Promise<Response> {
     routes,
     patterns,
     patternStops,
-    calendars: calendars.map((row) => ({ ...row, displayName: calendarDisplayName(row) })),
+    calendars,
     exceptions,
     trips,
     stopTimes,
@@ -75,26 +75,37 @@ export async function listTransit(env: Env): Promise<Response> {
 }
 
 export async function createStop(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = await readJson<Record<string, unknown>>(request);
+  const body = exactObject(await readJson<unknown>(request), "transitStop", ["name", "code", "placeId", "campusId", "locations"]);
   const name = requiredString(body.name, "name", 200);
   const placeId = optionalString(body.placeId, "placeId", 100);
   const campusId = optionalString(body.campusId, "campusId", 100);
+  const locations = normalizeLocationInputs(body.locations, "locations", 20);
+  for (const [index, location] of locations.entries()) {
+    if (location.role !== "boarding_point" && location.role !== "alighting_point") {
+      throw new HttpError(400, "validation_error", `locations[${index}].role is not supported for transit stops`);
+    }
+  }
   await Promise.all([
     assertExists(env.DB, "places", placeId, "Place"),
     assertExists(env.DB, "campuses", campusId, "Campus"),
   ]);
   const id = makeId("stop");
   const now = isoNow();
-  await env.DB.prepare("insert into transit_stops(id,place_id,campus_id,code,name,status,created_at,updated_at) values(?,?,?,?,?,'active',?,?)")
-    .bind(id, placeId, campusId, optionalString(body.code, "code", 100), name, now, now).run();
-  const locations = Array.isArray(body.locations) ? body.locations : [];
-  for (const [index, raw] of locations.entries()) await createLocation(env, "transit_stop", id, raw as never, principal, index === 0);
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("insert into transit_stops(id,place_id,campus_id,code,name,status,created_at,updated_at) values(?,?,?,?,?,'active',?,?)")
+      .bind(id, placeId, campusId, optionalString(body.code, "code", 100), name, now, now),
+  ];
+  for (const location of locations) {
+    const plan = await planLocation(env, "transit_stop", id, location, principal, now);
+    statements.push(...plan.statements);
+  }
+  await env.DB.batch(statements);
   await audit(env, principal, "transit.stop.create", "transit_stop", id, requestId, null, body);
   return json({ id }, { status: 201 });
 }
 
 export async function createRoute(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = await readJson<Record<string, unknown>>(request);
+  const body = exactObject(await readJson<unknown>(request), "transitRoute", ["name", "code", "operatorId"]);
   const id = makeId("route");
   const now = isoNow();
   const operatorId = optionalString(body.operatorId, "operatorId", 100);
@@ -106,24 +117,32 @@ export async function createRoute(request: Request, env: Env, principal: Session
 }
 
 export async function createPattern(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = await readJson<Record<string, unknown>>(request);
+  const body = exactObject(await readJson<unknown>(request), "transitPattern", ["routeId", "directionId", "name", "stops"]);
   const routeId = requiredString(body.routeId, "routeId", 100);
   await assertExists(env.DB, "transit_routes", routeId, "Route");
   const directionId = body.directionId;
   if (directionId !== 0 && directionId !== 1) throw new HttpError(400, "validation_error", "directionId must be 0 or 1");
-  const stops = Array.isArray(body.stops) ? body.stops : [];
+  const stops = arrayValue(body.stops, "stops", MAX_PATTERN_STOPS);
   if (stops.length < 2) throw new HttpError(400, "validation_error", "A route pattern requires at least two stops");
   const id = makeId("pattern");
-  const statements = [env.DB.prepare("insert into transit_patterns(id,route_id,direction_id,name) values(?,?,?,?)")
-    .bind(id, routeId, directionId, requiredString(body.name, "name", 200))];
+  const patternName = requiredString(body.name, "name", 200);
+  const plannedStops: Array<{ stopId: string; pickupType: string; dropoffType: string }> = [];
+  const seen = new Set<string>();
   for (const [index, raw] of stops.entries()) {
-    const stop = objectValue(raw, "stop");
-    const stopId = requiredString(stop.stopId, "stop.stopId", 100);
+    const stop = exactObject(raw, `stops[${index}]`, ["stopId", "pickupType", "dropoffType"]);
+    const stopId = requiredString(stop.stopId, `stops[${index}].stopId`, 100);
     await assertExists(env.DB, "transit_stops", stopId, "Stop");
-    const pickupType = optionalString(stop.pickupType, "stop.pickupType", 30) ?? "regular";
-    const dropoffType = optionalString(stop.dropoffType, "stop.dropoffType", 30) ?? "regular";
+    if (seen.has(stopId)) throw new HttpError(400, "validation_error", "A stop can appear only once in a pattern");
+    seen.add(stopId);
+    const pickupType = oneOf(stop.pickupType, `stops[${index}].pickupType`, PICKUP_TYPES);
+    const dropoffType = oneOf(stop.dropoffType, `stops[${index}].dropoffType`, DROPOFF_TYPES);
+    plannedStops.push({ stopId, pickupType, dropoffType });
+  }
+  const statements = [env.DB.prepare("insert into transit_patterns(id,route_id,direction_id,name) values(?,?,?,?)")
+    .bind(id, routeId, directionId, patternName)];
+  for (const [index, stop] of plannedStops.entries()) {
     statements.push(env.DB.prepare("insert into transit_pattern_stops(pattern_id,stop_id,stop_sequence,pickup_type,dropoff_type) values(?,?,?,?,?)")
-      .bind(id, stopId, index, pickupType, dropoffType));
+      .bind(id, stop.stopId, index, stop.pickupType, stop.dropoffType));
   }
   await env.DB.batch(statements);
   await audit(env, principal, "transit.pattern.create", "transit_pattern", id, requestId, null, body);
@@ -131,48 +150,78 @@ export async function createPattern(request: Request, env: Env, principal: Sessi
 }
 
 export async function createCalendar(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = await readJson<Record<string, unknown>>(request);
+  const body = exactObject(await readJson<unknown>(request), "serviceCalendar", [
+    "name",
+    "validFrom",
+    "validTo",
+    "weekdays",
+    "exceptions",
+    "sourceId",
+  ]);
   const id = makeId("calendar");
   const sourceId = optionalString(body.sourceId, "sourceId", 100);
   await assertExists(env.DB, "data_sources", sourceId, "Data source");
-  const weekdays = objectValue(body.weekdays, "weekdays");
-  const flags = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"].map((day) => weekdays[day] === true ? 1 : 0);
-  await env.DB.prepare(
+  const weekdays = exactObject(body.weekdays, "weekdays", WEEKDAYS);
+  const flags = WEEKDAYS.map((day) => booleanValue(weekdays[day], `weekdays.${day}`) ? 1 : 0);
+  const name = requiredString(body.name, "name", 200);
+  const validFrom = dateValue(body.validFrom, "validFrom");
+  const validTo = dateValue(body.validTo, "validTo");
+  if (validFrom > validTo) {
+    throw new HttpError(400, "validation_error", "Calendar date range is invalid");
+  }
+  const exceptions = arrayValue(body.exceptions, "exceptions", MAX_CALENDAR_EXCEPTIONS);
+  const statements: D1PreparedStatement[] = [env.DB.prepare(
     `insert into service_calendars(id,name,timezone,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id)
      values(?,?,'Asia/Shanghai',?,?,?,?,?,?,?,?,?,?)`,
-  ).bind(id, requiredString(body.name, "name", 200), requiredString(body.validFrom, "validFrom", 20), requiredString(body.validTo, "validTo", 20), ...flags, sourceId).run();
-  const exceptions = Array.isArray(body.exceptions) ? body.exceptions : [];
-  for (const raw of exceptions) {
-    const exception = objectValue(raw, "exception");
-    await env.DB.prepare("insert into service_calendar_exceptions(calendar_id,service_date,exception_type,label) values(?,?,?,?)")
-      .bind(id, requiredString(exception.date, "exception.date", 20), requiredString(exception.type, "exception.type", 20), optionalString(exception.label, "exception.label", 200)).run();
+  ).bind(id, name, validFrom, validTo, ...flags, sourceId)];
+  const exceptionDates = new Set<string>();
+  for (const [index, raw] of exceptions.entries()) {
+    const exception = exactObject(raw, `exceptions[${index}]`, ["date", "type", "label"]);
+    const type = oneOf(exception.type, `exceptions[${index}].type`, ["added", "removed"] as const);
+    const date = dateValue(exception.date, `exceptions[${index}].date`);
+    if (date < validFrom || date > validTo) {
+      throw new HttpError(400, "validation_error", `exceptions[${index}].date must be within the calendar date range`);
+    }
+    if (exceptionDates.has(date)) throw new HttpError(400, "validation_error", "Each exception date can appear only once");
+    exceptionDates.add(date);
+    statements.push(env.DB.prepare("insert into service_calendar_exceptions(calendar_id,service_date,exception_type,label) values(?,?,?,?)")
+      .bind(id, date, type, optionalString(exception.label, `exceptions[${index}].label`, 200)));
   }
+  await env.DB.batch(statements);
   await audit(env, principal, "transit.calendar.create", "service_calendar", id, requestId, null, body);
   return json({ id }, { status: 201 });
 }
 
 export async function createTrip(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = await readJson<Record<string, unknown>>(request);
+  const body = exactObject(await readJson<unknown>(request), "transitTrip", [
+    "patternId",
+    "serviceCalendarId",
+    "publicLabel",
+    "bookingPolicy",
+    "bookingUrl",
+    "sourceId",
+    "stopTimes",
+  ]);
   const patternId = requiredString(body.patternId, "patternId", 100);
   const calendarId = requiredString(body.serviceCalendarId, "serviceCalendarId", 100);
+  const sourceId = optionalString(body.sourceId, "sourceId", 100);
   await Promise.all([
     assertExists(env.DB, "transit_patterns", patternId, "Pattern"),
     assertExists(env.DB, "service_calendars", calendarId, "Calendar"),
+    assertExists(env.DB, "data_sources", sourceId, "Data source"),
   ]);
   const patternStops = await all<{ stop_id: string; stop_sequence: number }>(env.DB, "select stop_id,stop_sequence from transit_pattern_stops where pattern_id=? order by stop_sequence", [patternId]);
   if (patternStops.length === 0) throw new HttpError(400, "validation_error", "The pattern has no stop sequence yet");
-  const times = Array.isArray(body.stopTimes) ? body.stopTimes : [];
+  const times = arrayValue(body.stopTimes, "stopTimes", MAX_PATTERN_STOPS);
   if (times.length !== patternStops.length) throw new HttpError(400, "validation_error", "stopTimes must contain one item for every pattern stop");
   const id = makeId("trip");
-  const policy = body.bookingPolicy === undefined || body.bookingPolicy === null
-    ? "not_required"
-    : oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES);
+  const policy = oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES);
   const statements = [env.DB.prepare(
     `insert into transit_trips(id,pattern_id,service_calendar_id,public_label,booking_policy,booking_url,status,source_id)
      values(?,?,?,?,?,?,'active',?)`,
-  ).bind(id, patternId, calendarId, optionalString(body.publicLabel, "publicLabel", 200), policy, optionalString(body.bookingUrl, "bookingUrl", 1000), optionalString(body.sourceId, "sourceId", 100))];
+  ).bind(id, patternId, calendarId, optionalString(body.publicLabel, "publicLabel", 200), policy, optionalString(body.bookingUrl, "bookingUrl", 1000), sourceId)];
   for (const [index, raw] of times.entries()) {
-    const time = objectValue(raw, "stopTime");
+    const time = exactObject(raw, `stopTimes[${index}]`, ["arrivalTime", "departureTime"]);
     // Bind the pattern's own stop_sequence: the public journeys query compares
     // stop_times.stop_sequence across the trip, so it has to line up with the
     // pattern rather than with this array's index.
@@ -204,28 +253,25 @@ export async function replacePatternStops(
   const pattern = await first<{ id: string }>(env.DB, "select id from transit_patterns where id=?", [patternId]);
   if (!pattern) throw new HttpError(404, "not_found", "Pattern does not exist");
 
-  const body = await readJson<Record<string, unknown>>(request);
-  if (!Array.isArray(body.stops)) throw new HttpError(400, "validation_error", "stops must be an array");
-  if (body.stops.length < 2) throw new HttpError(400, "validation_error", "A route pattern requires at least two stops");
-  if (body.stops.length > MAX_PATTERN_STOPS) {
-    throw new HttpError(400, "validation_error", `A route pattern supports at most ${MAX_PATTERN_STOPS} stops`);
-  }
+  const body = exactObject(await readJson<unknown>(request), "patternStops", ["stops"]);
+  const stops = arrayValue(body.stops, "stops", MAX_PATTERN_STOPS);
+  if (stops.length < 2) throw new HttpError(400, "validation_error", "A route pattern requires at least two stops");
 
   // Validate the whole payload before touching the database: a rejected request
   // must never leave the pattern without its stop sequence.
   const activeStopIds = new Set((await all<{ id: string }>(env.DB, "select id from transit_stops where status='active'")).map((row) => row.id));
   const planned: Array<{ stopId: string; pickupType: string; dropoffType: string }> = [];
   const seen = new Set<string>();
-  for (const [index, raw] of body.stops.entries()) {
-    const stop = objectValue(raw, `stops[${index}]`);
+  for (const [index, raw] of stops.entries()) {
+    const stop = exactObject(raw, `stops[${index}]`, ["stopId", "pickupType", "dropoffType"]);
     const stopId = requiredString(stop.stopId, `stops[${index}].stopId`, 100);
     if (!activeStopIds.has(stopId)) throw new HttpError(400, "validation_error", `stops[${index}].stopId does not exist`);
     if (seen.has(stopId)) throw new HttpError(400, "validation_error", "A stop can appear only once in a pattern");
     seen.add(stopId);
     planned.push({
       stopId,
-      pickupType: stop.pickupType === undefined || stop.pickupType === null ? "regular" : oneOf(stop.pickupType, `stops[${index}].pickupType`, PICKUP_TYPES),
-      dropoffType: stop.dropoffType === undefined || stop.dropoffType === null ? "regular" : oneOf(stop.dropoffType, `stops[${index}].dropoffType`, DROPOFF_TYPES),
+      pickupType: oneOf(stop.pickupType, `stops[${index}].pickupType`, PICKUP_TYPES),
+      dropoffType: oneOf(stop.dropoffType, `stops[${index}].dropoffType`, DROPOFF_TYPES),
     });
   }
 
@@ -243,7 +289,7 @@ export async function replacePatternStops(
   if (trips.length * planned.length > 4000) {
     throw new HttpError(409, "conflict", "This pattern has too many trips to resequence in one request");
   }
-  const timeByTripStop = new Map(previousTimes.map((row) => [`${row.trip_id} ${row.stop_id}`, row]));
+  const timeByTripStop = new Map(previousTimes.map((row) => [JSON.stringify([row.trip_id, row.stop_id]), row]));
 
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("delete from transit_stop_times where trip_id in (select id from transit_trips where pattern_id=?)").bind(patternId),
@@ -255,7 +301,7 @@ export async function replacePatternStops(
   }
   for (const trip of trips) {
     for (const [index, stop] of planned.entries()) {
-      const carried = timeByTripStop.get(`${trip.id} ${stop.stopId}`);
+      const carried = timeByTripStop.get(JSON.stringify([trip.id, stop.stopId]));
       statements.push(env.DB.prepare("insert into transit_stop_times(trip_id,stop_id,stop_sequence,arrival_time,departure_time) values(?,?,?,?,?)")
         .bind(trip.id, stop.stopId, index, carried?.arrival_time ?? null, carried?.departure_time ?? null));
     }
@@ -281,34 +327,44 @@ export async function updateTrip(
   );
   if (!trip) throw new HttpError(404, "not_found", "Trip does not exist");
 
-  const body = await readJson<Record<string, unknown>>(request);
-  const calendarId = optionalString(body.serviceCalendarId, "serviceCalendarId", 100) ?? trip.service_calendar_id;
+  const body = partialObject(await readJson<unknown>(request), "transitTripUpdate", [
+    "serviceCalendarId",
+    "bookingPolicy",
+    "bookingUrl",
+    "stopTimes",
+  ]);
+  const calendarId = Object.hasOwn(body, "serviceCalendarId")
+    ? requiredString(body.serviceCalendarId, "serviceCalendarId", 100)
+    : trip.service_calendar_id;
   if (calendarId !== trip.service_calendar_id) {
     const calendar = await first<{ id: string }>(env.DB, "select id from service_calendars where id=?", [calendarId]);
     if (!calendar) throw new HttpError(400, "validation_error", "serviceCalendarId does not exist");
   }
-  const policy = body.bookingPolicy === undefined || body.bookingPolicy === null
-    ? trip.booking_policy
-    : oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES);
+  const policy = Object.hasOwn(body, "bookingPolicy")
+    ? oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES)
+    : trip.booking_policy;
+  const bookingUrl = Object.hasOwn(body, "bookingUrl")
+    ? optionalString(body.bookingUrl, "bookingUrl", 1000)
+    : trip.booking_url;
 
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("update transit_trips set service_calendar_id=?,booking_policy=?,booking_url=? where id=?")
-      .bind(calendarId, policy, optionalString(body.bookingUrl, "bookingUrl", 1000) ?? trip.booking_url, tripId),
+      .bind(calendarId, policy, bookingUrl, tripId),
   ];
 
-  if (body.stopTimes !== undefined) {
-    if (!Array.isArray(body.stopTimes)) throw new HttpError(400, "validation_error", "stopTimes must be an array");
+  if (Object.hasOwn(body, "stopTimes")) {
+    const stopTimes = arrayValue(body.stopTimes, "stopTimes", MAX_PATTERN_STOPS);
     const patternStops = await all<{ stop_id: string; stop_sequence: number }>(
       env.DB,
       "select stop_id,stop_sequence from transit_pattern_stops where pattern_id=? order by stop_sequence",
       [trip.pattern_id],
     );
-    if (body.stopTimes.length !== patternStops.length) {
+    if (stopTimes.length !== patternStops.length) {
       throw new HttpError(400, "validation_error", "stopTimes must contain one item for every pattern stop");
     }
     statements.push(env.DB.prepare("delete from transit_stop_times where trip_id=?").bind(tripId));
-    for (const [index, raw] of body.stopTimes.entries()) {
-      const time = objectValue(raw, `stopTimes[${index}]`);
+    for (const [index, raw] of stopTimes.entries()) {
+      const time = exactObject(raw, `stopTimes[${index}]`, ["arrivalTime", "departureTime"]);
       statements.push(env.DB.prepare("insert into transit_stop_times(trip_id,stop_id,stop_sequence,arrival_time,departure_time) values(?,?,?,?,?)")
         .bind(tripId, patternStops[index].stop_id, patternStops[index].stop_sequence,
           timeValue(time.arrivalTime, `stopTimes[${index}].arrivalTime`), timeValue(time.departureTime, `stopTimes[${index}].departureTime`)));
@@ -358,11 +414,47 @@ export async function publicJourneys(request: Request, env: Env): Promise<Respon
        join transit_stop_times fs on fs.trip_id=t.id and fs.stop_id=?
        join transit_stop_times ts on ts.trip_id=t.id and ts.stop_id=?
        join service_calendars c on c.id=t.service_calendar_id
+       join transit_pattern_stops fps on fps.pattern_id=p.id and fps.stop_id=fs.stop_id and fps.stop_sequence=fs.stop_sequence
+       join transit_pattern_stops tps on tps.pattern_id=p.id and tps.stop_id=ts.stop_id and tps.stop_sequence=ts.stop_sequence
       where t.status='active' and fs.stop_sequence<ts.stop_sequence and c.valid_from<=? and c.valid_to>=?
-        and c.${weekday}=1
+        and fps.pickup_type<>'none' and tps.dropoff_type<>'none'
+        and (fps.pickup_type<>'reservation_only' or t.booking_policy in ('required','optional'))
+        and (c.${weekday}=1 or exists(
+          select 1 from service_calendar_exceptions a
+           where a.calendar_id=c.id and a.service_date=? and a.exception_type='added'
+        ))
         and not exists(select 1 from service_calendar_exceptions e where e.calendar_id=c.id and e.service_date=? and e.exception_type='removed')
       order by fs.departure_time`,
-    [fromStopId, toStopId, date, date, date],
+    [fromStopId, toStopId, date, date, date, date],
   );
   return json({ date, timezone: "Asia/Shanghai", journeys }, { headers: { "cache-control": "public, max-age=60" } });
+}
+
+/**
+ * GET /api/public/transit/trips/:tripId/stops — 单个班次的完整停靠序列。
+ *
+ * M7 班次路线预览此前读 release manifest 里冻结的 patternStops / stopTimes。班次时刻
+ * 改了要立刻生效，所以这份数据和 journeys 一样走实时读，不再进快照；站点名也在这里
+ * 一并给出，免得调用方再去 manifest 里对一次。
+ */
+export async function publicTripStops(env: Env, tripId: string): Promise<Response> {
+  const trip = await first<{ id: string; patternId: string }>(
+    env.DB,
+    "select id,pattern_id as patternId from transit_trips where id=? and status='active'",
+    [tripId],
+  );
+  if (!trip) throw new HttpError(404, "not_found", "Trip does not exist");
+  // 以 pattern 的停靠序列为骨架：某一站还没录时刻时也要出现在预览里（时间留空）。
+  const stops = await all(
+    env.DB,
+    `select ps.stop_id as stopId,s.name as stopName,ps.stop_sequence as stopSequence,
+            ps.pickup_type as pickupType,ps.dropoff_type as dropoffType,
+            st.arrival_time as arrivalTime,st.departure_time as departureTime
+       from transit_pattern_stops ps
+       join transit_stops s on s.id=ps.stop_id
+       left join transit_stop_times st on st.trip_id=? and st.stop_sequence=ps.stop_sequence
+      where ps.pattern_id=? order by ps.stop_sequence`,
+    [tripId, trip.patternId],
+  );
+  return json({ tripId, patternId: trip.patternId, stops }, { headers: { "cache-control": "public, max-age=60" } });
 }

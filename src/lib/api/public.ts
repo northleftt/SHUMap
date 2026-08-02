@@ -1,12 +1,16 @@
 // Typed client for the v2 public API surface. All content is release-derived;
-// there is no fallback to bundled static data. When no release is active the
-// Worker returns 503 release_unavailable, surfaced as ApiError.isReleaseUnavailable.
+// bundled static data is never consulted. When no release is active the Worker
+// returns 503 release_unavailable, surfaced as ApiError.isReleaseUnavailable.
 
-import { apiFetch } from "./client";
+import { ApiError, apiFetch } from "./client";
+import { parseReleaseManifest } from "../release/manifestContract";
+import { parseFacilityStatusResponse, parseOperationalEventsResponse } from "./publicContract";
 import type {
   CampaignsResponse,
   CollectionTaskDto,
   CollectionTasksResponse,
+  OwnedCollectionTaskDto,
+  FacilityStatusResponse,
   JourneysResponse,
   MediaUploadResult,
   OperationalEventsResponse,
@@ -16,16 +20,30 @@ import type {
   SearchResponse,
   SubmissionInput,
   SubmissionResult,
+  TripStopsResponse,
 } from "./types";
+import type { CollectionPayload } from "../../../shared/submission-contract";
 
 /** GET /api/public/releases/current — the sole production content source. */
-export function getCurrentRelease(signal?: AbortSignal): Promise<ReleaseManifest> {
-  return apiFetch<ReleaseManifest>("/api/public/releases/current", { signal });
+export async function getCurrentRelease(signal?: AbortSignal): Promise<ReleaseManifest> {
+  const value = await apiFetch<unknown>("/api/public/releases/current", { signal });
+  return parseReleaseManifest(value);
+}
+
+/** GET /api/public/releases/current — null only when no release is active. */
+export async function getOptionalCurrentRelease(signal?: AbortSignal): Promise<ReleaseManifest | null> {
+  try {
+    return await getCurrentRelease(signal);
+  } catch (error) {
+    if (error instanceof ApiError && error.isReleaseUnavailable) return null;
+    throw error;
+  }
 }
 
 /** GET /api/public/releases/:id — immutable versioned artifact. */
-export function getRelease(releaseId: string, signal?: AbortSignal): Promise<ReleaseManifest> {
-  return apiFetch<ReleaseManifest>(`/api/public/releases/${encodeURIComponent(releaseId)}`, { signal });
+export async function getRelease(releaseId: string, signal?: AbortSignal): Promise<ReleaseManifest> {
+  const value = await apiFetch<unknown>(`/api/public/releases/${encodeURIComponent(releaseId)}`, { signal });
+  return parseReleaseManifest(value);
 }
 
 /**
@@ -76,9 +94,29 @@ export function getJourneys(
   });
 }
 
+/**
+ * GET /api/public/transit/trips/:tripId/stops — 班次的完整停靠序列（含时刻）。
+ *
+ * 不走 release manifest：班次时刻改了要立刻生效，快照里只留站点。
+ */
+export function getTripStops(tripId: string, signal?: AbortSignal): Promise<TripStopsResponse> {
+  return apiFetch<TripStopsResponse>(`/api/public/transit/trips/${encodeURIComponent(tripId)}/stops`, { signal });
+}
+
+/**
+ * GET /api/public/facility-status — 设施运营状态的实时读端。
+ *
+ * manifest 里的 operationalStatus 是发布快照基线，这里取到的新值盖在其上。
+ */
+export async function getFacilityStatus(signal?: AbortSignal): Promise<FacilityStatusResponse> {
+  const value = await apiFetch<unknown>("/api/public/facility-status", { signal });
+  return parseFacilityStatusResponse(value);
+}
+
 /** GET /api/public/operations — approved, currently-active operational events. */
-export function listOperations(signal?: AbortSignal): Promise<OperationalEventsResponse> {
-  return apiFetch<OperationalEventsResponse>("/api/public/operations", { signal });
+export async function listOperations(signal?: AbortSignal): Promise<OperationalEventsResponse> {
+  const value = await apiFetch<unknown>("/api/public/operations", { signal });
+  return parseOperationalEventsResponse(value);
 }
 
 /** GET /api/public/campaigns — approved, currently-active campaigns. */
@@ -114,13 +152,13 @@ export interface PublicFacilityType {
   code: string;
   name: string;
   iconKey: string | null;
+  status: "active" | "disabled";
 }
 
 /**
- * GET /api/public/facility-types — 仅「启用中」的设施类型。
+ * GET /api/public/facility-types — 采集读写共用的完整设施类型身份表。
  *
- * 不走 release manifest：manifest 里的 facilityTypes 是发布快照且不区分启用状态，
- * 后台停用一个类型后要立刻从采集表单消失，因此这里直读实时表。
+ * 不走 release manifest：状态需实时决定新建设施选项，历史采集记录仍用停用项解析名称。
  */
 export function listPublicFacilityTypes(signal?: AbortSignal): Promise<{ items: PublicFacilityType[] }> {
   return apiFetch<{ items: PublicFacilityType[] }>("/api/public/facility-types", { signal });
@@ -135,9 +173,9 @@ export function listCollectionTasks(deviceId: string, signal?: AbortSignal): Pro
 
 export function claimCollectionTask(
   buildingId: string,
-  body: { deviceId: string; assigneeName: string },
-): Promise<{ task: CollectionTaskDto }> {
-  return apiFetch<{ task: CollectionTaskDto }>(
+  body: { deviceId: string },
+): Promise<{ task: OwnedCollectionTaskDto }> {
+  return apiFetch<{ task: OwnedCollectionTaskDto }>(
     `/api/public/collection-tasks/${encodeURIComponent(buildingId)}/claim`,
     { method: "POST", body, headers: { "x-shumap-device-id": body.deviceId } },
   );
@@ -145,9 +183,9 @@ export function claimCollectionTask(
 
 export function saveCollectionTask(
   buildingId: string,
-  body: { deviceId: string; payload: Record<string, unknown> },
-): Promise<{ task: CollectionTaskDto }> {
-  return apiFetch<{ task: CollectionTaskDto }>(
+  body: { deviceId: string; payload: CollectionPayload },
+): Promise<{ task: OwnedCollectionTaskDto }> {
+  return apiFetch<{ task: OwnedCollectionTaskDto }>(
     `/api/public/collection-tasks/${encodeURIComponent(buildingId)}`,
     { method: "PUT", body, headers: { "x-shumap-device-id": body.deviceId } },
   );
@@ -155,9 +193,9 @@ export function saveCollectionTask(
 
 export function submitCollectionTask(
   buildingId: string,
-  body: { deviceId: string; payload: Record<string, unknown> },
-): Promise<{ task: CollectionTaskDto; submissionId: string }> {
-  return apiFetch<{ task: CollectionTaskDto; submissionId: string }>(
+  body: { deviceId: string; payload: CollectionPayload },
+): Promise<{ task: OwnedCollectionTaskDto; submissionId: string }> {
+  return apiFetch<{ task: OwnedCollectionTaskDto; submissionId: string }>(
     `/api/public/collection-tasks/${encodeURIComponent(buildingId)}/submit`,
     { method: "POST", body, headers: { "x-shumap-device-id": body.deviceId } },
   );

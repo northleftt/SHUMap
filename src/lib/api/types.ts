@@ -1,6 +1,6 @@
 // Types mirroring the v2 Worker public/admin contracts.
-// Sources of truth: worker/domain/types.ts (ReleaseManifest), worker/modules/releases.ts
-// (candidate builder + search documents), worker/modules/public.ts (endpoint payloads).
+// Sources of truth: worker/modules/releases.ts (candidate builder + search documents)
+// and worker/modules/public.ts (endpoint payloads).
 
 // ---------------------------------------------------------------------------
 // Release manifest (GET /api/public/releases/current | /releases/:id)
@@ -13,10 +13,11 @@ export interface ReleaseCampus {
   timezone: string;
 }
 
-/** Place row after normalizeJsonFields: *_json columns become parsed objects sans the Json suffix. */
 export interface ReleasePlace {
   id: string;
   kindId: string;
+  kindName: string;
+  isBuilding: boolean;
   campusId: string | null;
   parentPlaceId: string | null;
   lifecycleStatus: string;
@@ -24,8 +25,9 @@ export interface ReleasePlace {
   displayName: string;
   summary: string | null;
   description: string | null;
-  content: Record<string, unknown> | null;
+  content: Record<string, unknown>;
   contentHash: string;
+  aliases: string[];
 }
 
 export interface ReleaseFacility {
@@ -34,28 +36,29 @@ export interface ReleaseFacility {
   hostPlaceId: string | null;
   floorId: string | null;
   indoorSpaceId: string | null;
-  operationalStatus: string;
+  operationalStatus: FacilityOperationalStatus;
   quantity: number | null;
   revisionId: string;
   displayName: string;
-  serviceHours: unknown;
-  content: Record<string, unknown> | null;
+  facilityTypeStatus: "active" | "disabled";
+  serviceHours: { text: string } | null;
+  content: Record<string, unknown>;
   contentHash: string;
-  visibilityPolicy: unknown;
+  visibilityPolicy: Record<string, unknown>;
 }
 
 export interface ReleaseMerchant {
   id: string;
   organizationId: string | null;
-  hostPlaceId: string | null;
+  hostPlaceId: string;
   floorId: string | null;
   indoorSpaceId: string | null;
   revisionId: string;
   displayName: string;
   businessType: string | null;
-  openingHours: unknown;
-  contact: unknown;
-  content: Record<string, unknown> | null;
+  openingHours: { text: string } | null;
+  contact: { phone: string } | null;
+  content: Record<string, unknown>;
   contentHash: string;
 }
 
@@ -69,7 +72,7 @@ export interface ReleaseFloor {
   levelCode: string;
   levelOrder: number;
   displayName: string;
-  isPublic: number;
+  isPublic: 0 | 1;
 }
 
 /**
@@ -82,55 +85,74 @@ export interface ReleaseFacilityType {
   name: string;
   category: string;
   iconKey: string | null;
+  status: "active" | "disabled";
 }
 
-/** Map version row joined with asset checksum/key. Columns are snake_case (no normalization applied). */
+export interface ReleaseMapFilter {
+  id: string;
+  key: string;
+  label: string;
+  sortOrder: number;
+  placeKindIds: string[];
+  facilityTypeIds: string[];
+  includesMerchants: boolean;
+}
+
 export interface ReleaseMapVersion {
   id: string;
   campus_id: string | null;
   floor_id: string | null;
+  map_asset_id: string;
+  parent_version_id: string | null;
+  campusCode: string | null;
+  campusName: string | null;
   version_label: string;
-  coordinate_space_type: string;
-  coordinate_space_json?: string | null;
-  lifecycle_status: string;
+  coordinate_space_type: "svg_viewbox" | "normalized_image" | "local_metric" | "geographic";
+  coordinate_space_json: string;
+  parser_version: string | null;
+  lifecycle_status: "ready" | "published";
+  created_by: string | null;
+  created_at: string;
   checksum: string;
   assetKey: string;
-  [column: string]: unknown;
 }
 
-/** entity_locations joined with location_anchors. Anchor columns are snake_case; el.* are camelCase aliases. */
 export interface ReleaseLocation {
-  entityType: string;
+  entityType: "place" | "facility" | "merchant_outlet";
   entityId: string;
   role: string;
-  isPrimary: number;
-  // location_anchors columns (la.*)
+  isPrimary: 0 | 1;
   id: string;
   campus_id: string | null;
   building_place_id: string | null;
   floor_id: string | null;
   indoor_space_id: string | null;
-  geometry_type: string | null;
+  geometry_type: "Point" | "LineString" | "Polygon" | "MultiPolygon";
   geometry_json: string | null;
   crs: string | null;
   map_version_id: string | null;
   map_feature_id: string | null;
+  sourceElementId: string | null;
+  featureKind: "building_footprint" | "road" | "path" | "entrance" | "room" | "label" | "water" | "green" | "area" | "other" | null;
   location_hint: string | null;
-  precision_level: string | null;
+  precision_level: "campus" | "building" | "floor" | "space" | "exact" | "unknown";
   accuracy_meters: number | null;
-  verification_status: string | null;
-  [column: string]: unknown;
+  source_id: string | null;
+  verification_status: "unverified" | "reviewed" | "verified" | "rejected";
+  verified_by: string | null;
+  verified_at: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
+/**
+ * 快照里只留站点：站点带几何，属于地图数据。线路/班次/时刻/日历都是实时数据，
+ * 走 GET /api/public/transit/journeys 与 /transit/trips/:tripId/stops，不再冻结进 manifest。
+ */
 export interface ReleaseTransit {
   stops: TransitStop[];
-  routes: TransitRoute[];
-  patterns: unknown[];
-  patternStops: unknown[];
-  calendars: unknown[];
-  exceptions: unknown[];
-  trips: unknown[];
-  stopTimes: unknown[];
 }
 
 export interface TransitStop {
@@ -139,28 +161,19 @@ export interface TransitStop {
   campus_id: string | null;
   code: string | null;
   name: string;
-  status: string;
-  [column: string]: unknown;
-}
-
-export interface TransitRoute {
-  id: string;
-  code: string | null;
-  name: string;
-  operator_id: string | null;
-  status: string;
-  [column: string]: unknown;
+  status: "active";
+  created_at: string;
+  updated_at: string;
 }
 
 export type MapTarget =
   | { type: "locationAnchor"; id: string }
   | { type: "place"; id: string }
   | { type: "facility"; id: string }
-  | { type: "merchant_outlet"; id: string }
-  | { type: string; id: string };
+  | { type: "merchant_outlet"; id: string };
 
 export interface SearchDocument {
-  documentType: "place" | "facility" | "merchant_outlet" | string;
+  documentType: "place" | "facility" | "merchant_outlet";
   entityId: string;
   title: string;
   subtitle: string | null;
@@ -170,22 +183,22 @@ export interface SearchDocument {
   buildingPlaceId: string | null;
   floorId: string | null;
   facets: Array<string>;
-  mapTarget: MapTarget | null;
+  mapTarget: MapTarget;
   rankingWeight: number;
 }
 
 export interface ReleaseManifest {
   schemaVersion: 2;
-  release: { id: string; version: string; createdAt: string; artifactSha256?: string };
+  release: { id: string; version: string; createdAt: string };
   campuses: ReleaseCampus[];
   places: ReleasePlace[];
   facilities: ReleaseFacility[];
   merchants: ReleaseMerchant[];
   maps: ReleaseMapVersion[];
   locations: ReleaseLocation[];
-  /** 早于本字段发布的 artifact 里没有这两项，读取端必须容忍缺失。 */
-  floors?: ReleaseFloor[];
-  facilityTypes?: ReleaseFacilityType[];
+  floors: ReleaseFloor[];
+  facilityTypes: ReleaseFacilityType[];
+  mapFilters: ReleaseMapFilter[];
   transit: ReleaseTransit;
   searchDocuments: SearchDocument[];
   generatedAt: string;
@@ -218,30 +231,6 @@ export interface SearchResponse {
 // GET /api/public/places/:id
 // ---------------------------------------------------------------------------
 
-export interface PublicPlaceName {
-  language: string;
-  name: string;
-  nameType: string;
-}
-
-export interface PublicPlaceLocation {
-  role: string;
-  isPrimary: number;
-  id: string;
-  campus_id: string | null;
-  building_place_id: string | null;
-  floor_id: string | null;
-  indoor_space_id: string | null;
-  geometry_type: string | null;
-  geometry_json: string | null;
-  crs: string | null;
-  map_version_id: string | null;
-  map_feature_id: string | null;
-  location_hint: string | null;
-  precision_level: string | null;
-  [column: string]: unknown;
-}
-
 export interface PublicPlaceFacility {
   id: string;
   typeCode: string;
@@ -265,15 +254,17 @@ export interface PublicPlaceResponse {
   place: {
     id: string;
     kindId: string;
+    kindName: string;
+    isBuilding: boolean;
     campusId: string | null;
     lifecycleStatus: string;
     displayName: string;
     summary: string | null;
     description: string | null;
     content: Record<string, unknown>;
+    aliases: string[];
   };
-  names: PublicPlaceName[];
-  locations: PublicPlaceLocation[];
+  locations: ReleaseLocation[];
   facilities: PublicPlaceFacility[];
   floors: PublicPlaceFloor[];
 }
@@ -281,13 +272,15 @@ export interface PublicPlaceResponse {
 export interface PublicPlaceListItem {
   id: string;
   kindId: string;
+  kindName: string;
+  isBuilding: boolean;
   campusId: string | null;
   displayName: string;
   summary: string | null;
 }
 
 export interface PublicPlaceListResponse {
-  releaseId: string | null;
+  releaseId: string;
   items: PublicPlaceListItem[];
 }
 
@@ -316,11 +309,52 @@ export interface JourneysResponse {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/public/transit/trips/:tripId/stops
+// ---------------------------------------------------------------------------
+
+/** 一个班次的完整停靠序列（pattern 顺序 + 该班次的到发时刻）。 */
+export interface TripStop {
+  stopId: string;
+  stopName: string;
+  stopSequence: number;
+  pickupType: string;
+  dropoffType: string;
+  arrivalTime: string | null;
+  departureTime: string | null;
+}
+
+export interface TripStopsResponse {
+  tripId: string;
+  patternId: string;
+  stops: TripStop[];
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/public/facility-status
+// ---------------------------------------------------------------------------
+
+/** 设施 id → operational_status，盖在 manifest 的基线值之上。 */
+export type FacilityOperationalStatus = "available" | "partially_available" | "unavailable" | "unknown";
+
+export interface FacilityStatusResponse {
+  statuses: Record<string, FacilityOperationalStatus>;
+}
+
+// ---------------------------------------------------------------------------
 // Operations & campaigns (GET /api/public/operations | /campaigns)
 // ---------------------------------------------------------------------------
 
 export interface OperationalEventTarget {
-  targetType: string;
+  targetType:
+    | "place"
+    | "floor"
+    | "space"
+    | "facility"
+    | "merchant_outlet"
+    | "transit_stop"
+    | "transit_route"
+    | "transit_trip"
+    | "map_feature";
   targetId: string;
   impactType: string;
 }
@@ -335,31 +369,31 @@ export interface OperationalEventUpdate {
 /** 事件位置（live 下发，不经 release manifest）；geometryJson 为 GeoJSON 字符串。 */
 export interface OperationalEventLocation {
   id: string;
-  role: string;
-  geometryType: string | null;
-  geometryJson: string | null;
-  crs: string | null;
+  role: "event_location" | "impact_area" | "route_shape";
+  geometryType: "Point" | "Polygon" | "LineString";
+  geometryJson: string;
+  crs: "svg_viewbox";
   campusId: string | null;
 }
 
 export interface OperationalEvent {
   id: string;
-  eventType: string;
-  severity: "info" | "warning" | "critical" | string;
-  editorialStatus: string;
-  operationalStatus: string;
+  eventType: "maintenance" | "activity" | "closure" | "notice";
+  severity: "info" | "warning" | "critical";
+  editorialStatus: "approved";
+  operationalStatus: "scheduled" | "active" | "resolved" | "cancelled" | "expired";
   title: string;
   description: string | null;
   startsAt: string;
   expectedEndsAt: string | null;
   autoExpireAt: string | null;
-  resolvedAt?: string | null;
+  resolvedAt: string | null;
   lastVerifiedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  targets?: OperationalEventTarget[];
-  updates?: OperationalEventUpdate[];
-  locations?: OperationalEventLocation[];
+  targets: OperationalEventTarget[];
+  updates: OperationalEventUpdate[];
+  locations: OperationalEventLocation[];
 }
 
 export interface OperationalEventsResponse {
@@ -386,23 +420,12 @@ export interface CampaignsResponse {
 // POST /api/public/submissions
 // ---------------------------------------------------------------------------
 
-export type SubmissionTargetType =
-  | "place"
-  | "facility"
-  | "merchant_outlet"
-  | "transit_stop"
-  | "new_place";
-
-export interface SubmissionInput {
-  targetType: SubmissionTargetType;
-  targetId?: string | null;
-  baseRevisionId?: string | null;
-  payload: Record<string, unknown>;
-  submitterName?: string | null;
-  submitterContact?: string | null;
-  /** Quarantined uploads from POST /api/public/media, at most 3 per submission. */
-  photoMediaIds?: string[];
-}
+export type {
+  FeedbackSubmissionInput as SubmissionInput,
+  FeedbackType,
+  SubmissionPayload,
+  SubmissionTargetType,
+} from "../../../shared/submission-contract";
 
 export interface SubmissionResult {
   id: string;
@@ -425,19 +448,32 @@ export interface MediaUploadResult {
 // Public collection tasks
 // ---------------------------------------------------------------------------
 
+import type { CollectionPayload } from "../../../shared/submission-contract";
+
 export type CollectionTaskStatus = "collecting" | "submitted" | "accepted" | "needs_recollection";
 
-export interface CollectionTaskDto {
+interface CollectionTaskDtoBase {
   buildingId: string;
   status: CollectionTaskStatus;
   assignee: string | null;
-  owned: boolean;
-  payload?: Record<string, unknown>;
   lockExpiresAt: string | null;
-  submissionId?: string | null;
   updatedAt: string;
   submittedAt: string | null;
 }
+
+export interface OwnedCollectionTaskDto extends CollectionTaskDtoBase {
+  owned: true;
+  payload: CollectionPayload;
+  submissionId: string | null;
+}
+
+export interface UnownedCollectionTaskDto extends CollectionTaskDtoBase {
+  owned: false;
+  payload?: never;
+  submissionId?: never;
+}
+
+export type CollectionTaskDto = OwnedCollectionTaskDto | UnownedCollectionTaskDto;
 
 export interface CollectionTasksResponse {
   items: CollectionTaskDto[];

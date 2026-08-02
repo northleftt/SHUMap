@@ -2,8 +2,9 @@ import { CheckCircle2, CircleAlert, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import * as admin from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
-import { getCurrentRelease } from "../../lib/api/public";
+import { getOptionalCurrentRelease } from "../../lib/api/public";
 import type { ReleaseManifest } from "../../lib/api/types";
+import type { MapLifecycleStatus } from "../../lib/api/admin";
 import { useAuth } from "../AuthContext";
 import {
   EmptyState,
@@ -25,12 +26,12 @@ import {
 // ---------------------------------------------------------------------------
 
 /** 地图版本生命周期状态的中文文案。 */
-const MAP_STATUS_LABEL: Record<string, string> = {
+const MAP_STATUS_LABEL: Record<MapLifecycleStatus, string> = {
   published: "当前使用",
   ready: "就绪",
-  importing: "导入中",
   archived: "已归档",
   draft: "草稿",
+  rejected: "已拒绝",
 };
 
 /** 校验统计项的中文文案；未列出的键不展示。 */
@@ -55,7 +56,7 @@ export function ReleasesPage() {
   const { state, reload } = useAsyncData(async (signal) => {
     const [maps, release] = await Promise.all([
       admin.listMapVersions(signal),
-      getCurrentRelease(signal).catch(() => null),
+      getOptionalCurrentRelease(signal),
     ]);
     return { maps: maps.items, release };
   }, []);
@@ -70,8 +71,8 @@ export function ReleasesPage() {
   const [rollbackMsg, setRollbackMsg] = useState("");
 
   if (state.status === "loading") return <LoadingState label="加载发布信息…" />;
-  if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
-  const data = state.data!;
+  if (state.status === "error") return <ErrorBanner message={state.message} />;
+  const data = state.data;
   const release: ReleaseManifest | null = data.release;
 
   async function publish() {
@@ -82,8 +83,9 @@ export function ReleasesPage() {
     try {
       const res = await admin.publishRelease({
         version: version.trim(),
-        summary: summary.trim() || undefined,
-        mapVersionIds: selectedMapIds.length > 0 ? selectedMapIds : undefined,
+        summary: summary.trim() || null,
+        reason: null,
+        mapVersionIds: selectedMapIds,
       });
       setResult(res);
       if (res.status === "active") {
@@ -108,7 +110,7 @@ export function ReleasesPage() {
     setRollbackMsg("");
     setError("");
     try {
-      await admin.rollbackRelease(rollbackId.trim());
+      await admin.rollbackRelease(rollbackId.trim(), { reason: null });
       setRollbackMsg(`已回滚到 ${rollbackId.trim()}`);
       setRollbackId("");
       reload();
@@ -176,7 +178,7 @@ export function ReleasesPage() {
                       />
                       <span className="min-w-0 truncate">
                         {mapVersion.versionLabel}{" "}
-                        <span className="text-sub">（{MAP_STATUS_LABEL[mapVersion.lifecycleStatus] ?? "未知状态"}）</span>
+                        <span className="text-sub">（{MAP_STATUS_LABEL[mapVersion.lifecycleStatus]}）</span>
                       </span>
                     </label>
                   );
@@ -271,7 +273,7 @@ export function ReleasesPage() {
 }
 
 /**
- * 校验失败（422）不是 { error } 信封，而是 { id, status:'validation_failed', validation }。
+ * 校验失败（422）使用 { id, status:'validation_failed', validation } 响应体，和常规 { error } 信封不同。
  * 从 ApiError.body 里取回来，供上方校验报告分支渲染；不是这个形状则返回 null 走通用错误。
  */
 function validationFailure(err: unknown): admin.PublishReleaseResult | null {

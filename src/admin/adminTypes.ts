@@ -1,5 +1,7 @@
 // v2 admin domain types. These mirror the admin API payloads in worker/modules/*.
-// The legacy POI/marker/overview model has been removed.
+// The retired POI/marker/overview model has been removed.
+
+import type { SubmissionPayload, SubmissionTargetType } from "../../shared/submission-contract";
 
 export type AdminSection =
   | "dashboard"
@@ -109,6 +111,8 @@ export interface ReferenceDataResponse {
 export interface PlaceListItem {
   id: string;
   kindId: string;
+  kindName: string;
+  isBuilding: boolean;
   campusId: string | null;
   parentPlaceId: string | null;
   stableCode: string | null;
@@ -137,7 +141,7 @@ export interface PlaceDetailResponse {
   revisions: PlaceRevision[];
   names: Array<Record<string, unknown>>;
   locations: Array<Record<string, unknown>>;
-  floors: Array<Record<string, unknown>>;
+  floors: Floor[];
 }
 
 export interface FacilityDetailResponse {
@@ -160,6 +164,9 @@ export interface FacilityListItem {
   id: string;
   facilityTypeId?: string;
   hostPlaceId?: string | null;
+  floorId?: string | null;
+  indoorSpaceId?: string | null;
+  quantity?: number | null;
   operationalStatus?: string;
   displayName?: string | null;
   editorialStatus?: EditorialStatus | null;
@@ -170,6 +177,8 @@ export interface MerchantListItem {
   id: string;
   organizationId?: string | null;
   hostPlaceId?: string | null;
+  floorId?: string | null;
+  indoorSpaceId?: string | null;
   displayName?: string | null;
   businessType?: string | null;
   editorialStatus?: EditorialStatus | null;
@@ -186,10 +195,12 @@ export interface MapVersion {
   floorId: string | null;
   versionLabel: string;
   coordinateSpaceType: string;
-  lifecycleStatus: string;
+  lifecycleStatus: MapLifecycleStatus;
   createdAt: string;
   featureCount: number;
 }
+
+export type MapLifecycleStatus = "draft" | "ready" | "published" | "archived" | "rejected";
 
 // ---------------------------------------------------------------------------
 // Operations + campaigns
@@ -257,18 +268,13 @@ export interface TransitPatternStopRow {
   patternId: string;
   stopId: string;
   stopSequence: number;
-  pickupType: string;
-  dropoffType: string;
+  pickupType: TransitPickupType;
+  dropoffType: TransitDropoffType;
 }
 
-/**
- * 服务日历。`displayName` 由后端解析（导入数据的 name 是英文桶名），
- * 界面一律显示 displayName。
- */
 export interface ServiceCalendarRow {
   id: string;
   name: string;
-  displayName: string;
   timezone: string;
   validFrom: string;
   validTo: string;
@@ -288,7 +294,7 @@ export interface TransitTripRow {
   patternId: string;
   serviceCalendarId: string;
   publicLabel: string | null;
-  bookingPolicy: string;
+  bookingPolicy: TransitBookingPolicy;
   bookingUrl: string | null;
   status: string;
 }
@@ -325,16 +331,16 @@ export interface SubmissionPhotoRow {
 
 export interface SubmissionRow {
   id: string;
-  targetType: string;
+  targetType: SubmissionTargetType;
   targetId: string | null;
   baseRevisionId: string | null;
-  payloadJson: string;
+  payload: SubmissionPayload;
   submitterName: string | null;
   submitterContact: string | null;
   status: string;
   createdAt: string;
   reviewedAt: string | null;
-  photos?: SubmissionPhotoRow[];
+  photos: SubmissionPhotoRow[];
 }
 
 // ---------------------------------------------------------------------------

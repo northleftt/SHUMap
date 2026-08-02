@@ -1,12 +1,23 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
+import {
+  arrayValue,
+  jsonObject,
+  nullablePositiveInteger,
+  nullableSingleTextObject,
+  nullableString,
+  objectValue,
+  oneOf,
+  optionalString,
+  requiredString,
+  stringValue,
+} from "../../lib/dataContract";
 import type {
   FacilityDetailResponse,
   MerchantDetailResponse,
   OperationalEventRow,
   PlaceDetailResponse,
-  ReferenceDataResponse,
 } from "../adminTypes";
 import {
   Chip,
@@ -24,40 +35,29 @@ import {
   fmtRelative,
   useAsyncData,
 } from "../components/primitives";
+import { locationDraftFromApi } from "../components/LocationEditor";
+import { readMedia } from "../components/MediaPanel";
 
 // ---------------------------------------------------------------------------
 // A3 审核中心（左队列 + 右结构化对比 / 审核操作）
 //
-// 右侧把待审修订和上一版已发布内容按「基本信息 / 详细信息 / 图片 / 楼层采集」
-// 四个分区并排对照。采集提交生成的修订，主体内容都在楼层采集里，所以正文字段
-// 之外的内容也必须完整呈现，审核员才知道自己批的是什么。
+// 右侧把待审修订和上一版已发布内容按基本信息、详细信息和图片分区对照。
 // ---------------------------------------------------------------------------
 
 type RevisionKind = "place" | "facility" | "merchant";
 
 type QueueItem =
   | { kind: RevisionKind; id: string; revisionId: string | null; title: string; at: string }
-  | { kind: "operation"; id: string; title: string; at: string; severity: string }
-  | { kind: "submission"; id: string; title: string; at: string };
+  | { kind: "operation"; id: string; title: string; at: string; severity: string };
 
 const KIND_META: Record<QueueItem["kind"], { label: string; filter: string }> = {
   place: { label: "地点", filter: "地点" },
   facility: { label: "设施", filter: "设施" },
   merchant: { label: "商户", filter: "商户" },
   operation: { label: "运营", filter: "运营事件" },
-  submission: { label: "提交", filter: "用户提交" },
 };
 
 const EMPTY_TEXT = "未填写";
-
-/** 用户提交的目标类型 → 中文，避免队列里出现原始编码。 */
-const TARGET_TYPE_LABELS: Record<string, string> = {
-  place: "地点",
-  new_place: "新地点",
-  facility: "设施",
-  merchant_outlet: "商户",
-  transit_stop: "校车站点",
-};
 
 // ---------------------------------------------------------------------------
 // 修订内容解析（content_json 及各 *_json 列都是文本，需先解析）
@@ -65,29 +65,13 @@ const TARGET_TYPE_LABELS: Record<string, string> = {
 
 type Row = Record<string, unknown>;
 
-function isObject(value: unknown): value is Row {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+function text(value: unknown, field: string): string {
+  if (value === undefined || value === null) return "";
+  return stringValue(value, field).trim();
 }
 
-function text(value: unknown): string {
-  if (typeof value === "string") return value.trim();
-  if (typeof value === "number") return String(value);
-  return "";
-}
-
-function parseObject(raw: unknown): Row {
-  if (isObject(raw)) return raw;
-  if (typeof raw !== "string" || !raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return isObject(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function nestedText(raw: unknown, key: string): string {
-  return text(parseObject(raw)[key]);
+function nestedText(raw: unknown, key: string, field: string): string {
+  return nullableSingleTextObject(raw, field, key).trim();
 }
 
 interface DiffRow {
@@ -102,67 +86,22 @@ interface MediaItem {
   state: "added" | "removed" | "kept";
 }
 
-interface FloorFacilityView {
-  name: string;
-  typeLabel: string;
-  locationText: string;
-}
-
-interface FloorView {
-  /** 采集时填的楼层编号，仅用于两侧配对，不直接显示。 */
-  levelCode: string;
-  /** 给人看的楼层名，与通过审核后写入的显示名保持一致。 */
-  levelLabel: string;
-  note: string;
-  facilities: FloorFacilityView[];
-  photoCount: number;
-}
-
-interface FloorRow {
-  floor: FloorView;
-  state: "added" | "removed" | "changed" | "kept";
-}
-
 interface DiffModel {
   meta: string;
   basic: DiffRow[];
   facts: DiffRow[];
   media: MediaItem[];
-  floors: FloorRow[];
   otherCount: number;
 }
 
-/** detail.facts 缺失时的兜底键，与客户端详情页的取值口径一致。 */
-const FACT_FALLBACK: Array<[string, string]> = [
-  ["所属单位", "organization"],
-  ["进入方式", "accessMethod"],
-  ["开放时间", "openHours"],
-  ["联系电话", "phone"],
-];
-
 const PLACE_CONTENT_KEYS = new Set([
   "detail",
-  "collectionFloors",
-  "collectionSubmissionId",
-  "floorNotes",
   "address",
-  "media",
-  "coverImageUrl",
-  "legacySvgElementId",
-  "legacyCategory",
 ]);
 
 const PLACE_DETAIL_KEYS = new Set([
   "facts",
   "media",
-  "coverImageUrl",
-  "galleryImageUrl",
-  "organization",
-  "accessMethod",
-  "openHours",
-  "phone",
-  "summary",
-  "description",
 ]);
 
 // 标签与编辑器里的字段名保持一致，审核员和编辑看到的是同一套说法。
@@ -178,104 +117,57 @@ const MERCHANT_CONTENT_FIELDS: Array<[string, string]> = [
   ["简介", "summary"],
 ];
 
-/** 详细信息：label → value。地点侧同时兼容 facts 数组与散字段两种写法。 */
+/** 地点详细信息统一存储为 detail.facts。 */
 function placeFacts(content: Row): Map<string, string> {
   const facts = new Map<string, string>();
-  const detail = isObject(content.detail) ? content.detail : {};
-  if (Array.isArray(detail.facts)) {
-    for (const raw of detail.facts) {
-      if (!isObject(raw)) continue;
-      const label = text(raw.label);
-      if (label) facts.set(label, text(raw.value));
-    }
+  const detail = objectValue(content.detail, "place_revisions.content_json.detail");
+  for (const [index, raw] of arrayValue(detail.facts, "place_revisions.content_json.detail.facts").entries()) {
+    const field = `place_revisions.content_json.detail.facts[${index}]`;
+    const fact = objectValue(raw, field);
+    const label = requiredString(fact.label, `${field}.label`).trim();
+    if (facts.has(label)) throw new Error(`${field}.label duplicates ${JSON.stringify(label)}`);
+    facts.set(label, stringValue(fact.value, `${field}.value`).trim());
   }
-  for (const [label, key] of FACT_FALLBACK) {
-    if (facts.has(label)) continue;
-    const value = text(detail[key]);
-    if (value) facts.set(label, value);
-  }
-  const address = text(content.address);
+  const address = text(content.address, "place_revisions.content_json.address");
   if (address) facts.set("地址", address);
-  const floorNotes = text(content.floorNotes);
-  if (floorNotes) facts.set("楼层备注", floorNotes);
   return facts;
 }
 
 function fieldFacts(content: Row, fields: Array<[string, string]>): Map<string, string> {
   const facts = new Map<string, string>();
   for (const [label, key] of fields) {
-    const value = text(content[key]);
+    const value = text(content[key], `content_json.${key}`);
     if (value) facts.set(label, value);
   }
   return facts;
 }
 
 function menuText(content: Row): string {
-  if (!Array.isArray(content.menu)) return "";
-  return content.menu
-    .map((item) => (isObject(item) ? text(item.name) : text(item)))
-    .filter(Boolean)
+  if (content.menu === undefined) return "";
+  return arrayValue(content.menu, "merchant_revisions.content_json.menu")
+    .map((item, index) => requiredString(
+      objectValue(item, `merchant_revisions.content_json.menu[${index}]`).name,
+      `merchant_revisions.content_json.menu[${index}].name`,
+    ).trim())
     .join("、");
 }
 
-/** 图片地址：detail.media / content.media（字符串或 {url}）+ 单图字段。 */
-function mediaUrls(content: Row): string[] {
-  const detail = isObject(content.detail) ? content.detail : {};
-  const urls: string[] = [];
-  const push = (value: string) => {
-    if (value && !urls.includes(value)) urls.push(value);
-  };
-  for (const source of [detail.media, content.media]) {
-    if (!Array.isArray(source)) continue;
-    for (const item of source) {
-      push(isObject(item) ? text(item.url) : text(item));
-    }
+function mediaUrls(kind: RevisionKind, content: Row): string[] {
+  const value = kind === "place"
+    ? objectValue(content.detail, "place_revisions.content_json.detail").media
+    : content.media;
+  if (value === undefined) return [];
+  const mediaField = kind === "place"
+    ? "place_revisions.content_json.detail.media"
+    : `${kind}_revisions.content_json.media`;
+  const urls = arrayValue(value, mediaField).map((item, index) => {
+    const field = `${mediaField}[${index}]`;
+    return requiredString(objectValue(item, field).url, `${field}.url`).trim();
+  });
+  if (new Set(urls).size !== urls.length) {
+    throw new Error(`${kind}_revisions.content_json.media contains duplicate URLs`);
   }
-  push(text(detail.coverImageUrl));
-  push(text(detail.galleryImageUrl));
-  push(text(content.coverImageUrl));
   return urls;
-}
-
-/**
- * 楼层编号（"3" / "F3" / "B1"）→ 给人看的楼层名。
- * 与修订通过后写入楼层表的显示名同一口径，审核时看到的就是发布后的样子。
- */
-function floorLabel(levelCode: string): string {
-  const code = levelCode.trim().toUpperCase();
-  const above = code.match(/^F?(\d{1,3})$/);
-  if (above) return `${Number(above[1])} 层`;
-  const below = code.match(/^B(\d{1,2})$/);
-  if (below) return `地下 ${Number(below[1])} 层`;
-  return levelCode.trim();
-}
-
-function collectionFloors(content: Row, typeNames: Map<string, string>): FloorView[] {
-  if (!Array.isArray(content.collectionFloors)) return [];
-  const floors: FloorView[] = [];
-  for (const raw of content.collectionFloors) {
-    if (!isObject(raw)) continue;
-    const levelCode = text(raw.levelCode);
-    if (!levelCode) continue;
-    const facilities: FloorFacilityView[] = [];
-    if (Array.isArray(raw.facilities)) {
-      for (const item of raw.facilities) {
-        if (!isObject(item)) continue;
-        const typeLabel = typeNames.get(text(item.typeCode)) ?? "";
-        const name = text(item.name);
-        if (!name && !typeLabel) continue;
-        facilities.push({ name: name || typeLabel, typeLabel, locationText: text(item.locationText) });
-      }
-    }
-    floors.push({
-      levelCode,
-      levelLabel: floorLabel(levelCode),
-      note: text(raw.note),
-      facilities,
-      photoCount: Array.isArray(raw.photoMediaIds) ? raw.photoMediaIds.length : 0,
-    });
-  }
-  return floors;
 }
 
 function diffRows(before: Map<string, string>, after: Map<string, string>): DiffRow[] {
@@ -296,24 +188,6 @@ function mediaDiff(before: string[], after: string[]): MediaItem[] {
   ];
 }
 
-function floorSignature(floor: FloorView): string {
-  return JSON.stringify([floor.note, floor.photoCount, floor.facilities]);
-}
-
-function floorDiff(before: FloorView[], after: FloorView[]): FloorRow[] {
-  const beforeMap = new Map(before.map((floor) => [floor.levelCode, floor]));
-  const afterMap = new Map(after.map((floor) => [floor.levelCode, floor]));
-  const rows: FloorRow[] = after.map((floor) => {
-    const previous = beforeMap.get(floor.levelCode);
-    if (!previous) return { floor, state: "added" };
-    return { floor, state: floorSignature(previous) === floorSignature(floor) ? "kept" : "changed" };
-  });
-  for (const floor of before) {
-    if (!afterMap.has(floor.levelCode)) rows.push({ floor, state: "removed" });
-  }
-  return rows;
-}
-
 /** 已识别之外的键：只报变化数量，不把原始结构倾倒到界面上。 */
 function countOtherChanges(before: Row, after: Row, known: Set<string>, detailKnown?: Set<string>): number {
   let count = 0;
@@ -326,52 +200,150 @@ function countOtherChanges(before: Row, after: Row, known: Set<string>, detailKn
   compare(before, after, known);
   if (detailKnown) {
     compare(
-      isObject(before.detail) ? before.detail : {},
-      isObject(after.detail) ? after.detail : {},
+      before.detail === undefined ? {} : objectValue(before.detail, "baseline content_json.detail"),
+      objectValue(after.detail, "current content_json.detail"),
       detailKnown,
     );
   }
   return count;
 }
 
+function aliasesText(structure: Row, field: string, optional: boolean): string {
+  if (optional && structure.aliases === undefined) return "";
+  return arrayValue(structure.aliases, field)
+    .map((value, index) => requiredString(value, `${field}[${index}]`))
+    .join("、");
+}
+
+function validateLocations(structure: Row, field: string): void {
+  arrayValue(structure.locations, `${field}.locations`).forEach((location, index) => {
+    locationDraftFromApi(objectValue(location, `${field}.locations[${index}]`), index);
+  });
+}
+
+function validateStructure(kind: RevisionKind, structure: Row): void {
+  const field = `${kind}_revisions.structure_json`;
+  if (kind === "place") {
+    requiredString(structure.kindId, `${field}.kindId`);
+    nullableString(structure.campusId, `${field}.campusId`);
+    nullableString(structure.parentPlaceId, `${field}.parentPlaceId`);
+    nullableString(structure.stableCode, `${field}.stableCode`);
+    aliasesText(structure, `${field}.aliases`, false);
+    if (structure.building !== null) {
+      const building = objectValue(structure.building, `${field}.building`);
+      nullableString(building.buildingCode, `${field}.building.buildingCode`);
+      nullableString(building.managingOrganizationId, `${field}.building.managingOrganizationId`);
+      oneOf(building.publicAccessLevel, `${field}.building.publicAccessLevel`, ["public", "restricted", "private", "unknown"] as const);
+    }
+  } else if (kind === "facility") {
+    requiredString(structure.facilityTypeId, `${field}.facilityTypeId`);
+    nullableString(structure.hostPlaceId, `${field}.hostPlaceId`);
+    nullableString(structure.floorId, `${field}.floorId`);
+    nullableString(structure.indoorSpaceId, `${field}.indoorSpaceId`);
+    nullablePositiveInteger(structure.quantity, `${field}.quantity`);
+    oneOf(structure.operationalStatus, `${field}.operationalStatus`, ["available", "partially_available", "unavailable", "unknown"] as const);
+  } else {
+    nullableString(structure.organizationId, `${field}.organizationId`);
+    nullableString(structure.hostPlaceId, `${field}.hostPlaceId`);
+    nullableString(structure.floorId, `${field}.floorId`);
+    nullableString(structure.indoorSpaceId, `${field}.indoorSpaceId`);
+  }
+  validateLocations(structure, field);
+}
+
+function validateContent(kind: RevisionKind, content: Row): void {
+  if (kind === "place") {
+    const detail = objectValue(content.detail, "place_revisions.content_json.detail");
+    readMedia(detail.media);
+    placeFacts(content);
+    return;
+  }
+  if (content.media !== undefined) readMedia(content.media);
+  const fields = kind === "facility" ? FACILITY_CONTENT_FIELDS : MERCHANT_CONTENT_FIELDS;
+  fieldFacts(content, fields);
+  if (kind === "merchant" && content.menu !== undefined) {
+    arrayValue(content.menu, "merchant_revisions.content_json.menu").forEach((raw, index) => {
+      const field = `merchant_revisions.content_json.menu[${index}]`;
+      const item = objectValue(raw, field);
+      requiredString(item.name, `${field}.name`);
+      optionalString(item.price, `${field}.price`);
+      optionalString(item.description, `${field}.description`);
+    });
+  }
+}
+
 export function buildDiff(
   kind: RevisionKind,
   current: Row,
   baseline: Row | undefined,
-  typeNames: Map<string, string>,
 ): DiffModel {
-  const afterContent = parseObject(current.content_json);
-  const beforeContent = parseObject(baseline?.content_json);
+  const afterContent = jsonObject(current.content_json, `${kind}_revisions.content_json`);
+  const beforeContent = baseline ? jsonObject(baseline.content_json, `${kind}_revisions.content_json`) : {};
+  const afterStructure = jsonObject(current.structure_json, `${kind}_revisions.structure_json`);
+  const beforeStructure = baseline ? jsonObject(baseline.structure_json, `${kind}_revisions.structure_json`) : {};
+  validateContent(kind, afterContent);
+  validateStructure(kind, afterStructure);
+  if (baseline) {
+    validateContent(kind, beforeContent);
+    validateStructure(kind, beforeStructure);
+  }
   const basic: DiffRow[] = [];
   const pushBasic = (label: string, before: string, after: string) => {
     basic.push({ label, before, after, changed: before !== after });
   };
-  pushBasic("名称", text(baseline?.display_name), text(current.display_name));
+  pushBasic(
+    "名称",
+    text(baseline?.display_name, `${kind}_revisions.display_name`),
+    requiredString(current.display_name, `${kind}_revisions.display_name`).trim(),
+  );
 
   let beforeFacts = new Map<string, string>();
   let afterFacts = new Map<string, string>();
   let otherCount = 0;
 
   if (kind === "place") {
-    pushBasic("简介", text(baseline?.summary), text(current.summary));
-    pushBasic("详细描述", text(baseline?.description), text(current.description));
-    beforeFacts = placeFacts(beforeContent);
+    pushBasic("简介", text(baseline?.summary, "place_revisions.summary"), text(current.summary, "place_revisions.summary"));
+    pushBasic("详细描述", text(baseline?.description, "place_revisions.description"), text(current.description, "place_revisions.description"));
+    beforeFacts = baseline ? placeFacts(beforeContent) : new Map<string, string>();
     afterFacts = placeFacts(afterContent);
     otherCount = countOtherChanges(beforeContent, afterContent, PLACE_CONTENT_KEYS, PLACE_DETAIL_KEYS);
+    for (const [label, key] of [["地点类型", "kindId"], ["校区", "campusId"], ["父地点", "parentPlaceId"], ["地点编号", "stableCode"]] as const) {
+      pushBasic(label, text(beforeStructure[key], `place_revisions.structure_json.${key}`), text(afterStructure[key], `place_revisions.structure_json.${key}`));
+    }
+    pushBasic(
+      "别名",
+      aliasesText(beforeStructure, "place_revisions.structure_json.aliases", !baseline),
+      aliasesText(afterStructure, "place_revisions.structure_json.aliases", false),
+    );
   } else if (kind === "facility") {
-    pushBasic("服务时间", nestedText(baseline?.service_hours_json, "text"), nestedText(current.service_hours_json, "text"));
-    beforeFacts = fieldFacts(beforeContent, FACILITY_CONTENT_FIELDS);
+    pushBasic(
+      "服务时间",
+      baseline ? nestedText(baseline.service_hours_json, "text", "facility_revisions.service_hours_json") : "",
+      nestedText(current.service_hours_json, "text", "facility_revisions.service_hours_json"),
+    );
+    beforeFacts = baseline ? fieldFacts(beforeContent, FACILITY_CONTENT_FIELDS) : new Map<string, string>();
     afterFacts = fieldFacts(afterContent, FACILITY_CONTENT_FIELDS);
     otherCount = countOtherChanges(
       beforeContent,
       afterContent,
       new Set([...FACILITY_CONTENT_FIELDS.map(([, key]) => key), "detail", "media"]),
     );
+    for (const [label, key] of [["设施类型", "facilityTypeId"], ["所属楼宇", "hostPlaceId"], ["楼层", "floorId"], ["室内空间", "indoorSpaceId"], ["运营状态", "operationalStatus"]] as const) {
+      pushBasic(label, text(beforeStructure[key], `facility_revisions.structure_json.${key}`), text(afterStructure[key], `facility_revisions.structure_json.${key}`));
+    }
   } else {
-    pushBasic("分类", text(baseline?.business_type), text(current.business_type));
-    pushBasic("营业时间", nestedText(baseline?.opening_hours_json, "text"), nestedText(current.opening_hours_json, "text"));
-    pushBasic("联系电话", nestedText(baseline?.contact_json, "phone"), nestedText(current.contact_json, "phone"));
-    beforeFacts = fieldFacts(beforeContent, MERCHANT_CONTENT_FIELDS);
+    pushBasic("分类", text(baseline?.business_type, "merchant_revisions.business_type"), text(current.business_type, "merchant_revisions.business_type"));
+    pushBasic(
+      "营业时间",
+      baseline ? nestedText(baseline.opening_hours_json, "text", "merchant_revisions.opening_hours_json") : "",
+      nestedText(current.opening_hours_json, "text", "merchant_revisions.opening_hours_json"),
+    );
+    pushBasic(
+      "联系电话",
+      baseline ? nestedText(baseline.contact_json, "phone", "merchant_revisions.contact_json") : "",
+      nestedText(current.contact_json, "phone", "merchant_revisions.contact_json"),
+    );
+    beforeFacts = baseline ? fieldFacts(beforeContent, MERCHANT_CONTENT_FIELDS) : new Map<string, string>();
     afterFacts = fieldFacts(afterContent, MERCHANT_CONTENT_FIELDS);
     const beforeMenu = menuText(beforeContent);
     const afterMenu = menuText(afterContent);
@@ -382,10 +354,22 @@ export function buildDiff(
       afterContent,
       new Set([...MERCHANT_CONTENT_FIELDS.map(([, key]) => key), "menu", "detail", "media"]),
     );
+    for (const [label, key] of [["所属品牌", "organizationId"], ["所在地点", "hostPlaceId"], ["所在楼层", "floorId"], ["室内空间", "indoorSpaceId"]] as const) {
+      pushBasic(label, text(beforeStructure[key], `merchant_revisions.structure_json.${key}`), text(afterStructure[key], `merchant_revisions.structure_json.${key}`));
+    }
+  }
+  const beforeLocations = baseline ? arrayValue(beforeStructure.locations, `${kind}_revisions.structure_json.locations`) : [];
+  const afterLocations = arrayValue(afterStructure.locations, `${kind}_revisions.structure_json.locations`);
+  if (JSON.stringify(beforeLocations) !== JSON.stringify(afterLocations)) {
+    pushBasic("地图位置", `${beforeLocations.length} 个`, `${afterLocations.length} 个`);
   }
 
-  const revisionNo = text(current.revision_no);
-  const submittedAt = text(current.submitted_at) || text(current.created_at);
+  if (typeof current.revision_no !== "number" || !Number.isInteger(current.revision_no) || current.revision_no <= 0) {
+    throw new Error(`${kind}_revisions.revision_no must be a positive integer`);
+  }
+  const revisionNo = String(current.revision_no);
+  const submittedAt = text(current.submitted_at, `${kind}_revisions.submitted_at`)
+    || requiredString(current.created_at, `${kind}_revisions.created_at`).trim();
   const meta = [
     revisionNo ? `修订 #${revisionNo}` : "",
     submittedAt ? `提交于 ${fmtDateTime(submittedAt)}` : "",
@@ -398,10 +382,7 @@ export function buildDiff(
     meta,
     basic,
     facts: diffRows(beforeFacts, afterFacts),
-    media: mediaDiff(mediaUrls(beforeContent), mediaUrls(afterContent)),
-    floors: kind === "place"
-      ? floorDiff(collectionFloors(beforeContent, typeNames), collectionFloors(afterContent, typeNames))
-      : [],
+    media: mediaDiff(baseline ? mediaUrls(kind, beforeContent) : [], mediaUrls(kind, afterContent)),
     otherCount,
   };
 }
@@ -493,56 +474,14 @@ function MediaThumb({ item }: { item: MediaItem }) {
   );
 }
 
-const FLOOR_STATE_META: Record<FloorRow["state"], { label: string; tone: "ok" | "error" | "warning" | "neutral" }> = {
-  added: { label: "新增楼层", tone: "ok" },
-  removed: { label: "已删除楼层", tone: "error" },
-  changed: { label: "有修改", tone: "warning" },
-  kept: { label: "无变化", tone: "neutral" },
-};
-
-function FloorCard({ row }: { row: FloorRow }) {
-  const meta = FLOOR_STATE_META[row.state];
-  const { floor } = row;
-  return (
-    <div className="rounded-lg bg-surface px-4 py-3">
-      <div className="flex items-center gap-2.5">
-        <span className="text-emphasis">{floor.levelLabel}</span>
-        <Pill tone={meta.tone}>{meta.label}</Pill>
-        <span className="text-label text-sub">
-          {floor.facilities.length} 项设施
-          {floor.photoCount > 0 ? ` · ${floor.photoCount} 张平面图照片` : ""}
-        </span>
-      </div>
-      <p className="mt-1.5 text-aux text-sub">备注：{floor.note || EMPTY_TEXT}</p>
-      {floor.facilities.length > 0 ? (
-        <ul className="mt-2 space-y-1">
-          {floor.facilities.map((facility, index) => (
-            <li className="text-body text-ink" key={`${facility.name}:${index}`}>
-              {facility.name}
-              {facility.typeLabel && facility.typeLabel !== facility.name ? (
-                <span className="text-sub">（{facility.typeLabel}）</span>
-              ) : null}
-              {facility.locationText ? <span className="text-sub"> · {facility.locationText}</span> : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="mt-2 text-body text-sub">本层未记录设施</p>
-      )}
-    </div>
-  );
-}
-
 export function RevisionDiffView({ diff, sectionKey }: { diff: DiffModel; sectionKey: string }) {
   const basicChanged = diff.basic.filter((row) => row.changed).length;
   const factsChanged = diff.facts.filter((row) => row.changed).length;
   const mediaChanged = diff.media.filter((item) => item.state !== "kept").length;
-  const floorsChanged = diff.floors.filter((row) => row.state !== "kept").length;
   const nothing =
     basicChanged === 0
     && factsChanged === 0
     && mediaChanged === 0
-    && floorsChanged === 0
     && diff.otherCount === 0;
 
   return (
@@ -568,16 +507,6 @@ export function RevisionDiffView({ diff, sectionKey }: { diff: DiffModel; sectio
         </DiffSection>
       ) : null}
 
-      {diff.floors.length > 0 ? (
-        <DiffSection changedCount={floorsChanged} key={`${sectionKey}:floors`} title="楼层采集">
-          <div className="space-y-2">
-            {diff.floors.map((row) => (
-              <FloorCard key={`${row.state}:${row.floor.levelCode}`} row={row} />
-            ))}
-          </div>
-        </DiffSection>
-      ) : null}
-
       {diff.otherCount > 0 ? (
         <p className="px-1 text-aux text-sub">另有 {diff.otherCount} 处其他变更未在上方分区展示。</p>
       ) : null}
@@ -597,10 +526,9 @@ export function ReviewPage() {
   const [error, setError] = useState("");
 
   const queue = useAsyncData(async (signal) => {
-    const [revisions, operations, submissions] = await Promise.all([
+    const [revisions, operations] = await Promise.all([
       admin.listPendingRevisions(signal),
-      admin.listAdminOperations<OperationalEventRow>(signal).catch(() => ({ items: [] as OperationalEventRow[] })),
-      admin.listSubmissions(signal),
+      admin.listAdminOperations<OperationalEventRow>(signal),
     ]);
     const items: QueueItem[] = [
       ...revisions.items.map((revision): QueueItem => ({
@@ -613,48 +541,34 @@ export function ReviewPage() {
       ...operations.items
         .filter((e) => e.editorialStatus === "draft" || e.editorialStatus === "in_review")
         .map((e): QueueItem => ({ kind: "operation", id: e.id, title: e.title, at: e.createdAt, severity: e.severity })),
-      ...submissions.items
-        .filter((s) => s.status === "pending" || s.status === "in_review")
-        .map((s): QueueItem => {
-          const target = TARGET_TYPE_LABELS[s.targetType] ?? "内容";
-          const from = text(s.submitterName);
-          return {
-            kind: "submission",
-            id: s.id,
-            title: from ? `${target} · ${from}` : target,
-            at: s.createdAt,
-          };
-        }),
     ];
     return items.sort((a, b) => (a.at > b.at ? -1 : 1));
   }, []);
-
-  // 设施类型编码 → 中文名，用于楼层采集里的设施行。
-  const reference = useAsyncData(
-    (signal) => admin.listReferenceData<ReferenceDataResponse>(signal).catch(() => null),
-    [],
-  );
 
   const isRevision = selected?.kind === "place" || selected?.kind === "facility" || selected?.kind === "merchant";
   const selectedRevisionId = selected && "revisionId" in selected ? selected.revisionId : null;
 
   // 待审修订的历史版本（含 content_json），用于结构化对比。
   const revisionDetail = useAsyncData(
-    async (signal): Promise<{ kind: RevisionKind; revisions: Row[] } | null> => {
+    async (signal): Promise<{ diff: DiffModel } | null> => {
       if (!selected) return null;
+      if (selected.kind !== "place" && selected.kind !== "facility" && selected.kind !== "merchant") return null;
+      if (!selected.revisionId) throw new Error("Pending revision has no revision id");
+      let revisions: Row[];
       if (selected.kind === "place") {
         const data = await admin.getAdminPlace<PlaceDetailResponse>(selected.id, signal);
-        return { kind: "place", revisions: data.revisions as Row[] };
-      }
-      if (selected.kind === "facility") {
+        revisions = data.revisions as Row[];
+      } else if (selected.kind === "facility") {
         const data = await admin.getFacility<FacilityDetailResponse>(selected.id, signal);
-        return { kind: "facility", revisions: data.revisions as Row[] };
-      }
-      if (selected.kind === "merchant") {
+        revisions = data.revisions as Row[];
+      } else {
         const data = await admin.getMerchant<MerchantDetailResponse>(selected.id, signal);
-        return { kind: "merchant", revisions: data.revisions as Row[] };
+        revisions = data.revisions as Row[];
       }
-      return null;
+      const current = revisions.find((revision) => revision.id === selected.revisionId);
+      if (!current) throw new Error(`Revision ${selected.revisionId} does not exist in entity history`);
+      const baseline = revisions.find((revision) => revision.editorial_status === "approved");
+      return { diff: buildDiff(selected.kind, current, baseline) };
     },
     [selected?.kind ?? "", selected?.id ?? "", selectedRevisionId ?? ""],
   );
@@ -662,26 +576,11 @@ export function ReviewPage() {
   if (queue.state.status === "loading") return <LoadingState label="加载审核队列…" />;
   if (queue.state.status === "error") return <ErrorBanner message={queue.state.message ?? "加载失败"} />;
   const items = queue.state.data!;
-  const filters = ["全部", "地点", "设施", "商户", "运营事件", "用户提交"];
+  const filters = ["全部", "地点", "设施", "商户", "运营事件"];
   const countOf = (f: string) => (f === "全部" ? items.length : items.filter((i) => KIND_META[i.kind].filter === f).length);
   const visible = filter === "全部" ? items : items.filter((i) => KIND_META[i.kind].filter === filter);
 
-  const facilityTypeNames = new Map<string, string>();
-  if (reference.state.status === "ready" && reference.state.data) {
-    for (const type of reference.state.data.facilityTypes) {
-      const code = text(type.code);
-      if (code) facilityTypeNames.set(code, text(type.name));
-    }
-  }
-
-  // 待审修订 vs 上一版已发布内容
-  let diff: DiffModel | null = null;
-  if (isRevision && revisionDetail.state.status === "ready" && revisionDetail.state.data) {
-    const { kind, revisions } = revisionDetail.state.data;
-    const current = revisions.find((r) => r.id === selectedRevisionId);
-    const baseline = revisions.find((r) => r.editorial_status === "approved");
-    if (current) diff = buildDiff(kind, current, baseline, facilityTypeNames);
-  }
+  const diff = revisionDetail.state.status === "ready" ? revisionDetail.state.data?.diff ?? null : null;
 
   async function decide(decision: "approve" | "reject") {
     if (!selected) return;
@@ -691,8 +590,6 @@ export function ReviewPage() {
     try {
       if (selected.kind === "operation") {
         await admin.reviewOperation(selected.id, { decision, note: note.trim() || undefined });
-      } else if (selected.kind === "submission") {
-        await admin.reviewSubmission(selected.id, { decision: decision === "approve" ? "accept" : "reject", note: note.trim() || undefined });
       } else {
         if (!selected.revisionId) throw new Error("数据异常，无法提交审核");
         await admin.reviewRevision(selected.kind, selected.revisionId, { decision, note: note.trim() || undefined });
@@ -753,7 +650,7 @@ export function ReviewPage() {
             <div className="space-y-5 p-5">
               <div>
                 <div className="flex items-center gap-2.5">
-                  <Pill tone="info">{KIND_META[selected.kind].label}{selected.kind === "submission" ? "" : "修订"}</Pill>
+                  <Pill tone="info">{KIND_META[selected.kind].label}修订</Pill>
                   <h2 className="text-card">{selected.title}</h2>
                 </div>
                 <p className="mt-1.5 text-aux text-sub">
@@ -776,12 +673,7 @@ export function ReviewPage() {
                   严重程度：<Pill tone={selected.severity === "critical" ? "error" : selected.severity === "warning" ? "warning" : "info"}>{SEVERITY_LABELS[selected.severity] ?? selected.severity}</Pill>
                   <Link className="text-primary" to={`/admin/operations/${selected.id}`}>查看事件详情 ›</Link>
                 </div>
-              ) : (
-                <div className="text-body text-sub">
-                  用户提交在用户提交页逐字段处理。
-                  <Link className="ml-2 text-primary" to="/admin/submissions">前往处理 ›</Link>
-                </div>
-              )}
+              ) : null}
 
               <TextArea label="审核意见（驳回时必填）" onChange={setNote} placeholder="填写审核意见…" rows={3} value={note} />
               <ErrorBanner message={error} />

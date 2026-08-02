@@ -8,8 +8,8 @@ const SEVERITY_STYLE = {
 
 export type Severity = keyof typeof SEVERITY_STYLE;
 
-export function severityOf(value: string | undefined): Severity {
-  return value === "warning" || value === "critical" ? value : "info";
+export function severityOf(value: Severity): Severity {
+  return value;
 }
 
 /** M2 POI 详情通栏运营信息横幅；无事件时槽位整体隐藏（调用方不渲染）。 */

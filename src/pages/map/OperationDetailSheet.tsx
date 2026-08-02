@@ -4,7 +4,7 @@ import { SheetModal } from "../../components/ui/SheetModal";
 import { SeverityIcon, severityOf, type Severity } from "../../components/ui/SeverityBanner";
 import { StatusPill, type StatusTone } from "../../components/ui/StatusPill";
 import type { OperationalEvent } from "../../lib/api/types";
-import { useRelease } from "../../lib/release/ReleaseContext";
+import type { MapBuilding } from "../../lib/types";
 
 const TYPE_LABELS: Record<string, string> = {
   closure: "关闭",
@@ -66,10 +66,12 @@ function formatDateRange(event: OperationalEvent): string {
  */
 export function OperationDetailSheet({
   event,
+  buildings,
   variant = "sheet",
   onClose,
 }: {
   event: OperationalEvent | null;
+  buildings: MapBuilding[];
   /** sheet = 移动端底部弹卡；panel = 桌面端居中浮层 */
   variant?: "sheet" | "panel";
   onClose: () => void;
@@ -90,7 +92,7 @@ export function OperationDetailSheet({
             <X size={15} />
           </button>
           <div className="min-h-0 flex-1 overflow-y-auto pt-4">
-            <OperationDetailContent event={event} onNavigate={onClose} />
+            <OperationDetailContent event={event} buildings={buildings} onNavigate={onClose} />
           </div>
         </div>
       </div>
@@ -99,24 +101,31 @@ export function OperationDetailSheet({
 
   return (
     <SheetModal open={event !== null} onClose={onClose} expandable initialHeight={0.62}>
-      {event ? <OperationDetailContent event={event} onNavigate={onClose} /> : null}
+      {event ? <OperationDetailContent event={event} buildings={buildings} onNavigate={onClose} /> : null}
     </SheetModal>
   );
 }
 
-function OperationDetailContent({ event, onNavigate }: { event: OperationalEvent; onNavigate: () => void }) {
+function OperationDetailContent({
+  event,
+  buildings,
+  onNavigate,
+}: {
+  event: OperationalEvent;
+  buildings: MapBuilding[];
+  onNavigate: () => void;
+}) {
   const navigate = useNavigate();
-  const { release } = useRelease();
   const severity = severityOf(event.severity);
   const TypeIcon = TYPE_ICONS[event.eventType] ?? Info;
   const typeLabel = TYPE_LABELS[event.eventType] ?? "通知";
-  const targets = event.targets ?? [];
+  const targets = event.targets;
   const placeTargets = targets.filter((target) => target.targetType === "place");
   const facilityTargetCount = targets.filter((target) => target.targetType === "facility").length;
-  const updates = event.updates ?? [];
+  const updates = event.updates;
 
   const placeName = (placeId: string) =>
-    release?.buildings.find((building) => building.poiKey === placeId)?.name ?? "关联地点";
+    buildings.find((building) => building.poiKey === placeId)?.name ?? "关联地点";
 
   const openPlace = (placeId: string) => {
     onNavigate();

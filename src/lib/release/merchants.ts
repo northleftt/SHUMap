@@ -1,76 +1,101 @@
-// Merchant outlet projection from the release manifest.
-//
-// Merchants have no page of their own: per the v2 design each outlet is grouped
-// onto its host place (`hostPlaceId`) and rendered inside that place's M2 POI
-// detail, reusing the same layout plus the optional extension fields (menu,
-// stall code, average price).
-//
-// This module is deliberately free of asset imports so it can be unit-tested.
-
 import type { ReleaseMerchant } from "../api/types";
 import type { MerchantMenuItem, MerchantSummary } from "../types";
 
-function stringField(source: Record<string, unknown> | null | undefined, ...keys: string[]): string {
-  if (!source) return "";
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+function contractError(merchantId: string, field: string, expectation: string): Error {
+  return new Error(`Release merchant ${merchantId} ${field} ${expectation}`);
+}
+
+function optionalString(merchantId: string, field: string, value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw contractError(merchantId, field, "must be a string when present");
+  return value.trim();
+}
+
+function objectField(merchantId: string, field: string, value: unknown): Record<string, unknown> | null {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw contractError(merchantId, field, "must be an object or null");
   }
-  return "";
+  return value as Record<string, unknown>;
 }
 
-/** opening_hours_json / contact_json are free-form; accept a plain string or {text|phone}. */
-function textOf(value: unknown, ...keys: string[]): string {
-  if (typeof value === "string") return value.trim();
-  if (value && typeof value === "object") return stringField(value as Record<string, unknown>, ...keys);
-  return "";
+function objectText(
+  merchantId: string,
+  field: string,
+  value: unknown,
+  property: string,
+): string {
+  const object = objectField(merchantId, field, value);
+  if (object === null) return "";
+  return optionalString(merchantId, `${field}.${property}`, object[property]);
 }
 
-function normalizeMenu(value: unknown): MerchantMenuItem[] {
-  if (!Array.isArray(value)) return [];
-  const items: MerchantMenuItem[] = [];
-  for (const raw of value) {
-    if (!raw || typeof raw !== "object") continue;
-    const record = raw as Record<string, unknown>;
-    const name = stringField(record, "name", "title");
-    if (!name) continue;
-    items.push({
+function menu(merchantId: string, value: unknown): MerchantMenuItem[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw contractError(merchantId, "content.menu", "must be an array");
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw contractError(merchantId, `content.menu[${index}]`, "must be an object");
+    }
+    const item = raw as Record<string, unknown>;
+    const name = optionalString(merchantId, `content.menu[${index}].name`, item.name);
+    if (!name) throw contractError(merchantId, `content.menu[${index}].name`, "must be non-empty");
+    return {
       name,
-      price: stringField(record, "price"),
-      description: stringField(record, "description", "desc"),
-    });
-  }
-  return items;
+      price: optionalString(merchantId, `content.menu[${index}].price`, item.price),
+      description: optionalString(merchantId, `content.menu[${index}].description`, item.description),
+    };
+  });
 }
 
-/** Project a manifest merchant row onto the front-end display model. */
+function media(merchantId: string, value: unknown): MerchantSummary["media"] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw contractError(merchantId, "content.media", "must be an array");
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw contractError(merchantId, `content.media[${index}]`, "must be an object");
+    }
+    const item = raw as Record<string, unknown>;
+    if (item.role !== "cover" && item.role !== "gallery") {
+      throw contractError(merchantId, `content.media[${index}].role`, "must be cover or gallery");
+    }
+    const url = optionalString(merchantId, `content.media[${index}].url`, item.url);
+    if (!url) throw contractError(merchantId, `content.media[${index}].url`, "must be non-empty");
+    const alt = optionalString(merchantId, `content.media[${index}].alt`, item.alt);
+    const caption = optionalString(merchantId, `content.media[${index}].caption`, item.caption);
+    return {
+      role: item.role,
+      url,
+      ...(alt ? { alt } : {}),
+      ...(caption ? { caption } : {}),
+    };
+  });
+}
+
 export function normalizeMerchant(merchant: ReleaseMerchant): MerchantSummary {
-  const content = merchant.content ?? {};
+  const content = objectField(merchant.id, "content", merchant.content);
+  if (content === null) throw contractError(merchant.id, "content", "must be an object");
   return {
     id: merchant.id,
     name: merchant.displayName,
-    businessType: typeof merchant.businessType === "string" ? merchant.businessType.trim() : "",
-    openingHours: textOf(merchant.openingHours, "text", "summary", "hours"),
-    stallCode: stringField(content, "stallCode", "stallNo", "stall"),
-    phone: textOf(merchant.contact, "phone", "tel", "mobile"),
-    avgPrice: stringField(content, "avgPrice", "averagePrice", "perCapita"),
-    summary: stringField(content, "summary", "description"),
-    floorId: merchant.floorId ?? null,
-    menu: normalizeMenu(content.menu),
+    businessType: optionalString(merchant.id, "businessType", merchant.businessType),
+    openingHours: objectText(merchant.id, "openingHours", merchant.openingHours, "text"),
+    stallCode: optionalString(merchant.id, "content.stallCode", content.stallCode),
+    phone: objectText(merchant.id, "contact", merchant.contact, "phone"),
+    avgPrice: optionalString(merchant.id, "content.avgPrice", content.avgPrice),
+    summary: optionalString(merchant.id, "content.summary", content.summary),
+    media: media(merchant.id, content.media),
+    floorId: merchant.floorId,
+    menu: menu(merchant.id, content.menu),
   };
 }
 
-/**
- * Group manifest merchants by host place. Outlets without a `hostPlaceId` are
- * dropped: with no standalone merchant page they have nowhere to render.
- */
-export function groupMerchantsByPlace(
-  merchants: ReleaseMerchant[] | null | undefined,
-): Map<string, MerchantSummary[]> {
+export function groupMerchantsByPlace(merchants: ReleaseMerchant[]): Map<string, MerchantSummary[]> {
   const byPlace = new Map<string, MerchantSummary[]>();
-  for (const merchant of merchants ?? []) {
-    if (!merchant.hostPlaceId) continue;
+  for (const merchant of merchants) {
+    if (!merchant.hostPlaceId) {
+      throw contractError(merchant.id, "hostPlaceId", "must identify the place that renders the outlet");
+    }
     const list = byPlace.get(merchant.hostPlaceId) ?? [];
     list.push(normalizeMerchant(merchant));
     byPlace.set(merchant.hostPlaceId, list);

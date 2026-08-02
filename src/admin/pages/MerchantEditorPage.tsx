@@ -2,8 +2,18 @@ import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
+import {
+  arrayValue,
+  jsonObject,
+  nullableSingleTextObject,
+  nullableString,
+  objectValue,
+  oneOf,
+  optionalString,
+  requiredString,
+} from "../../lib/dataContract";
 import type { MerchantMenuItem } from "../../lib/types";
-import type { MerchantDetailResponse, MerchantListItem, PlaceListItem, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
+import type { MerchantDetailResponse, PlaceListItem, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   EditorialPill,
   ErrorBanner,
@@ -18,23 +28,72 @@ import {
   errorMessage,
   useAsyncData,
 } from "../components/primitives";
+import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
+import { locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import type { MerchantContent } from "../../../shared/revision-contract";
 
-/** content_json.menu 的宽松解析：只保留有名称的条目，价格/描述可空。 */
 function parseMenu(value: unknown): MerchantMenuItem[] {
-  if (!Array.isArray(value)) return [];
-  const items: MerchantMenuItem[] = [];
-  for (const raw of value) {
-    if (!raw || typeof raw !== "object") continue;
-    const record = raw as Record<string, unknown>;
-    const name = typeof record.name === "string" ? record.name : "";
-    if (!name.trim()) continue;
-    items.push({
-      name,
-      price: typeof record.price === "string" ? record.price : typeof record.price === "number" ? String(record.price) : "",
-      description: typeof record.description === "string" ? record.description : "",
-    });
-  }
-  return items;
+  if (value === undefined) return [];
+  return arrayValue(value, "merchant_revisions.content_json.menu").map((raw, index) => {
+    const field = `merchant_revisions.content_json.menu[${index}]`;
+    const record = objectValue(raw, field);
+    return {
+      name: requiredString(record.name, `${field}.name`),
+      price: optionalString(record.price, `${field}.price`) ?? "",
+      description: optionalString(record.description, `${field}.description`) ?? "",
+    };
+  });
+}
+
+interface MerchantEditorRevision {
+  displayName: string;
+  organizationId: string;
+  hostPlaceId: string;
+  floorId: string;
+  indoorSpaceId: string;
+  businessType: string;
+  openingHours: string;
+  phone: string;
+  content: MerchantContent;
+  media: MediaRow[];
+  avgPrice: string;
+  stallCode: string;
+  summary: string;
+  menu: MerchantMenuItem[];
+  sourceId: string;
+  editorialStatus: "draft" | "in_review" | "approved" | "rejected" | "superseded";
+  locations: LocationDraft[];
+}
+
+function parseMerchantEditorRevision(response: MerchantDetailResponse): MerchantEditorRevision {
+  const merchant = objectValue(response.merchant, "merchant");
+  const structure = jsonObject(merchant.structure_json, "merchant_revisions.structure_json");
+  const content = jsonObject(merchant.content_json, "merchant_revisions.content_json");
+  const locations = arrayValue(structure.locations, "merchant_revisions.structure_json.locations")
+    .map((location, index) => locationDraftFromApi(objectValue(location, `merchant_revisions.structure_json.locations[${index}]`), index));
+  return {
+    displayName: requiredString(merchant.display_name, "merchant_revisions.display_name"),
+    organizationId: nullableString(structure.organizationId, "merchant_revisions.structure_json.organizationId") ?? "",
+    hostPlaceId: nullableString(structure.hostPlaceId, "merchant_revisions.structure_json.hostPlaceId") ?? "",
+    floorId: nullableString(structure.floorId, "merchant_revisions.structure_json.floorId") ?? "",
+    indoorSpaceId: nullableString(structure.indoorSpaceId, "merchant_revisions.structure_json.indoorSpaceId") ?? "",
+    businessType: nullableString(merchant.business_type, "merchant_revisions.business_type") ?? "",
+    openingHours: nullableSingleTextObject(merchant.opening_hours_json, "merchant_revisions.opening_hours_json", "text"),
+    phone: nullableSingleTextObject(merchant.contact_json, "merchant_revisions.contact_json", "phone"),
+    content: content as MerchantContent,
+    media: readMedia(content.media),
+    avgPrice: optionalString(content.avgPrice, "merchant_revisions.content_json.avgPrice") ?? "",
+    stallCode: optionalString(content.stallCode, "merchant_revisions.content_json.stallCode") ?? "",
+    summary: optionalString(content.summary, "merchant_revisions.content_json.summary") ?? "",
+    menu: parseMenu(content.menu),
+    sourceId: nullableString(merchant.source_id, "merchant_revisions.source_id") ?? "",
+    editorialStatus: oneOf(
+      merchant.editorial_status,
+      "merchant_revisions.editorial_status",
+      ["draft", "in_review", "approved", "rejected", "superseded"] as const,
+    ),
+    locations,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -47,20 +106,26 @@ export function MerchantEditorPage() {
   const navigate = useNavigate();
 
   const { state } = useAsyncData(async (signal) => {
-    const [ref, spaces, places, merchants, detail] = await Promise.all([
+    const [ref, spaces, places, detail] = await Promise.all([
       admin.listReferenceData<ReferenceDataResponse>(signal),
       admin.listSpaces<SpacesResponse>(signal),
       admin.listAdminPlaces<PlaceListItem>(signal),
-      isNew ? Promise.resolve({ items: [] as MerchantListItem[] }) : admin.listMerchants<MerchantListItem>(signal),
       isNew ? Promise.resolve(null) : admin.getMerchant<MerchantDetailResponse>(id, signal),
     ]);
-    return { ref, spaces, places: places.items, merchants: merchants.items, detail };
+    return {
+      ref,
+      spaces,
+      places: places.items,
+      detail,
+      editor: detail ? parseMerchantEditorRevision(detail) : null,
+    };
   }, [id, isNew]);
 
   const [name, setName] = useState("");
   const [organizationId, setOrganizationId] = useState("");
   const [hostPlaceId, setHostPlaceId] = useState("");
   const [floorId, setFloorId] = useState("");
+  const [indoorSpaceId, setIndoorSpaceId] = useState("");
   const [businessType, setBusinessType] = useState("");
   const [openingHours, setOpeningHours] = useState("");
   const [phone, setPhone] = useState("");
@@ -69,53 +134,41 @@ export function MerchantEditorPage() {
   const [summary, setSummary] = useState("");
   const [sourceId, setSourceId] = useState("");
   const [menu, setMenu] = useState<MerchantMenuItem[]>([]);
-  const [baseContent, setBaseContent] = useState<Record<string, unknown>>({});
+  const [baseContent, setBaseContent] = useState<MerchantContent>({});
+  const [media, setMedia] = useState<MediaRow[]>([]);
+  const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (state.status !== "ready" || isNew) return;
-    const item = state.data!.merchants.find((m) => m.id === id);
-    if (!item) return;
-    setName(String(item.displayName ?? ""));
-    setHostPlaceId(item.hostPlaceId ? String(item.hostPlaceId) : "");
-    setFloorId(item.floorId ? String(item.floorId) : "");
-    setBusinessType(String(item.businessType ?? ""));
-    setOrganizationId(item.organizationId ? String(item.organizationId) : "");
-    const detail = state.data!.detail?.merchant;
-    if (!detail) return;
-    try {
-      const opening = JSON.parse(String(detail.opening_hours_json ?? "null")) as { text?: unknown } | null;
-      setOpeningHours(typeof opening?.text === "string" ? opening.text : "");
-    } catch {
-      setOpeningHours("");
-    }
-    try {
-      const contact = JSON.parse(String(detail.contact_json ?? "null")) as { phone?: unknown } | null;
-      setPhone(typeof contact?.phone === "string" ? contact.phone : "");
-    } catch {
-      setPhone("");
-    }
-    let content: Record<string, unknown> = {};
-    try {
-      content = JSON.parse(String(detail.content_json ?? "{}")) as Record<string, unknown>;
-    } catch {
-      content = {};
-    }
-    setBaseContent(content);
-    setAvgPrice(typeof content.avgPrice === "string" ? content.avgPrice : "");
-    setStallCode(typeof content.stallCode === "string" ? content.stallCode : "");
-    setSummary(typeof content.summary === "string" ? content.summary : "");
-    setMenu(parseMenu(content.menu));
-    setSourceId(detail.source_id ? String(detail.source_id) : "");
+    const editor = state.data!.editor;
+    if (!editor) throw new Error("Merchant detail is missing");
+    setName(editor.displayName);
+    setHostPlaceId(editor.hostPlaceId);
+    setFloorId(editor.floorId);
+    setIndoorSpaceId(editor.indoorSpaceId);
+    setBusinessType(editor.businessType);
+    setOrganizationId(editor.organizationId);
+    setOpeningHours(editor.openingHours);
+    setPhone(editor.phone);
+    setBaseContent(editor.content);
+    setMedia(editor.media);
+    setAvgPrice(editor.avgPrice);
+    setStallCode(editor.stallCode);
+    setSummary(editor.summary);
+    setMenu(editor.menu);
+    setSourceId(editor.sourceId);
+    setLocationDrafts(editor.locations);
   }, [state, id, isNew]);
 
   if (state.status === "loading") return <LoadingState label="加载商户…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
   const data = state.data!;
-  const item = isNew ? null : data.merchants.find((m) => m.id === id) ?? null;
-  const reviewLocked = item?.editorialStatus === "in_review";
+  const editor = data.editor;
+  const reviewLocked = editor?.editorialStatus === "in_review";
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
+  const indoorSpaces = data.spaces.spaces.filter((space) => !floorId || space.floorId === floorId);
 
   function updateMenuItem(index: number, patch: Partial<MerchantMenuItem>) {
     setMenu((items) => items.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
@@ -123,17 +176,20 @@ export function MerchantEditorPage() {
 
   async function save(thenSubmit: boolean) {
     if (!name.trim()) { setError("请填写名称"); return; }
+    if (!hostPlaceId) { setError("请选择所在地点"); return; }
+    const unnamedMenuIndex = menu.findIndex((entry) => !entry.name.trim());
+    if (unnamedMenuIndex !== -1) { setError(`请填写第 ${unnamedMenuIndex + 1} 个菜单条目的名称`); return; }
     setBusy(true);
     setError("");
     // baseContent 合并：未在表单展示的扩展字段原样保留
     const content = { ...baseContent };
+    if (media.length) content.media = media;
+    else delete content.media;
     for (const [key, value] of [["avgPrice", avgPrice], ["stallCode", stallCode], ["summary", summary]] as const) {
       if (value.trim()) content[key] = value.trim();
       else delete content[key];
     }
-    const menuItems = menu
-      .filter((entry) => entry.name.trim())
-      .map((entry) => ({
+    const menuItems = menu.map((entry) => ({
         name: entry.name.trim(),
         ...(entry.price.trim() ? { price: entry.price.trim() } : {}),
         ...(entry.description.trim() ? { description: entry.description.trim() } : {}),
@@ -144,31 +200,36 @@ export function MerchantEditorPage() {
       let revisionId = "";
       if (isNew) {
         const created = await admin.createMerchant({
-          organizationId: organizationId || undefined,
-          hostPlaceId: hostPlaceId || undefined,
-          floorId: floorId || undefined,
           displayName: name.trim(),
-          businessType: businessType.trim() || undefined,
-          openingHours: openingHours.trim() ? { text: openingHours.trim() } : undefined,
-          contact: phone.trim() ? { phone: phone.trim() } : undefined,
+          businessType: businessType.trim() || null,
+          openingHours: openingHours.trim() ? { text: openingHours.trim() } : null,
+          contact: phone.trim() ? { phone: phone.trim() } : null,
           content,
-          sourceId: sourceId || undefined,
+          sourceId: sourceId || null,
+          structure: {
+            organizationId: organizationId || null,
+            hostPlaceId,
+            floorId: floorId || null,
+            indoorSpaceId: indoorSpaceId || null,
+            locations: locationDrafts.map(locationInput),
+          },
         });
         revisionId = created.revisionId;
       } else {
-        // 挂接关系先落库（即时生效），再提交正文修订（走审核）。
-        await admin.updateMerchant(id, {
-          organizationId: organizationId || null,
-          hostPlaceId: hostPlaceId || null,
-          floorId: floorId || null,
-        });
         const created = await admin.createMerchantRevision(id, {
           displayName: name.trim(),
-          businessType: businessType.trim() || undefined,
-          openingHours: openingHours.trim() ? { text: openingHours.trim() } : undefined,
-          contact: phone.trim() ? { phone: phone.trim() } : undefined,
+          businessType: businessType.trim() || null,
+          openingHours: openingHours.trim() ? { text: openingHours.trim() } : null,
+          contact: phone.trim() ? { phone: phone.trim() } : null,
           content,
-          sourceId: sourceId || undefined,
+          sourceId: sourceId || null,
+          structure: {
+            organizationId: organizationId || null,
+            hostPlaceId,
+            floorId: floorId || null,
+            indoorSpaceId: indoorSpaceId || null,
+            locations: locationDrafts.map(locationInput),
+          },
         });
         revisionId = created.id;
       }
@@ -191,7 +252,7 @@ export function MerchantEditorPage() {
             placeholder="门店名称"
             value={name}
           />
-          {item ? <EditorialPill status={item.editorialStatus} /> : null}
+          {editor ? <EditorialPill status={editor.editorialStatus} /> : null}
         </div>
         <div className="space-y-4 p-5">
           <div>
@@ -206,17 +267,24 @@ export function MerchantEditorPage() {
               />
               <SelectField
                 label="所在地点"
-                onChange={(value) => { setHostPlaceId(value); setFloorId(""); }}
+                onChange={(value) => { setHostPlaceId(value); setFloorId(""); setIndoorSpaceId(""); }}
                 options={data.places.map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
                 placeholder="选择地点"
                 value={hostPlaceId}
               />
               <SelectField
                 label="所在楼层"
-                onChange={setFloorId}
+                onChange={(value) => { setFloorId(value); setIndoorSpaceId(""); }}
                 options={floors.map((f) => ({ value: f.id, label: f.displayName }))}
                 placeholder={hostPlaceId ? (floors.length ? "选择楼层" : "该地点暂无楼层") : "先选地点"}
                 value={floorId}
+              />
+              <SelectField
+                label="室内空间"
+                onChange={setIndoorSpaceId}
+                options={indoorSpaces.map((space) => ({ value: space.id, label: space.displayName }))}
+                placeholder={floorId ? "不指定" : "先选楼层"}
+                value={indoorSpaceId}
               />
               <Field label="分类" onChange={setBusinessType} placeholder="如 咖啡轻食" value={businessType} />
               <Field label="营业时间" onChange={setOpeningHours} placeholder="如 08:00 - 20:00" value={openingHours} />
@@ -233,12 +301,6 @@ export function MerchantEditorPage() {
             placeholder="不指定"
             value={sourceId}
           />
-          <InfoNote>品牌的统一信息（标识、连锁关系）在品牌库维护；本页编辑的是单个门店，与所在地点和楼层绑定。</InfoNote>
-          {!isNew ? (
-            <InfoNote tone="info">
-              所属品牌、所在地点和所在楼层保存后立即生效；名称、营业时间、菜单等需提交审核通过并发布后对用户可见。
-            </InfoNote>
-          ) : null}
           {reviewLocked ? <InfoNote tone="warning">当前修订正在审核，处理完成后才能继续编辑。</InfoNote> : null}
           <ErrorBanner message={error} />
           <div className="flex gap-3">
@@ -251,6 +313,7 @@ export function MerchantEditorPage() {
       </Panel>
 
       <div className="space-y-4 self-start">
+        <MediaPanel disabled={reviewLocked} media={media} onChange={setMedia} />
         <Panel
           title={`菜单 / 商品${menu.length ? `（${menu.length}）` : ""}`}
           action={
@@ -265,7 +328,7 @@ export function MerchantEditorPage() {
         >
           <div className="space-y-3">
             {menu.length === 0 ? (
-              <InfoNote>菜单为选填内容，提交审核并发布后在门店详情中展示。</InfoNote>
+              <InfoNote>还没有菜单条目。</InfoNote>
             ) : (
               menu.map((entry, index) => (
                 <div key={index} className="space-y-2 rounded-lg border border-line p-3">
@@ -299,7 +362,7 @@ export function MerchantEditorPage() {
               ))
             )}
             {menu.length > 0 ? (
-              <InfoNote tone="info">未填名称的条目在保存时会被丢弃；价格与描述可留空。</InfoNote>
+              <InfoNote tone="info">每个条目都需要名称；价格与描述可留空。</InfoNote>
             ) : null}
           </div>
         </Panel>

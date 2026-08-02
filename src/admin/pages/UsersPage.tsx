@@ -39,13 +39,13 @@ const ERROR_TEXT: Record<string, string> = {
   not_found: "账户不存在，可能已被其他人改动，刷新后再试。",
 };
 
-function accountError(err: unknown, fallback: string): string {
+function accountError(err: unknown, defaultMessage: string): string {
   if (err instanceof ApiError) {
     const mapped = ERROR_TEXT[err.code];
     if (mapped) return mapped;
-    return fallback;
+    return defaultMessage;
   }
-  return errorMessage(err, fallback);
+  return errorMessage(err, defaultMessage);
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -161,7 +161,7 @@ function CreateForm({
   }
 
   return (
-    <Panel title="新建账户">
+    <Panel title={roleId === "volunteer" ? "加入志愿者名单" : "新建账户"}>
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="邮箱" onChange={setEmail} placeholder="name@example.com" type="email" value={email} />
         <Field label="姓名" onChange={setDisplayName} placeholder="真实姓名或昵称" value={displayName} />
@@ -269,6 +269,7 @@ function UserRow({
   const [editingRole, setEditingRole] = useState(false);
   const assignable = roles.filter((role) => role.assignable);
   const isOwner = user.roles.includes("owner");
+  const isVolunteer = user.roles.includes("volunteer");
   const active = user.status === "active";
 
   async function patch(body: { status?: "active" | "disabled"; roleId?: string }) {
@@ -323,7 +324,7 @@ function UserRow({
             title={isOwner ? "超级管理员的角色不在此处调整" : isSelf ? "不能修改自己的角色" : "更换角色"}
             type="button"
           >
-            {editingRole ? "取消" : "改角色"}
+            {editingRole ? "取消" : isVolunteer ? "调整权限" : "改角色"}
           </button>
           <button
             className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line px-3 text-aux font-medium text-ink disabled:opacity-40"
@@ -342,7 +343,7 @@ function UserRow({
               title={isSelf ? "不能停用自己的账户" : "停用后无法登录"}
               type="button"
             >
-              停用
+              {isVolunteer ? "移出名单" : "停用"}
             </button>
           ) : (
             <button
@@ -351,7 +352,7 @@ function UserRow({
               onClick={() => void patch({ status: "active" })}
               type="button"
             >
-              启用
+              {isVolunteer ? "加入名单" : "启用"}
             </button>
           )}
         </div>

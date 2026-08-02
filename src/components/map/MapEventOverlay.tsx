@@ -1,4 +1,5 @@
 import type { OperationalEvent } from "../../lib/api/types";
+import { parseGeoGeometryJson, type GeoGeometry } from "../../lib/geoGeometry";
 import type { MapViewWindow } from "./MapCanvas";
 
 /** 叠加图层项：事件 + 其 svg_viewbox 坐标。 */
@@ -9,30 +10,14 @@ export interface EventOverlayItem {
   geometry: GeoGeometry;
 }
 
-type GeoGeometry =
-  | { type: "Point"; coordinates: [number, number] }
-  | { type: "LineString"; coordinates: [number, number][] }
-  | { type: "Polygon"; coordinates: [number, number][][] };
-
-function parseGeometry(raw: string | null): GeoGeometry | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as GeoGeometry;
-    if (parsed.type === "Point" || parsed.type === "LineString" || parsed.type === "Polygon") return parsed;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
 const SEVERITY_COLORS = {
   info: "#1e80c1",
   warning: "#f59e0b",
   critical: "#dc2626",
 } as const;
 
-function severityColor(severity: string): string {
-  return SEVERITY_COLORS[severity as keyof typeof SEVERITY_COLORS] ?? SEVERITY_COLORS.info;
+function severityColor(severity: OperationalEvent["severity"]): string {
+  return SEVERITY_COLORS[severity];
 }
 
 /**
@@ -42,10 +27,11 @@ function severityColor(severity: string): string {
 export function buildEventOverlayItems(events: OperationalEvent[]): EventOverlayItem[] {
   const items: EventOverlayItem[] = [];
   for (const event of events) {
-    for (const location of event.locations ?? []) {
-      if (location.crs !== "svg_viewbox") continue;
-      const geometry = parseGeometry(location.geometryJson);
-      if (!geometry) continue;
+    for (const location of event.locations) {
+      const geometry = parseGeoGeometryJson(location.geometryJson, `operation location ${location.id}.geometryJson`);
+      if (location.geometryType !== geometry.type) {
+        throw new Error(`Data contract violation: operation location ${location.id}.geometryType must match geometryJson.type`);
+      }
       items.push({ event, locationId: location.id, campusId: location.campusId ?? null, geometry });
     }
   }
@@ -123,21 +109,25 @@ export function MapEventOverlay({
           );
         }
 
-        if (item.geometry.type === "Polygon") {
-          const ring = item.geometry.coordinates[0] ?? [];
-          const points = ring.map(([x, y]) => `${x},${y}`).join(" ");
-          const cx = ring.reduce((sum, [x]) => sum + x, 0) / Math.max(1, ring.length);
-          const cy = ring.reduce((sum, [, y]) => sum + y, 0) / Math.max(1, ring.length);
+        if (item.geometry.type === "Polygon" || item.geometry.type === "MultiPolygon") {
+          const polygons = item.geometry.type === "Polygon" ? [item.geometry.coordinates] : item.geometry.coordinates;
+          const rings = polygons.map((polygon) => polygon[0]);
+          const labelRing = rings[0];
+          const cx = labelRing.reduce((sum, [x]) => sum + x, 0) / labelRing.length;
+          const cy = labelRing.reduce((sum, [, y]) => sum + y, 0) / labelRing.length;
           return (
             <g key={item.locationId} {...common}>
-              <polygon
-                points={points}
-                fill={color}
-                fillOpacity={selected ? 0.28 : 0.15}
-                stroke={color}
-                strokeWidth={unit * 0.09}
-                strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
-              />
+              {rings.map((ring, ringIndex) => (
+                <polygon
+                  key={ringIndex}
+                  points={ring.map(([x, y]) => `${x},${y}`).join(" ")}
+                  fill={color}
+                  fillOpacity={selected ? 0.28 : 0.15}
+                  stroke={color}
+                  strokeWidth={unit * 0.09}
+                  strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
+                />
+              ))}
               <text
                 x={cx}
                 y={cy}

@@ -196,6 +196,7 @@ test("the geometry re-edit endpoints are registered and permission gated", () =>
 test("map feature import writes the geometry columns", () => {
   const jobs = fs.readFileSync(path.join(root, "worker/modules/jobs.ts"), "utf8");
   assert.match(jobs, /insert into map_features\([^)]*geometry_json,bbox_json/);
-  assert.match(jobs, /feature\.geometry \? jsonString\(feature\.geometry\) : null/);
-  assert.match(jobs, /feature\.bbox \? jsonString\(feature\.bbox\) : null/);
+  assert.match(jobs, /feature\.geometry === null \? null : JSON\.stringify\(feature\.geometry\)/);
+  assert.match(jobs, /feature\.bbox === null \? null : JSON\.stringify\(feature\.bbox\)/);
+  assert.match(jobs, /shapeHash: serializedGeometry === null \? null : await sha256\(serializedGeometry\)/);
 });

@@ -1,8 +1,9 @@
-import type { EntityLocationType, LocationInput, SessionPrincipal } from "../domain/types";
+import type { RevisionLocationInput } from "../../shared/revision-contract";
+import type { EntityLocationType, SessionPrincipal } from "../domain/types";
 import type { D1PreparedStatement, Env } from "../types/cloudflare";
-import { assertExists, first, run } from "../lib/db";
+import { all, assertExists, first, run } from "../lib/db";
 import { HttpError } from "../lib/http";
-import { isoNow, jsonString, makeId } from "../lib/values";
+import { isoNow, jsonString, makeId, parseJsonObject } from "../lib/values";
 
 const ROLES = [
   "primary_display", "footprint", "centroid", "main_entrance", "accessible_entrance",
@@ -12,22 +13,58 @@ const ROLES = [
 
 const PRECISIONS = ["campus", "building", "floor", "space", "exact", "unknown"] as const;
 
-export async function createLocation(
+interface StoredEntityLocation {
+  bindingId: string;
+  role: RevisionLocationInput["role"];
+  isPrimary: number;
+  campusId: string | null;
+  buildingPlaceId: string | null;
+  floorId: string | null;
+  indoorSpaceId: string | null;
+  geometryType: RevisionLocationInput["geometryType"];
+  geometryJson: string | null;
+  crs: string | null;
+  mapVersionId: string | null;
+  mapFeatureId: string | null;
+  sourceElementId: string | null;
+  locationHint: string | null;
+  precisionLevel: RevisionLocationInput["precisionLevel"];
+  accuracyMeters: number | null;
+  sourceId: string | null;
+  validFrom: string | null;
+  validTo: string | null;
+}
+
+export async function listEntityLocations(
   env: Env,
   entityType: EntityLocationType,
   entityId: string,
-  input: LocationInput,
-  principal: SessionPrincipal,
-  isPrimary: boolean,
-): Promise<{ anchorId: string; bindingId: string }> {
-  const plan = await planLocation(env, entityType, entityId, input, principal, isPrimary, isoNow());
-  const statements = [];
-  if (isPrimary) {
-    statements.push(env.DB.prepare("update entity_locations set is_primary=0 where entity_type=? and entity_id=?").bind(entityType, entityId));
-  }
-  statements.push(...plan.statements);
-  await env.DB.batch(statements);
-  return { anchorId: plan.anchorId, bindingId: plan.bindingId };
+): Promise<Array<RevisionLocationInput & { bindingId: string; sourceElementId: string | null }>> {
+  const rows = await all<StoredEntityLocation>(
+    env.DB,
+    `select el.id as bindingId,el.role,el.is_primary as isPrimary,
+            la.campus_id as campusId,la.building_place_id as buildingPlaceId,
+            la.floor_id as floorId,la.indoor_space_id as indoorSpaceId,
+            la.geometry_type as geometryType,la.geometry_json as geometryJson,la.crs,
+            la.map_version_id as mapVersionId,la.map_feature_id as mapFeatureId,
+            mf.source_element_id as sourceElementId,la.location_hint as locationHint,
+            la.precision_level as precisionLevel,la.accuracy_meters as accuracyMeters,
+            la.source_id as sourceId,la.valid_from as validFrom,la.valid_to as validTo
+       from entity_locations el
+       join location_anchors la on la.id=el.anchor_id
+       left join map_features mf on mf.id=la.map_feature_id
+      where el.entity_type=? and el.entity_id=? and el.valid_to is null
+      order by el.is_primary desc,el.created_at,el.id`,
+    [entityType, entityId],
+  );
+  return rows.map(({ geometryJson, isPrimary, ...row }) => {
+    if (isPrimary !== 0 && isPrimary !== 1) throw new Error(`location ${row.bindingId} is_primary must be 0 or 1`);
+    return {
+      ...row,
+      geometry: geometryJson === null ? null : parseJsonObject(geometryJson, `location ${row.bindingId} geometry_json`),
+      isPrimary: isPrimary === 1,
+    };
+  });
 }
 
 /**
@@ -39,9 +76,8 @@ export async function planLocation(
   env: Env,
   entityType: EntityLocationType,
   entityId: string,
-  input: LocationInput,
+  input: RevisionLocationInput,
   principal: SessionPrincipal,
-  isPrimary: boolean,
   now: string,
 ): Promise<{ anchorId: string; bindingId: string; statements: D1PreparedStatement[] }> {
   validateInput(input);
@@ -49,11 +85,10 @@ export async function planLocation(
 
   const anchorId = makeId("anchor");
   const bindingId = makeId("eloc");
-  const geometryType = input.geometryType ?? "Point";
   const verificationStatus = principal.permissions.includes("review:content") || principal.permissions.includes("*")
     ? "reviewed"
     : "unverified";
-  const geometryJson = input.geometry === undefined || input.geometry === null ? null : jsonString(input.geometry);
+  const geometryJson = input.geometry === null ? null : jsonString(input.geometry);
 
   const statements: D1PreparedStatement[] = [];
   statements.push(
@@ -63,18 +98,23 @@ export async function planLocation(
         map_feature_id,location_hint,precision_level,accuracy_meters,source_id,verification_status,valid_from,valid_to,created_at,updated_at
       ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).bind(
-      anchorId, input.campusId ?? null, input.buildingPlaceId ?? null, input.floorId ?? null, input.indoorSpaceId ?? null,
-      input.role, geometryType, geometryJson, input.crs ?? null, input.mapVersionId ?? null, input.mapFeatureId ?? null,
-      input.locationHint ?? null, input.precisionLevel ?? "unknown", input.accuracyMeters ?? null, input.sourceId ?? null,
-      verificationStatus, input.validFrom ?? null, input.validTo ?? null, now, now,
+      anchorId, input.campusId, input.buildingPlaceId, input.floorId, input.indoorSpaceId,
+      input.role, input.geometryType, geometryJson, input.crs, input.mapVersionId, input.mapFeatureId,
+      input.locationHint, input.precisionLevel, input.accuracyMeters, input.sourceId,
+      verificationStatus, input.validFrom, input.validTo, now, now,
     ),
   );
   statements.push(
     env.DB.prepare(
       "insert into entity_locations(id,entity_type,entity_id,anchor_id,role,is_primary,valid_from,valid_to,created_at) values(?,?,?,?,?,?,?,?,?)",
-    ).bind(bindingId, entityType, entityId, anchorId, input.role, isPrimary ? 1 : 0, input.validFrom ?? null, input.validTo ?? null, now),
+    ).bind(bindingId, entityType, entityId, anchorId, input.role, input.isPrimary ? 1 : 0, input.validFrom, input.validTo, now),
   );
   return { anchorId, bindingId, statements };
+}
+
+export async function validateLocation(env: Env, input: RevisionLocationInput): Promise<void> {
+  validateInput(input);
+  await validateHierarchy(env, input);
 }
 
 export async function retireEntityLocations(env: Env, entityType: EntityLocationType, entityId: string): Promise<void> {
@@ -86,12 +126,12 @@ export async function retireEntityLocations(env: Env, entityType: EntityLocation
   );
 }
 
-function validateInput(input: LocationInput): void {
+function validateInput(input: RevisionLocationInput): void {
   if (!ROLES.includes(input.role)) throw new HttpError(400, "validation_error", "Invalid location role");
-  if (input.precisionLevel && !PRECISIONS.includes(input.precisionLevel)) {
+  if (!PRECISIONS.includes(input.precisionLevel)) {
     throw new HttpError(400, "validation_error", "Invalid location precision");
   }
-  if (input.geometry !== undefined && input.geometry !== null && !input.crs && !input.mapVersionId) {
+  if (input.geometry !== null && !input.crs && !input.mapVersionId) {
     throw new HttpError(400, "validation_error", "A coordinate reference system or map version is required for geometry");
   }
   if (input.mapFeatureId && !input.mapVersionId) {
@@ -102,7 +142,7 @@ function validateInput(input: LocationInput): void {
   }
 }
 
-async function validateHierarchy(env: Env, input: LocationInput): Promise<void> {
+async function validateHierarchy(env: Env, input: RevisionLocationInput): Promise<void> {
   await Promise.all([
     assertExists(env.DB, "campuses", input.campusId, "Campus"),
     assertExists(env.DB, "buildings", input.buildingPlaceId, "Building"),
@@ -119,6 +159,16 @@ async function validateHierarchy(env: Env, input: LocationInput): Promise<void> 
       throw new HttpError(400, "invalid_spatial_hierarchy", "Floor does not belong to the selected building");
     }
   }
+  if (input.buildingPlaceId && input.campusId) {
+    const building = await first<{ campus_id: string | null }>(
+      env.DB,
+      `select p.campus_id from buildings b join places p on p.id=b.place_id where b.place_id=?`,
+      [input.buildingPlaceId],
+    );
+    if (building?.campus_id !== input.campusId) {
+      throw new HttpError(400, "invalid_spatial_hierarchy", "Building does not belong to the selected campus");
+    }
+  }
   if (input.indoorSpaceId) {
     const space = await first<{ floor_id: string }>(env.DB, "select floor_id from indoor_spaces where id=?", [input.indoorSpaceId]);
     if (input.floorId && space?.floor_id !== input.floorId) {
@@ -126,9 +176,20 @@ async function validateHierarchy(env: Env, input: LocationInput): Promise<void> 
     }
   }
   if (input.mapFeatureId && input.mapVersionId) {
-    const feature = await first<{ map_version_id: string }>(env.DB, "select map_version_id from map_features where id=?", [input.mapFeatureId]);
+    const feature = await first<{ map_version_id: string; campus_id: string | null; floor_id: string | null }>(
+      env.DB,
+      `select mf.map_version_id,mv.campus_id,mv.floor_id
+         from map_features mf join map_versions mv on mv.id=mf.map_version_id where mf.id=?`,
+      [input.mapFeatureId],
+    );
     if (feature?.map_version_id !== input.mapVersionId) {
       throw new HttpError(400, "invalid_map_binding", "Map feature does not belong to the selected map version");
+    }
+    if (input.campusId && feature?.campus_id && feature.campus_id !== input.campusId) {
+      throw new HttpError(400, "invalid_map_binding", "Map feature does not belong to the selected campus");
+    }
+    if (input.floorId && feature?.floor_id !== input.floorId) {
+      throw new HttpError(400, "invalid_map_binding", "Map feature does not belong to the selected floor");
     }
   }
 }

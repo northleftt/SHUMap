@@ -2,7 +2,7 @@ import { ChevronDown, ChevronRight, Pencil, Plus, Tags, Trash2 } from "lucide-re
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
-import type { FacilityTypeInstanceRow, FacilityTypeRow } from "../../lib/api/admin";
+import type { FacilityTypeInstanceRow, FacilityTypeMapFilterCategory, FacilityTypeRow } from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
 import { facilityIconByKey, facilityIconKeyLabel } from "../../lib/facilityIcons";
 import { useAuth } from "../AuthContext";
@@ -27,7 +27,7 @@ import {
 // 「不要某个标签了」分两种情况，界面上区分清楚：
 //   · 已经挂了点位 → 只能停用。停用后不再出现在新建设施和志愿者采集的可选项里，
 //     但既有点位照常展示与发布，历史数据不受影响。
-//   · 一个点位都没挂 → 可以直接删除。
+//   · 没有点位和采集记录引用 → 可以直接删除。
 // ---------------------------------------------------------------------------
 
 const ERROR_TEXT: Record<string, string> = {
@@ -35,16 +35,18 @@ const ERROR_TEXT: Record<string, string> = {
   invalid_code: "英文编码只能用小写字母、数字和下划线，并以字母开头。",
   code_immutable: "已有类型的英文编码不能修改。要换编码请新建一个类型，再把旧的停用。",
   unsupported_icon_key: "选择的图标不在支持范围内，请重新选择。",
-  facility_type_in_use: "这个类型下还挂着点位，不能删除。可以先停用它。",
+  facility_type_in_use: "这个类型仍被点位或采集记录引用，不能删除。可以先停用它。",
+  inactive_map_filter: "启用中的设施类型必须归入启用中的地图分类。",
+  map_filter_in_use: "这个地图分类仍承载使用中的内容，当前操作无法完成。",
   validation_error: "填写的内容不完整或不正确，请检查后重试。",
   forbidden: "当前账号没有维护设施类型的权限。",
   unauthorized: "登录状态已失效，请重新登录。",
   not_found: "这个类型不存在，可能已被其他人改动，刷新后再试。",
 };
 
-function typeError(err: unknown, fallback: string): string {
-  if (err instanceof ApiError) return ERROR_TEXT[err.code] ?? fallback;
-  return errorMessage(err, fallback);
+function typeError(err: unknown, defaultMessage: string): string {
+  if (err instanceof ApiError) return ERROR_TEXT[err.code] ?? defaultMessage;
+  return errorMessage(err, defaultMessage);
 }
 
 /** 分类只用于分组展示，中文名在这里定；接口给的是英文键。 */
@@ -138,12 +140,14 @@ function TypeForm({
   editing,
   iconKeys,
   categories,
+  mapFilterCategories,
   onClose,
   onSaved,
 }: {
   editing: FacilityTypeRow | null;
   iconKeys: string[];
   categories: string[];
+  mapFilterCategories: FacilityTypeMapFilterCategory[];
   onClose: () => void;
   onSaved: (message: string) => void;
 }) {
@@ -154,12 +158,13 @@ function TypeForm({
   const [interval, setInterval] = useState(
     editing?.verificationIntervalDays == null ? "" : String(editing.verificationIntervalDays),
   );
+  const [mapFilterCategoryId, setMapFilterCategoryId] = useState(editing?.mapFilterCategoryId ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const codeOk = /^[a-z][a-z0-9_]*$/.test(code.trim().toLowerCase());
   const intervalOk = interval.trim() === "" || /^\d{1,4}$/.test(interval.trim());
-  const ready = name.trim().length > 0 && (editing !== null || codeOk) && intervalOk;
+  const ready = name.trim().length > 0 && (editing !== null || codeOk) && intervalOk && mapFilterCategoryId.length > 0;
 
   async function submit() {
     setBusy(true);
@@ -172,6 +177,7 @@ function TypeForm({
           category,
           iconKey: iconKey || null,
           verificationIntervalDays: days,
+          mapFilterCategoryId,
         });
         onSaved(`已保存「${name.trim()}」`);
       } else {
@@ -181,6 +187,7 @@ function TypeForm({
           category,
           iconKey: iconKey || null,
           verificationIntervalDays: days,
+          mapFilterCategoryId,
         });
         onSaved(`已新增类型「${name.trim()}」`);
       }
@@ -219,6 +226,15 @@ function TypeForm({
           onChange={setInterval}
           placeholder="如 90"
           value={interval}
+        />
+        <SelectField
+          label="地图分类"
+          onChange={setMapFilterCategoryId}
+          options={mapFilterCategories
+            .filter((item) => editing !== null || item.active)
+            .map((item) => ({ value: item.id, label: item.active ? item.label : `${item.label}（已停用）` }))}
+          placeholder="选择地图分类"
+          value={mapFilterCategoryId}
         />
       </div>
       <div className="mt-4 max-w-lg">
@@ -323,7 +339,7 @@ function TypeCard({
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const active = type.status !== "disabled";
-  const removable = type.instanceCount === 0;
+  const removable = type.instanceCount === 0 && type.collectionReferenceCount === 0;
 
   async function toggleStatus() {
     setBusy(true);
@@ -371,7 +387,7 @@ function TypeCard({
             {active ? null : <Pill tone="neutral">已停用</Pill>}
           </p>
           <p className="mt-0.5 text-label text-sub">
-            {categoryLabel(type.category)} · 图标：{facilityIconKeyLabel(type.iconKey ?? "generic")}
+            {categoryLabel(type.category)} · 地图分类：{type.mapFilterLabel} · 图标：{facilityIconKeyLabel(type.iconKey ?? "generic")}
             {type.verificationIntervalDays ? ` · 建议每 ${type.verificationIntervalDays} 天复核` : ""}
           </p>
         </div>
@@ -408,7 +424,7 @@ function TypeCard({
               className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-error/40 px-3 text-aux font-medium text-error disabled:opacity-40"
               disabled={busy || !removable}
               onClick={() => setConfirmDelete(true)}
-              title={removable ? "彻底删除这个类型" : "这个类型下还挂着点位，只能停用"}
+              title={removable ? "彻底删除这个类型" : "这个类型仍被点位或采集记录引用，只能停用"}
               type="button"
             >
               <Trash2 size={13} />
@@ -466,12 +482,12 @@ export function FacilityTypesPage() {
     if (key === "all") return data.items.length;
     if (key === "active") return data.items.filter((t) => t.status !== "disabled").length;
     if (key === "disabled") return data.items.filter((t) => t.status === "disabled").length;
-    return data.items.filter((t) => t.instanceCount === 0).length;
+    return data.items.filter((t) => t.instanceCount === 0 && t.collectionReferenceCount === 0).length;
   };
   const visible = data.items.filter((type) => {
     if (filter === "active") return type.status !== "disabled";
     if (filter === "disabled") return type.status === "disabled";
-    if (filter === "empty") return type.instanceCount === 0;
+    if (filter === "empty") return type.instanceCount === 0 && type.collectionReferenceCount === 0;
     return true;
   });
 
@@ -479,7 +495,7 @@ export function FacilityTypesPage() {
     { key: "all", label: "全部" },
     { key: "active", label: "启用中" },
     { key: "disabled", label: "已停用" },
-    { key: "empty", label: "暂无点位" },
+    { key: "empty", label: "可删除" },
   ];
 
   function afterChange(message: string) {
@@ -498,6 +514,7 @@ export function FacilityTypesPage() {
           categories={data.categories}
           editing={editing}
           iconKeys={data.iconKeys}
+          mapFilterCategories={data.mapFilterCategories}
           onClose={() => {
             setCreating(false);
             setEditing(null);

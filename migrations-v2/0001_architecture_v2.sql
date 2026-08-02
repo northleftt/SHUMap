@@ -256,7 +256,7 @@ create table location_anchors (
   floor_id text references floors(id) on delete restrict,
   indoor_space_id text references indoor_spaces(id) on delete restrict,
   role text not null check (role in ('primary_display','footprint','centroid','main_entrance','accessible_entrance','navigation_target','service_position','boarding_point','alighting_point','event_location','impact_area','route_shape','other')),
-  geometry_type text not null check (geometry_type in ('Point','LineString','Polygon')),
+  geometry_type text not null check (geometry_type in ('Point','LineString','Polygon','MultiPolygon')),
   geometry_json text check (geometry_json is null or json_valid(geometry_json)),
   crs text,
   map_version_id text references map_versions(id) on delete restrict,
@@ -654,7 +654,7 @@ create index idx_search_release_campus on search_documents(release_id, campus_id
 -- Asynchronous jobs ---------------------------------------------------------
 create table jobs (
   id text primary key,
-  job_type text not null check (job_type in ('map_import','floor_import','media_process','search_build','release_build','garbage_collect')),
+  job_type text not null check (job_type in ('map_import','floor_import')),
   idempotency_key text not null unique,
   status text not null check (status in ('queued','running','waiting_review','succeeded','failed','cancelled')),
   payload_json text not null check (json_valid(payload_json)),

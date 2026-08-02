@@ -40,19 +40,52 @@ export async function readJsonLimited<T>(request: Request, maximumBytes: number)
   if (!contentType.toLowerCase().includes("application/json")) {
     throw new HttpError(415, "unsupported_media_type", "Expected application/json");
   }
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > maximumBytes) {
-    throw new HttpError(413, "payload_too_large", `Request body must be at most ${maximumBytes} bytes`);
-  }
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > maximumBytes) {
-    throw new HttpError(413, "payload_too_large", `Request body must be at most ${maximumBytes} bytes`);
-  }
+  const bytes = await readBodyLimited(request, maximumBytes);
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as T;
   } catch {
     throw new HttpError(400, "invalid_json", "Request body is not valid JSON");
   }
+}
+
+export async function readBodyLimited(request: Request, maximumBytes: number): Promise<ArrayBuffer> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null) {
+    const declared = Number(contentLength);
+    if (!Number.isSafeInteger(declared) || declared < 0) {
+      throw new HttpError(400, "invalid_content_length", "Content-Length must be a non-negative integer");
+    }
+    if (declared > maximumBytes) {
+      throw new HttpError(413, "payload_too_large", `Request body must be at most ${maximumBytes} bytes`);
+    }
+  }
+  if (!request.body) return new ArrayBuffer(0);
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maximumBytes) {
+        await reader.cancel();
+        throw new HttpError(413, "payload_too_large", `Request body must be at most ${maximumBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
 }
 
 export class HttpError extends Error {

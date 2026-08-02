@@ -31,44 +31,43 @@ function nextKey(): string {
 
 /**
  * 把任意图片文件画到 canvas 上按最长边缩放后导出 JPEG。
- * 拿不到 2d context（极老浏览器 / 内存不足）时退回原文件，让服务端的
- * 类型与大小校验兜底。
+ * 解码、绘制和编码中的任一步失败都会进入照片失败状态。
  */
 export async function compressImage(file: File): Promise<Blob> {
   const bitmap = await loadBitmap(file);
-  if (!bitmap) return file;
-  const { width, height } = bitmap;
-  const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(width * scale));
-  canvas.height = Math.max(1, Math.round(height * scale));
-  const context = canvas.getContext("2d");
-  if (!context) {
+  try {
+    const { width, height } = bitmap;
+    const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("浏览器无法创建照片压缩画布");
+    context.drawImage(bitmap as CanvasImageSource, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((result) => resolve(result), "image/jpeg", JPEG_QUALITY);
+    });
+    if (!blob) throw new Error("浏览器无法编码压缩后的照片");
+    return blob;
+  } finally {
     if ("close" in bitmap) bitmap.close();
-    return file;
   }
-  context.drawImage(bitmap as CanvasImageSource, 0, 0, canvas.width, canvas.height);
-  if ("close" in bitmap) bitmap.close();
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((result) => resolve(result), "image/jpeg", JPEG_QUALITY);
-  });
-  return blob ?? file;
 }
 
-async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement | null> {
+async function loadBitmap(file: File): Promise<ImageBitmap | HTMLImageElement> {
   if (typeof createImageBitmap === "function") {
     try {
       return await createImageBitmap(file);
     } catch {
-      // Safari 对某些 HEIC/损坏文件会抛错，落到 <img> 解码。
+      // 浏览器位图解码不可用时，继续使用 <img> 解码同一文件。
     }
   }
   const url = URL.createObjectURL(file);
   try {
-    return await new Promise<HTMLImageElement | null>((resolve) => {
+    return await new Promise<HTMLImageElement>((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
-      image.onerror = () => resolve(null);
+      image.onerror = () => reject(new Error("照片解码失败，请选择可读取的图片"));
       image.src = url;
     });
   } finally {

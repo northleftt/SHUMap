@@ -1,9 +1,9 @@
 import { Check, Hexagon, MapPin, Route, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
 import * as admin from "../../lib/api/admin";
-import { campusConfigs } from "../../lib/release/mapData";
-import type { CampusKey } from "../../lib/types";
+import type { CampusConfig, CampusKey } from "../../lib/types";
 import type { OperationalEventRow, PlaceListItem, SpacesResponse } from "../adminTypes";
 import {
   Chip,
@@ -11,7 +11,6 @@ import {
   EVENT_TYPE_LABELS,
   Field,
   GhostButton,
-  InfoNote,
   LoadingState,
   Panel,
   Pill,
@@ -41,6 +40,12 @@ const EVENT_TYPES = [
   { key: "notice", label: "通知", severity: "info" },
 ] as const;
 
+function eventTypeMetadata(key: (typeof EVENT_TYPES)[number]["key"]): (typeof EVENT_TYPES)[number] {
+  const metadata = EVENT_TYPES.find((item) => item.key === key);
+  if (!metadata) throw new Error(`Unknown event type ${key}`);
+  return metadata;
+}
+
 type Vert = [number, number];
 type DrawMode = "point" | "area" | "path";
 
@@ -60,9 +65,8 @@ const POINT_COLOR = "#1e80c1";
 const PATH_COLOR = "#1e80c1";
 
 function viewBoxOf(svgRaw: string): { x: number; y: number; w: number; h: number } {
-  const match = svgRaw.match(/viewBox="([^"]+)"/);
-  const parts = (match?.[1] ?? "0 0 1000 1000").split(/[\s,]+/).map(Number);
-  return { x: parts[0] ?? 0, y: parts[1] ?? 0, w: parts[2] ?? 1000, h: parts[3] ?? 1000 };
+  const viewBox = parseSvgViewBox(svgRaw);
+  return { x: viewBox.x, y: viewBox.y, w: viewBox.width, h: viewBox.height };
 }
 
 function round1(n: number): number {
@@ -92,16 +96,32 @@ function pathLength(vertices: Vert[]): number {
  * Both forms are accepted so the lookup never silently misses — a failed match
  * blocks the save instead of writing a campus-less (all-campus) event.
  */
-function campusKeyOfRow(row: { code: string; id: string }): string {
-  return (row.code || row.id.replace(/^campus_/, "")).trim().toLowerCase();
+function campusKeyOfRow(row: { code: string }): CampusKey {
+  const code = row.code.trim().toLowerCase();
+  if (code !== "baoshan" && code !== "jiading" && code !== "yanchang") {
+    throw new Error(`未知校区代码：${row.code}`);
+  }
+  return code;
 }
 
+const CAMPUS_DISPLAY: Record<CampusKey, Omit<CampusConfig, "id" | "key" | "label" | "mapVersionId" | "svgRaw">> = {
+  baoshan: { focusPoint: { x: 0.48, y: 0.43 }, scaleMultiplier: 1.78, minScaleMultiplier: 1, edgePaddingRatio: 0.18, selectionEdgePaddingRatio: 0.3, selectionScaleMultiplier: 2.15 },
+  jiading: { focusPoint: { x: 0.37, y: 0.5 }, scaleMultiplier: 3.05, minScaleMultiplier: 1, edgePaddingRatio: 0.3, selectionEdgePaddingRatio: 0.4, selectionScaleMultiplier: 2.4 },
+  yanchang: { focusPoint: { x: 0.52, y: 0.46 }, scaleMultiplier: 0.8, minScaleMultiplier: 1, edgePaddingRatio: 0.2, selectionEdgePaddingRatio: 0.32, selectionScaleMultiplier: 1.35 },
+};
+
 function isVert(value: unknown): value is Vert {
-  return Array.isArray(value) && value.length >= 2 && typeof value[0] === "number" && typeof value[1] === "number";
+  return Array.isArray(value) && value.length === 2
+    && typeof value[0] === "number" && Number.isFinite(value[0])
+    && typeof value[1] === "number" && Number.isFinite(value[1]);
 }
 
 function vertsOf(value: unknown): Vert[] {
-  return Array.isArray(value) ? value.filter(isVert).map(([x, y]) => [x, y] as Vert) : [];
+  if (!Array.isArray(value)) throw new Error("几何坐标必须是数组");
+  return value.map((vertex, index) => {
+    if (!isVert(vertex)) throw new Error(`第 ${index + 1} 个几何坐标无效`);
+    return [vertex[0], vertex[1]];
+  });
 }
 
 /** Drops the duplicated closing vertex a GeoJSON ring carries. */
@@ -134,7 +154,17 @@ export function OperationCreatePage() {
     ]);
     const event = routeId ? operations?.items.find((item) => item.id === routeId) : undefined;
     if (routeId && !event) throw new Error("事件不存在");
-    return { spaces, places: places.items, maps: maps.items, event };
+    const campusRows = spaces.campuses.filter((row) => row.status === "active");
+    const campusMaps = maps.items.filter((map) => map.campusId && !map.floorId && ["ready", "published"].includes(map.lifecycleStatus));
+    const campuses = await Promise.all(campusRows.map(async (row) => {
+      const key = campusKeyOfRow(row);
+      const map = campusMaps.find((candidate) => candidate.campusId === row.id);
+      if (!map) throw new Error(`校区 ${row.name} 没有可用校园地图版本`);
+      const svgRaw = await admin.fetchAdminMapAssetSvg(map.id, signal);
+      return { id: row.id, key, label: row.name, mapVersionId: map.id, svgRaw, ...CAMPUS_DISPLAY[key] } satisfies CampusConfig;
+    }));
+    if (!campuses.length) throw new Error("没有可用校区地图");
+    return { spaces, places: places.items, maps: maps.items, campuses, event };
   }, [routeId]);
 
   const [eventType, setEventType] = useState<(typeof EVENT_TYPES)[number]["key"]>("maintenance");
@@ -144,7 +174,7 @@ export function OperationCreatePage() {
   const [expectedEndsAt, setExpectedEndsAt] = useState("");
   const [targetIds, setTargetIds] = useState<string[]>([]);
   const [targetPick, setTargetPick] = useState("");
-  const [campusKey, setCampusKey] = useState(campusConfigs[0]?.key ?? "baoshan");
+  const [campusKey, setCampusKey] = useState<CampusKey>("baoshan");
   // 绘制状态：mode=当前工具；draft=进行中的顶点；point/area/path=已完成几何
   const [mode, setMode] = useState<DrawMode | null>(null);
   const [draft, setDraft] = useState<Vert[]>([]);
@@ -156,11 +186,12 @@ export function OperationCreatePage() {
   const [error, setError] = useState("");
   const [hydrated, setHydrated] = useState(false);
 
-  const campus = campusConfigs.find((c) => c.key === campusKey) ?? campusConfigs[0];
-  const vb = useMemo(() => viewBoxOf(campus.svgRaw), [campus]);
+  const campuses = state.status === "ready" ? state.data!.campuses : [];
+  const campus = campuses.find((candidate) => candidate.key === campusKey);
+  const vb = useMemo(() => campus ? viewBoxOf(campus.svgRaw) : null, [campus]);
   // 闭合吸附半径（viewBox 单位）；双击去重 epsilon
-  const snapR = vb.w / 50;
-  const dedupeEps = vb.w / 500;
+  const snapR = vb ? vb.w / 50 : null;
+  const dedupeEps = vb ? vb.w / 500 : null;
 
   const drafting = mode === "area" || mode === "path";
   const minVertices = mode === "area" ? 3 : 2;
@@ -172,35 +203,55 @@ export function OperationCreatePage() {
   // 编辑模式：把已存的 svg_viewbox 几何回显到画布（只做一次，避免覆盖用户改动）
   useEffect(() => {
     if (!editing || hydrated || !loadedEvent) return;
-    const locations = loadedEvent.locations ?? [];
+    if (!Array.isArray(loadedEvent.locations)) {
+      setError("事件位置数据缺失");
+      setHydrated(true);
+      return;
+    }
+    const locations = loadedEvent.locations;
     const anchorCampusId = locations.find((location) => location.campusId)?.campusId ?? null;
     const row = anchorCampusId ? campusRows.find((candidate) => candidate.id === anchorCampusId) : undefined;
-    const key = row ? campusKeyOfRow(row) : null;
-    const restoredKey = key && campusConfigs.some((config) => config.key === key) ? (key as CampusKey) : campusKey;
+    if (anchorCampusId && !row) {
+      setError(`事件位置引用了未知校区 ${anchorCampusId}`);
+      setHydrated(true);
+      return;
+    }
+    const restoredKey = row ? campusKeyOfRow(row) : campusKey;
 
-    for (const location of locations) {
-      if (location.crs !== "svg_viewbox" || !location.geometryJson) continue;
-      let geometry: { type?: string; coordinates?: unknown };
-      try {
-        geometry = JSON.parse(location.geometryJson) as { type?: string; coordinates?: unknown };
-      } catch {
-        continue;
+    try {
+      for (const location of locations) {
+        if (location.crs !== "svg_viewbox" || typeof location.geometryJson !== "string") {
+          throw new Error(`位置 ${location.id} 缺少 svg_viewbox 几何`);
+        }
+        const geometry = JSON.parse(location.geometryJson) as { type?: string; coordinates?: unknown };
+        if (location.role === "event_location") {
+          if (geometry.type !== "Point" || !isVert(geometry.coordinates)) throw new Error("事件点几何无效");
+          setPoint({ campusKey: restoredKey, x: geometry.coordinates[0], y: geometry.coordinates[1] });
+        } else if (location.role === "impact_area") {
+          if (geometry.type !== "Polygon" || !Array.isArray(geometry.coordinates) || geometry.coordinates.length !== 1) {
+            throw new Error("影响区域几何无效");
+          }
+          const ring = openRing(vertsOf(geometry.coordinates[0]));
+          if (ring.length < 3) throw new Error("影响区域至少需要三个顶点");
+          setArea({ campusKey: restoredKey, vertices: ring });
+        } else if (location.role === "route_shape") {
+          if (geometry.type !== "LineString") throw new Error("路径几何无效");
+          const vertices = vertsOf(geometry.coordinates);
+          if (vertices.length < 2) throw new Error("路径至少需要两个顶点");
+          setPath({ campusKey: restoredKey, vertices });
+        } else {
+          throw new Error(`事件位置包含不支持的角色 ${location.role}`);
+        }
       }
-      if (location.role === "event_location" && geometry.type === "Point" && isVert(geometry.coordinates)) {
-        setPoint({ campusKey: restoredKey, x: geometry.coordinates[0], y: geometry.coordinates[1] });
-      } else if (location.role === "impact_area" && geometry.type === "Polygon") {
-        const ring = Array.isArray(geometry.coordinates) ? openRing(vertsOf(geometry.coordinates[0])) : [];
-        if (ring.length >= 3) setArea({ campusKey: restoredKey, vertices: ring });
-      } else if (location.role === "route_shape" && geometry.type === "LineString") {
-        const vertices = vertsOf(geometry.coordinates);
-        if (vertices.length >= 2) setPath({ campusKey: restoredKey, vertices });
-      }
+    } catch (reason) {
+      setError(errorMessage(reason, "事件位置数据无效"));
     }
     setCampusKey(restoredKey);
     setHydrated(true);
-  }, [editing, hydrated, loadedEvent, campusRows, campusKey]);
+  }, [editing, hydrated, loadedEvent, campusRows, campuses, campusKey]);
 
   function toViewBox(event: React.MouseEvent<HTMLDivElement>): Vert | null {
+    if (!vb) return null;
     const rect = mapRef.current?.getBoundingClientRect();
     if (!rect) return null;
     // preserveAspectRatio="xMidYMid meet" 反推 viewBox 坐标
@@ -242,6 +293,7 @@ export function OperationCreatePage() {
   }, [draftReady, mode, campusKey, draft, clearDrawing]);
 
   function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (snapR === null || dedupeEps === null) return;
     const at = toViewBox(event);
     if (!at) return;
     if (mode === "point") {
@@ -291,23 +343,36 @@ export function OperationCreatePage() {
 
   if (state.status === "loading") return <LoadingState label={editing ? "加载事件与几何…" : "加载…"} />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
+  if (!campus || !vb) return <ErrorBanner message="当前校区没有可用地图" />;
   const places = state.data!.places;
   const event = state.data!.event;
 
-  const typeMeta = EVENT_TYPES.find((t) => t.key === eventType) ?? EVENT_TYPES[0];
+  const typeMeta = eventTypeMetadata(eventType);
 
   // 该校区当前可用的地图版本（ready / published）。带上它，发布校验才能把
   // 事件几何和 release 里的地图版本对上（releases.ts 的 map-version warning）。
   const campusRow = campusRows.find((row) => campusKeyOfRow(row) === campusKey);
-  const mapVersion = campusRow
-    ? state.data!.maps.find((version) => version.campusId === campusRow.id && version.lifecycleStatus === "published")
-      ?? state.data!.maps.find((version) => version.campusId === campusRow.id && version.lifecycleStatus === "ready")
-    : undefined;
+  const selectedCampus = campuses.find((candidate) => candidate.key === campusKey);
+  const mapVersion = selectedCampus ? state.data!.maps.find((version) => version.id === selectedCampus.mapVersionId) : undefined;
 
   /** 三种 role 的几何 → locations 载荷；点在最前，成为 primary binding。 */
   function buildLocations(): admin.OperationLocationInput[] {
-    if (!campusRow) return [];
-    const base = { campusId: campusRow.id, mapVersionId: mapVersion?.id ?? null, crs: "svg_viewbox" as const };
+    if (!campusRow || !mapVersion) throw new Error("当前校区缺少 canonical 地图版本");
+    const base = {
+      campusId: campusRow.id,
+      buildingPlaceId: null,
+      floorId: null,
+      indoorSpaceId: null,
+      mapVersionId: mapVersion.id,
+      mapFeatureId: null,
+      crs: "svg_viewbox",
+      locationHint: null,
+      precisionLevel: "exact" as const,
+      accuracyMeters: null,
+      sourceId: null,
+      validFrom: null,
+      validTo: null,
+    };
     const locations: admin.OperationLocationInput[] = [];
     if (point && point.campusKey === campusKey) {
       locations.push({
@@ -315,6 +380,7 @@ export function OperationCreatePage() {
         role: "event_location",
         geometryType: "Point",
         geometry: { type: "Point", coordinates: [point.x, point.y] },
+        isPrimary: locations.length === 0,
       });
     }
     if (area && area.campusKey === campusKey) {
@@ -323,6 +389,7 @@ export function OperationCreatePage() {
         role: "impact_area",
         geometryType: "Polygon",
         geometry: { type: "Polygon", coordinates: [[...area.vertices, area.vertices[0]]] },
+        isPrimary: locations.length === 0,
       });
     }
     if (path && path.campusKey === campusKey) {
@@ -331,6 +398,7 @@ export function OperationCreatePage() {
         role: "route_shape",
         geometryType: "LineString",
         geometry: { type: "LineString", coordinates: path.vertices },
+        isPrimary: locations.length === 0,
       });
     }
     return locations;
@@ -345,7 +413,8 @@ export function OperationCreatePage() {
   async function save() {
     if (draft.length > 0) { setError("请先完成（Enter）或取消（Esc）正在绘制的图形"); return; }
     // 校区必须显式解析成 campuses 行，否则事件会泛化到所有校区
-    if (hasGeometry && !campusRow) {
+    if (!campus) { setError("当前校区没有可用地图"); return; }
+    if (hasGeometry && (!campusRow || !mapVersion)) {
       setError(`未能在后端找到校区「${campus.label}」（code=${campusKey}），无法保存几何；请先在校区管理中确认该校区存在`);
       return;
     }
@@ -366,10 +435,13 @@ export function OperationCreatePage() {
         eventType,
         severity: typeMeta.severity,
         title: title.trim(),
-        description: description.trim() || undefined,
+        description: description.trim() || null,
         startsAt: new Date(startsAt).toISOString(),
-        expectedEndsAt: expectedEndsAt ? new Date(expectedEndsAt).toISOString() : undefined,
-        targets: targetIds.map((id) => ({ type: "place", id })),
+        expectedEndsAt: expectedEndsAt ? new Date(expectedEndsAt).toISOString() : null,
+        autoExpireAt: null,
+        sourceId: null,
+        responsibleOrganizationId: null,
+        targets: targetIds.map((id) => ({ type: "place", id, impactType: "affected" })),
         locations: buildLocations(),
       });
       navigate("/admin/operations");
@@ -581,10 +653,6 @@ export function OperationCreatePage() {
                   </div>
                 </div>
               ) : null}
-
-              {!point && !area && !path && draft.length === 0 ? (
-                <InfoNote>选择上方 点 / 区域 / 路径 后在右侧地图绘制（均为可选）。</InfoNote>
-              ) : null}
             </div>
 
             <p className="mt-2 text-label leading-relaxed text-sub">
@@ -629,7 +697,7 @@ export function OperationCreatePage() {
       {/* 右：地图 */}
       <Panel padded={false} className="overflow-hidden">
         <div className="flex items-center gap-2 px-5 pt-4">
-          {campusConfigs.map((c) => (
+          {campuses.map((c) => (
             <Chip key={c.key} active={campusKey === c.key} onClick={() => { setCampusKey(c.key); clearAllGeometry(); }}>
               {c.label}
             </Chip>
@@ -716,7 +784,7 @@ export function OperationCreatePage() {
                     strokeLinecap="round"
                     strokeWidth={unit * 0.1}
                   />
-                  {mode === "area" && draftReady && cursor && dist(cursor, draft[0]) <= snapR ? (
+                  {mode === "area" && draftReady && cursor && dist(cursor, draft[0]) <= vb.w / 50 ? (
                     <line
                       x1={draft[draft.length - 1][0]}
                       y1={draft[draft.length - 1][1]}

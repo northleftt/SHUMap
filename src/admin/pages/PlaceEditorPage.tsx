@@ -1,8 +1,18 @@
-import { Plus, Trash2, Upload } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
-import type { PlaceDetailResponse, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
+import {
+  arrayValue,
+  jsonObject,
+  nullableString,
+  objectValue,
+  oneOf,
+  optionalString,
+  requiredString,
+  stringValue,
+} from "../../lib/dataContract";
+import type { Floor, PlaceDetailResponse, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   EditorialPill,
   ErrorBanner,
@@ -19,16 +29,14 @@ import {
   fmtDateTime,
   useAsyncData,
 } from "../components/primitives";
+import { LocationEditor, isLocationDraftBlank, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
+import type { PlaceContent } from "../../../shared/revision-contract";
 
 // ---------------------------------------------------------------------------
 // A7 地点编辑器
 //
-// 两条保存通道，因为承载能力不同：
-//   1. 名称 / 简介 / 详细描述 / 详细信息 / 图片 → 新建修订草稿，经审核发布；
-//   2. 类型 / 校区 / 楼栋代码 / 别名 / 楼层 → PATCH 即时生效。
-//
-// 第二类字段在修订表里没有对应列（修订只存文案），无法用「草稿→审核→发布」承载，
-// 因此直接写库并记审计。这是有意的设计边界，不是简化实现。
+// 正文、结构字段和位置统一写入修订草稿，经审核后原子应用。
 // ---------------------------------------------------------------------------
 
 interface RevisionRow {
@@ -41,15 +49,37 @@ interface RevisionRow {
 }
 
 interface FactRow {
+  id?: string;
   label: string;
   value: string;
 }
 
-interface MediaRow {
-  role: "cover" | "gallery";
-  url: string;
-  alt?: string;
-  caption?: string;
+interface PlaceBuildingStructure {
+  buildingCode: string | null;
+  managingOrganizationId: string | null;
+  publicAccessLevel: "public" | "restricted" | "private" | "unknown";
+}
+
+interface PlaceEditorRevision {
+  displayName: string;
+  summary: string;
+  description: string;
+  sourceId: string;
+  kindId: string;
+  campusId: string;
+  parentPlaceId: string;
+  stableCode: string;
+  aliases: string[];
+  building: PlaceBuildingStructure | null;
+  locations: LocationDraft[];
+  content: PlaceContent;
+  facts: FactRow[];
+  media: MediaRow[];
+}
+
+interface PlaceEditorData {
+  response: PlaceDetailResponse;
+  revision: PlaceEditorRevision;
 }
 
 /** 表单固定展示的四条信息；其余自定义条目原样保留。 */
@@ -62,47 +92,63 @@ const FACT_PLACEHOLDERS: Record<string, string> = {
   进入方式: "如 刷校园卡进入",
 };
 
-function readFacts(detail: Record<string, unknown>): FactRow[] {
-  if (!Array.isArray(detail.facts)) return [];
-  const rows: FactRow[] = [];
-  for (const raw of detail.facts) {
-    if (!raw || typeof raw !== "object") continue;
-    const record = raw as Record<string, unknown>;
-    const label = typeof record.label === "string" ? record.label.trim() : "";
-    if (!label) continue;
-    rows.push({ label, value: typeof record.value === "string" ? record.value : String(record.value ?? "") });
-  }
-  return rows;
+function readFacts(value: unknown): FactRow[] {
+  return arrayValue(value, "place_revisions.content_json.detail.facts").map((raw, index) => {
+    const field = `place_revisions.content_json.detail.facts[${index}]`;
+    const record = objectValue(raw, field);
+    const id = optionalString(record.id, `${field}.id`);
+    return {
+      ...(id === undefined ? {} : { id }),
+      label: requiredString(record.label, `${field}.label`),
+      value: stringValue(record.value, `${field}.value`),
+    };
+  });
 }
 
-function readMedia(detail: Record<string, unknown>): MediaRow[] {
-  const rows: MediaRow[] = [];
-  if (Array.isArray(detail.media)) {
-    for (const raw of detail.media) {
-      if (!raw || typeof raw !== "object") continue;
-      const record = raw as Record<string, unknown>;
-      const url = typeof record.url === "string" ? record.url.trim() : "";
-      if (!url) continue;
-      rows.push({
-        role: record.role === "cover" ? "cover" : "gallery",
-        url,
-        ...(typeof record.alt === "string" && record.alt ? { alt: record.alt } : {}),
-        ...(typeof record.caption === "string" && record.caption ? { caption: record.caption } : {}),
-      });
-    }
-    return rows;
+function parsePlaceEditorData(response: PlaceDetailResponse): PlaceEditorData {
+  const place = objectValue(response.place, "place");
+  const structure = jsonObject(place.structure_json, "place_revisions.structure_json");
+  const content = jsonObject(place.content_json, "place_revisions.content_json");
+  const detail = objectValue(content.detail, "place_revisions.content_json.detail");
+  const aliases = arrayValue(structure.aliases, "place_revisions.structure_json.aliases")
+    .map((value, index) => requiredString(value, `place_revisions.structure_json.aliases[${index}]`));
+  const buildingValue = structure.building;
+  let building: PlaceBuildingStructure | null;
+  if (buildingValue === null) {
+    building = null;
+  } else {
+    const record = objectValue(buildingValue, "place_revisions.structure_json.building");
+    building = {
+      buildingCode: nullableString(record.buildingCode, "place_revisions.structure_json.building.buildingCode"),
+      managingOrganizationId: nullableString(record.managingOrganizationId, "place_revisions.structure_json.building.managingOrganizationId"),
+      publicAccessLevel: oneOf(
+        record.publicAccessLevel,
+        "place_revisions.structure_json.building.publicAccessLevel",
+        ["public", "restricted", "private", "unknown"] as const,
+      ),
+    };
   }
-  // 早期内容只有单张封面/展示图两个字段，读进来后一律按列表维护。
-  for (const [key, role] of [["coverImageUrl", "cover"], ["galleryImageUrl", "gallery"]] as const) {
-    const value = detail[key];
-    if (typeof value === "string" && value.trim()) rows.push({ role, url: value.trim() });
-  }
-  return rows;
-}
-
-/** 一个地点只有一张封面：设定新封面时把其余降为展示图。 */
-function withCover(rows: MediaRow[], index: number): MediaRow[] {
-  return rows.map((row, i) => ({ ...row, role: i === index ? "cover" : "gallery" }));
+  const locations = arrayValue(structure.locations, "place_revisions.structure_json.locations")
+    .map((location, index) => locationDraftFromApi(objectValue(location, `place_revisions.structure_json.locations[${index}]`), index));
+  return {
+    response,
+    revision: {
+      displayName: requiredString(place.display_name, "place_revisions.display_name"),
+      summary: nullableString(place.summary, "place_revisions.summary") ?? "",
+      description: nullableString(place.description, "place_revisions.description") ?? "",
+      sourceId: nullableString(place.source_id, "place_revisions.source_id") ?? "",
+      kindId: requiredString(structure.kindId, "place_revisions.structure_json.kindId"),
+      campusId: nullableString(structure.campusId, "place_revisions.structure_json.campusId") ?? "",
+      parentPlaceId: nullableString(structure.parentPlaceId, "place_revisions.structure_json.parentPlaceId") ?? "",
+      stableCode: nullableString(structure.stableCode, "place_revisions.structure_json.stableCode") ?? "",
+      aliases,
+      building,
+      locations,
+      content: content as PlaceContent,
+      facts: readFacts(detail.facts),
+      media: readMedia(detail.media),
+    },
+  };
 }
 
 export function PlaceEditorPage() {
@@ -111,74 +157,79 @@ export function PlaceEditorPage() {
   const navigate = useNavigate();
 
   const detail = useAsyncData(
-    (signal) => (isNew ? Promise.resolve(null) : admin.getAdminPlace<PlaceDetailResponse>(id, signal)),
+    async (signal) => {
+      if (isNew) return null;
+      return parsePlaceEditorData(await admin.getAdminPlace<PlaceDetailResponse>(id, signal));
+    },
     [id, isNew],
   );
   const meta = useAsyncData(async (signal) => {
-    const [spaces, ref] = await Promise.all([
+    const [spaces, ref, maps] = await Promise.all([
       admin.listSpaces<SpacesResponse>(signal),
       admin.listReferenceData<ReferenceDataResponse>(signal),
+      admin.listMapVersions(signal),
     ]);
-    return { spaces, ref };
+    return { spaces, ref, mapVersions: maps.items };
   }, []);
 
   const [name, setName] = useState("");
   const [kindId, setKindId] = useState("");
   const [campusId, setCampusId] = useState("");
+  const [parentPlaceId, setParentPlaceId] = useState("");
   const [stableCode, setStableCode] = useState("");
+  const [hasBuildingStructure, setHasBuildingStructure] = useState(false);
   const [buildingCode, setBuildingCode] = useState("");
+  const [managingOrganizationId, setManagingOrganizationId] = useState("");
+  const [publicAccessLevel, setPublicAccessLevel] = useState<PlaceBuildingStructure["publicAccessLevel"]>("unknown");
   const [summary, setSummary] = useState("");
   const [description, setDescription] = useState("");
   const [aliases, setAliases] = useState("");
   const [facts, setFacts] = useState<FactRow[]>([]);
   const [media, setMedia] = useState<MediaRow[]>([]);
-  const [baseContent, setBaseContent] = useState<Record<string, unknown>>({});
+  const [baseContent, setBaseContent] = useState<PlaceContent>({ detail: { facts: [], media: [] } });
   const [sourceId, setSourceId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>([]);
 
   // 用当前修订初始化表单
   useEffect(() => {
-    if (detail.state.status !== "ready" || !detail.state.data) return;
-    const place = detail.state.data.place as Record<string, unknown>;
-    setName(String(place.display_name ?? ""));
-    setKindId(String(place.kind_id ?? ""));
-    setCampusId(place.campus_id ? String(place.campus_id) : "");
-    setStableCode(place.stable_code ? String(place.stable_code) : "");
-    setBuildingCode(place.building_code ? String(place.building_code) : "");
-    setSummary(place.summary ? String(place.summary) : "");
-    setDescription(place.description ? String(place.description) : "");
-    let content: Record<string, unknown> = {};
-    try {
-      content = JSON.parse(String(place.content_json ?? "{}")) as Record<string, unknown>;
-    } catch {
-      content = {};
-    }
-    setBaseContent(content);
-    const detailBlock = content.detail && typeof content.detail === "object" && !Array.isArray(content.detail)
-      ? (content.detail as Record<string, unknown>)
-      : {};
-    setFacts(readFacts(detailBlock));
-    setMedia(readMedia(detailBlock));
-    setSourceId(place.source_id ? String(place.source_id) : "");
-    const names = detail.state.data.names as Array<Record<string, unknown>>;
-    setAliases(names.filter((n) => n.name_type === "alias").map((n) => String(n.name)).join("、"));
+    if (detail.state.status !== "ready" || detail.state.data === null) return;
+    const revision = detail.state.data.revision;
+    setName(revision.displayName);
+    setKindId(revision.kindId);
+    setCampusId(revision.campusId);
+    setParentPlaceId(revision.parentPlaceId);
+    setStableCode(revision.stableCode);
+    setHasBuildingStructure(revision.building !== null);
+    setBuildingCode(revision.building?.buildingCode ?? "");
+    setManagingOrganizationId(revision.building?.managingOrganizationId ?? "");
+    setPublicAccessLevel(revision.building?.publicAccessLevel ?? "unknown");
+    setSummary(revision.summary);
+    setDescription(revision.description);
+    setBaseContent(revision.content);
+    setFacts(revision.facts);
+    setMedia(revision.media);
+    setSourceId(revision.sourceId);
+    setAliases(revision.aliases.join("、"));
+    setLocationDrafts(revision.locations);
   }, [detail.state]);
 
   if (!isNew && detail.state.status === "loading") return <LoadingState label="加载地点…" />;
-  if (!isNew && detail.state.status === "error") return <ErrorBanner message={detail.state.message ?? "加载失败"} />;
+  if (!isNew && detail.state.status === "error") return <ErrorBanner message={detail.state.message} />;
+  if (meta.state.status === "loading") return <LoadingState label="加载地点分类与空间数据…" />;
+  if (meta.state.status === "error") return <ErrorBanner message={meta.state.message} />;
 
-  const kinds = meta.state.status === "ready" ? meta.state.data!.ref.placeKinds : [];
-  const campuses = meta.state.status === "ready" ? meta.state.data!.spaces.campuses : [];
+  const kinds = meta.state.data.ref.placeKinds;
+  const campuses = meta.state.data.spaces.campuses;
+  const parentPlaces = meta.state.data.spaces.buildings.filter((building) => building.placeId !== id);
   const data = detail.state.status === "ready" ? detail.state.data : null;
-  const revisions = ((data?.revisions ?? []) as RevisionRow[]).slice(0, 8);
+  const revisions = data === null ? [] : (data.response.revisions as RevisionRow[]).slice(0, 8);
   const currentRevision = revisions.find((r) => r.editorial_status === "in_review")
     ?? revisions.find((r) => r.editorial_status === "draft");
   const reviewLocked = currentRevision?.editorial_status === "in_review";
-  const locations = (data?.locations ?? []) as Array<Record<string, unknown>>;
-  const floors = (data?.floors ?? []) as Array<Record<string, unknown>>;
-  const isBuilding = kindId === "building";
+  const floors = data === null ? [] : data.response.floors;
 
   function factValue(label: string): string {
     return facts.find((fact) => fact.label === label)?.value ?? "";
@@ -189,77 +240,82 @@ export function PlaceEditorPage() {
       const index = rows.findIndex((row) => row.label === label);
       if (index === -1) return value.trim() ? [...rows, { label, value }] : rows;
       const next = [...rows];
-      next[index] = { label, value };
+      next[index] = { ...next[index], label, value };
       return next;
     });
   }
 
   /** 详细信息与图片写回 content.detail，其余内容字段原样保留。 */
-  function composeContent(): Record<string, unknown> {
-    const previousDetail = baseContent.detail && typeof baseContent.detail === "object" && !Array.isArray(baseContent.detail)
-      ? (baseContent.detail as Record<string, unknown>)
-      : {};
+  function composeContent(): PlaceContent {
+    const previousDetail = objectValue(baseContent.detail, "place content.detail");
     const keptFacts = facts
-      .map((fact) => ({ label: fact.label.trim(), value: fact.value.trim() }))
+      .map((fact) => ({ ...(fact.id === undefined ? {} : { id: fact.id }), label: fact.label.trim(), value: fact.value.trim() }))
       .filter((fact) => fact.label && fact.value);
-    const keptMedia = media
-      .map((row) => ({ role: row.role, url: row.url.trim(), ...(row.alt ? { alt: row.alt } : {}), ...(row.caption ? { caption: row.caption } : {}) }))
-      .filter((row) => row.url);
-    const nextDetail: Record<string, unknown> = { ...previousDetail, facts: keptFacts, media: keptMedia };
-    if (!keptFacts.length) delete nextDetail.facts;
-    if (!keptMedia.length) delete nextDetail.media;
-    // 列表化后单图字段不再是数据源，留着会与列表打架。
-    delete nextDetail.coverImageUrl;
-    delete nextDetail.galleryImageUrl;
-    const cover = keptMedia.find((row) => row.role === "cover");
-    if (cover) nextDetail.coverImageUrl = cover.url;
-    const content = { ...baseContent };
-    if (Object.keys(nextDetail).length) content.detail = nextDetail;
-    else delete content.detail;
-    return content;
+    const nextDetail: PlaceContent["detail"] = { ...previousDetail, facts: keptFacts, media };
+    return { ...baseContent, detail: nextDetail };
   }
 
   async function save(thenSubmit: boolean) {
     if (!name.trim()) { setError("请填写名称"); return; }
     if (!kindId) { setError("请选择类型"); return; }
-    setBusy(true);
-    setError("");
-    setNotice("");
-    const aliasList = aliases.split(/[、,，]/).map((a) => a.trim()).filter(Boolean);
-    const content = composeContent();
     try {
+      setBusy(true);
+      setError("");
+      setNotice("");
+      const aliasList = aliases.split(/[、,，]/).map((a) => a.trim()).filter(Boolean);
+      const content = composeContent();
+      const locations = locationDrafts
+        .filter((location) => !isLocationDraftBlank(location))
+        .map((location) => locationInput(hasBuildingStructure ? {
+          ...location,
+          campusId,
+          buildingPlaceId: isNew ? "" : id,
+        } : location));
       let placeId = id;
       let revisionId = "";
       if (isNew) {
         const created = await admin.createPlace({
-          kindId,
-          campusId: campusId || undefined,
-          stableCode: stableCode.trim() || undefined,
           displayName: name.trim(),
-          summary: summary.trim() || undefined,
-          description: description.trim() || undefined,
+          summary: summary.trim() || null,
+          description: description.trim() || null,
           content,
-          sourceId: sourceId || undefined,
-          aliases: aliasList,
-          ...(buildingCode.trim() ? { building: { buildingCode: buildingCode.trim() } } : {}),
+          sourceId: sourceId || null,
+          structure: {
+            kindId,
+            campusId: campusId || null,
+            parentPlaceId: parentPlaceId || null,
+            stableCode: stableCode.trim() || null,
+            aliases: aliasList,
+            locations,
+            building: hasBuildingStructure ? {
+              buildingCode: buildingCode.trim() || null,
+              managingOrganizationId: managingOrganizationId || null,
+              publicAccessLevel,
+            } : null,
+          },
         });
         placeId = created.id;
         revisionId = created.revisionId;
       } else {
-        // 结构字段先落库（即时生效），再提交正文修订（走审核）。
-        await admin.updatePlace(placeId, {
-          kindId,
-          campusId: campusId || null,
-          stableCode: stableCode.trim() || null,
-          ...(isBuilding ? { buildingCode: buildingCode.trim() || null } : {}),
-          aliases: aliasList,
-        });
         const created = await admin.createPlaceRevision(placeId, {
           displayName: name.trim(),
-          summary: summary.trim() || undefined,
-          description: description.trim() || undefined,
+          summary: summary.trim() || null,
+          description: description.trim() || null,
           content,
-          sourceId: sourceId || undefined,
+          sourceId: sourceId || null,
+          structure: {
+            kindId,
+            campusId: campusId || null,
+            parentPlaceId: parentPlaceId || null,
+            stableCode: stableCode.trim() || null,
+            aliases: aliasList,
+            building: hasBuildingStructure ? {
+              buildingCode: buildingCode.trim() || null,
+              managingOrganizationId: managingOrganizationId || null,
+              publicAccessLevel,
+            } : null,
+            locations,
+          },
         });
         revisionId = created.id;
       }
@@ -303,9 +359,45 @@ export function PlaceEditorPage() {
                 placeholder="选择校区"
                 value={campusId}
               />
+              <SelectField
+                label="父地点"
+                onChange={setParentPlaceId}
+                options={parentPlaces.map((place) => ({ value: place.placeId, label: place.displayName ?? place.placeId }))}
+                placeholder="不指定"
+                value={parentPlaceId}
+              />
               <Field label="地点编号" onChange={setStableCode} placeholder="如 LIB-01" value={stableCode} />
-              {isBuilding ? (
-                <Field label="楼栋代码" onChange={setBuildingCode} placeholder="如 A1" value={buildingCode} />
+              <label className="flex items-center gap-2 self-end rounded-lg border border-line px-3 py-2 text-body text-ink">
+                <input
+                  checked={hasBuildingStructure}
+                  disabled={floors.length > 0 && hasBuildingStructure}
+                  onChange={(event) => setHasBuildingStructure(event.target.checked)}
+                  type="checkbox"
+                />
+                作为楼宇维护楼层结构
+              </label>
+              {hasBuildingStructure ? (
+                <>
+                  <Field label="楼栋代码" onChange={setBuildingCode} placeholder="如 A1" value={buildingCode} />
+                  <SelectField
+                    label="管理单位"
+                    onChange={setManagingOrganizationId}
+                    options={meta.state.data.ref.organizations.map((organization) => ({ value: organization.id, label: organization.name }))}
+                    placeholder="不指定"
+                    value={managingOrganizationId}
+                  />
+                  <SelectField
+                    label="开放级别"
+                    onChange={(value) => setPublicAccessLevel(oneOf(value, "publicAccessLevel", ["public", "restricted", "private", "unknown"] as const))}
+                    options={[
+                      { value: "public", label: "公开" },
+                      { value: "restricted", label: "有限开放" },
+                      { value: "private", label: "不对外开放" },
+                      { value: "unknown", label: "未知" },
+                    ]}
+                    value={publicAccessLevel}
+                  />
+                </>
               ) : null}
               <Field label="别名（、分隔）" onChange={setAliases} placeholder="如 图书馆、上图" value={aliases} />
             </div>
@@ -315,8 +407,7 @@ export function PlaceEditorPage() {
 
           {/* 详细信息：用户在地点详情页看到的信息行 */}
           <div>
-            <p className="mb-1 text-emphasis">详细信息</p>
-            <p className="mb-3 text-label text-sub">填写的条目会显示在用户端地点详情页，留空则不展示</p>
+            <p className="mb-3 text-emphasis">详细信息</p>
             <div className="grid grid-cols-2 gap-3">
               {FACT_LABELS.map((label) => (
                 <Field
@@ -363,16 +454,11 @@ export function PlaceEditorPage() {
           <SelectField
             label="数据来源"
             onChange={setSourceId}
-            options={(meta.state.status === "ready" ? meta.state.data!.ref.sources : []).map((source) => ({ value: source.id, label: source.title }))}
+            options={meta.state.data.ref.sources.map((source) => ({ value: source.id, label: source.title }))}
             placeholder="不指定"
             value={sourceId}
           />
-          {!isNew ? (
-            <InfoNote tone="info">
-              类型、校区、地点编号、楼栋代码和别名保存后立即生效；名称、简介、详细信息和图片需提交审核通过并发布后对用户可见。
-            </InfoNote>
-          ) : null}
-          {reviewLocked ? <InfoNote tone="warning">当前修订正在审核，处理完成后才能继续编辑。</InfoNote> : null}
+          {reviewLocked ? <InfoNote tone="warning">当前内容正在审核，处理完成后才能继续编辑。</InfoNote> : null}
           <ErrorBanner message={error} />
           {notice ? <InfoNote tone="info">{notice}</InfoNote> : null}
           <div className="flex gap-3">
@@ -386,44 +472,35 @@ export function PlaceEditorPage() {
 
       {/* 右：图片 + 楼层 + 位置 + 修订历史 */}
       <div className="space-y-4 self-start">
-        <PhotoPanel
+        <MediaPanel
           disabled={reviewLocked}
           media={media}
           onChange={setMedia}
-          onError={setError}
         />
 
         {isNew ? (
           <Panel title="楼层">
-            <InfoNote>保存地点后可在此添加楼层。</InfoNote>
+            <InfoNote>保存后可添加楼层</InfoNote>
           </Panel>
         ) : (
           <FloorPanel
             floors={floors}
-            isBuilding={isBuilding}
+            isBuilding={hasBuildingStructure}
             onDone={(message) => { setNotice(message); detail.reload(); }}
             placeId={id}
           />
         )}
 
-        <Panel title="地图位置">
-          {locations.length === 0 ? (
-            <InfoNote>该地点还没有地图落点。</InfoNote>
-          ) : (
-            <div className="space-y-3">
-              {locations.map((loc, i) => (
-                <div key={i} className="flex items-center gap-2.5 text-body">
-                  <Pill tone={loc.isPrimary || loc.is_primary ? "info" : "neutral"}>
-                    {loc.isPrimary || loc.is_primary ? "主要位置" : "附加位置"}
-                  </Pill>
-                  <span className="text-sub">
-                    {loc.location_hint ? String(loc.location_hint) : "已标注坐标"}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Panel>
+        <LocationEditor
+          buildingCampusId={campusId || null}
+          disabled={reviewLocked}
+          entityPlaceId={isNew ? null : id}
+          isBuilding={hasBuildingStructure}
+          mapVersions={meta.state.data.mapVersions}
+          onChange={setLocationDrafts}
+          spaces={meta.state.data.spaces}
+          value={locationDrafts}
+        />
 
         {!isNew ? (
           <Panel title="修订历史" padded={false}>
@@ -446,96 +523,9 @@ export function PlaceEditorPage() {
               {revisions.length === 0 ? <p className="py-4 text-body text-sub">暂无修订记录</p> : null}
             </div>
           </Panel>
-        ) : (
-          <Panel title="提示">
-            <InfoNote tone="info">保存后提交审核，通过后对用户可见。</InfoNote>
-          </Panel>
-        )}
+        ) : null}
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 图片列表：直传 + 缩略图 + 设为封面 / 删除
-// ---------------------------------------------------------------------------
-
-function PhotoPanel({
-  media,
-  onChange,
-  onError,
-  disabled,
-}: {
-  media: MediaRow[];
-  onChange: (rows: MediaRow[]) => void;
-  onError: (message: string) => void;
-  disabled: boolean;
-}) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-
-  async function upload(files: FileList | null) {
-    if (!files?.length) return;
-    setUploading(true);
-    onError("");
-    try {
-      const added: MediaRow[] = [];
-      for (const file of Array.from(files)) {
-        const result = await admin.uploadAdminMedia(file);
-        added.push({ role: media.length + added.length === 0 ? "cover" : "gallery", url: result.url });
-      }
-      onChange([...media, ...added]);
-    } catch (err) {
-      onError(errorMessage(err, "图片上传失败"));
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
-
-  return (
-    <Panel
-      title={`图片${media.length ? `（${media.length}）` : ""}`}
-      action={
-        <GhostButton disabled={disabled || uploading} onClick={() => fileRef.current?.click()}>
-          <Upload size={14} />
-          {uploading ? "上传中…" : "上传图片"}
-        </GhostButton>
-      }
-    >
-      <input
-        accept="image/jpeg,image/png,image/webp"
-        className="hidden"
-        multiple
-        onChange={(e) => void upload(e.target.files)}
-        ref={fileRef}
-        type="file"
-      />
-      {media.length === 0 ? (
-        <InfoNote>还没有图片。上传后需提交审核并发布，用户端才会看到。</InfoNote>
-      ) : (
-        <div className="space-y-2">
-          {media.map((row, index) => (
-            <div key={`${row.url}:${index}`} className="flex items-center gap-3 rounded-lg border border-line p-2">
-              <img alt="" className="h-14 w-20 shrink-0 rounded object-cover" src={row.url} />
-              <div className="min-w-0 flex-1">
-                {row.role === "cover" ? <Pill tone="info">封面</Pill> : null}
-                <p className="mt-1 truncate text-label text-sub">{row.url}</p>
-              </div>
-              {row.role === "cover" ? null : (
-                <GhostButton disabled={disabled} onClick={() => onChange(withCover(media, index))}>
-                  设为封面
-                </GhostButton>
-              )}
-              <GhostButton danger disabled={disabled} onClick={() => onChange(media.filter((_, i) => i !== index))}>
-                <Trash2 size={14} />
-              </GhostButton>
-            </div>
-          ))}
-          <InfoNote tone="info">封面图会作为地点详情页的首图展示。</InfoNote>
-        </div>
-      )}
-    </Panel>
   );
 }
 
@@ -553,14 +543,14 @@ function suggestFloorName(levelCode: string): string {
   return levelCode.trim();
 }
 
-/** 楼层排序值：地下为负，地上为正，非数字编码排到最后。 */
-function suggestFloorOrder(levelCode: string, fallback: number): number {
+/** 楼层排序值：地下为负，地上为正。 */
+function suggestFloorOrder(levelCode: string): number {
   const code = levelCode.trim().toUpperCase();
   const above = code.match(/^F?(\d{1,3})$/);
   if (above) return Number(above[1]);
   const below = code.match(/^B(\d{1,2})$/);
   if (below) return -Number(below[1]);
-  return fallback;
+  throw new Error(`不支持的楼层编号：${levelCode}`);
 }
 
 function FloorPanel({
@@ -570,7 +560,7 @@ function FloorPanel({
   onDone,
 }: {
   placeId: string;
-  floors: Array<Record<string, unknown>>;
+  floors: Floor[];
   isBuilding: boolean;
   onDone: (message: string) => void;
 }) {
@@ -591,8 +581,9 @@ function FloorPanel({
       await admin.createFloor({
         buildingPlaceId: placeId,
         levelCode: code,
-        levelOrder: suggestFloorOrder(code, floors.length + 1),
+        levelOrder: suggestFloorOrder(code),
         displayName: displayName.trim() || suggestFloorName(code),
+        isPublic: true,
       });
       setLevelCode("");
       setDisplayName("");
@@ -621,7 +612,7 @@ function FloorPanel({
     }
   }
 
-  const sorted = [...floors].sort((a, b) => Number(a.level_order ?? 0) - Number(b.level_order ?? 0));
+  const sorted = [...floors].sort((a, b) => a.levelOrder - b.levelOrder);
 
   return (
     <Panel
@@ -636,10 +627,6 @@ function FloorPanel({
       }
     >
       <div className="space-y-3">
-        {!isBuilding ? (
-          <InfoNote>只有建筑类型的地点可以维护楼层。把类型改为「建筑」并保存后即可添加。</InfoNote>
-        ) : null}
-
         {adding && isBuilding ? (
           <div className="space-y-2 rounded-lg border border-line p-3">
             <div className="grid grid-cols-2 gap-2">
@@ -664,14 +651,14 @@ function FloorPanel({
         ) : null}
 
         {sorted.length === 0 ? (
-          isBuilding ? <InfoNote>还没有楼层。添加楼层后即可为设施指定所在楼层。</InfoNote> : null
+          <InfoNote>还没有楼层</InfoNote>
         ) : (
           <div className="divide-y divide-line">
             {sorted.map((floor) => {
-              const floorId = String(floor.id);
-              const label = String(floor.display_name ?? floor.displayName ?? floor.level_code ?? "");
-              const code = String(floor.level_code ?? floor.levelCode ?? "");
-              const hidden = Number(floor.is_public ?? 1) === 0;
+              const floorId = floor.id;
+              const label = floor.displayName;
+              const code = floor.levelCode;
+              const hidden = floor.isPublic === 0;
               if (editingId === floorId) {
                 return (
                   <div key={floorId} className="flex items-center gap-2 py-2">

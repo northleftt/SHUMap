@@ -364,9 +364,11 @@ test("submission creation validates photo ids before writing links", () => {
   assert.match(submissions, /statements\.push\(\.\.\.promotion\.statements\)/);
 
   const collections = fs.readFileSync(path.join(root, "worker/modules/collections.ts"), "utf8");
-  // The collection allowlist has to let photo ids through or the payload is rejected.
-  assert.match(collections, /"floors", "photoMediaIds"/);
-  assert.match(collections, /filterAttachablePhotos/);
+  const contract = fs.readFileSync(path.join(root, "worker/lib/submission-contracts.ts"), "utf8");
+  // The canonical collection contract has to accept both building and floor photo ids.
+  assert.match(contract, /\["openHours", "phone", "organization", "floors", "photoMediaIds"\]/);
+  assert.match(contract, /\["id", "levelCode", "note", "facilities", "photoMediaIds"\]/);
+  assert.match(collections, /assertAttachablePhotos/);
 });
 
 test("the photo cap is enforced in one place and mirrored by the UI", () => {

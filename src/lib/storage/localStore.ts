@@ -2,22 +2,14 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 
 const STORE_EVENT = "shumap:local-store";
 
-export function readStore<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
+export function readStore<T>(key: string, initialValue: T): T {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return initialValue;
+  return JSON.parse(raw) as T;
 }
 
 export function writeStore<T>(key: string, value: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // storage full / private mode — keep the in-memory event so the UI stays consistent
-  }
+  localStorage.setItem(key, JSON.stringify(value));
   window.dispatchEvent(new CustomEvent(STORE_EVENT, { detail: key }));
 }
 
@@ -25,7 +17,7 @@ export function writeStore<T>(key: string, value: T): void {
  * localStorage-backed state shared across components on the same page.
  * Writes dispatch a custom event so every mounted consumer re-renders.
  */
-export function useLocalStore<T>(key: string, fallback: T): [T, (next: T | ((prev: T) => T)) => void] {
+export function useLocalStore<T>(key: string, initialValue: T): [T, (next: T | ((prev: T) => T)) => void] {
   const raw = useSyncExternalStore(
     (callback) => {
       const handler = (event: Event) => {
@@ -40,7 +32,7 @@ export function useLocalStore<T>(key: string, fallback: T): [T, (next: T | ((pre
     },
     () => localStorage.getItem(key),
   );
-  const value = raw === null ? fallback : readStore(key, fallback);
+  const value = raw === null ? initialValue : JSON.parse(raw) as T;
   const valueRef = useRef(value);
   valueRef.current = value;
   const setValue = useCallback((next: T | ((prev: T) => T)) => {

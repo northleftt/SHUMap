@@ -12,6 +12,8 @@ __pycache__/
 .dev.vars
 .dev.vars.*
 .playwright-mcp/
+.playwright-cli/
 m1-check.png
 map-check.png
 admin-login.png
+final-*.jpeg

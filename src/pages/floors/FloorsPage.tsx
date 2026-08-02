@@ -5,73 +5,105 @@ import { FloorPlanCanvas, type FloorPlanAnchor } from "../../components/map/Floo
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { getPlace } from "../../lib/api/public";
 import type { PublicPlaceFacility, PublicPlaceFloor, ReleaseManifest } from "../../lib/api/types";
 import { facilityDotColor, facilityIcon } from "../../lib/facilityIcons";
-import { useAsyncData } from "../../lib/hooks/useAsyncData";
+import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
 import { facilityAnchorsForFloor, floorMapVersionsByFloor } from "../../lib/release/floorPlans";
+import { releaseFacilitiesForPlace } from "../../lib/release/mapData";
 import { useRelease } from "../../lib/release/ReleaseContext";
 // 类目中文名只维护一份（此前这里有一张同样写错前缀的副本）。
-import { KIND_LABELS } from "../map/category";
 
-/** 设施位置描述：约定 content.locationDescription，兼容历史字段。 */
+/** 设施位置描述只读取 canonical content.locationDescription。 */
 function locationDescription(facility: PublicPlaceFacility): string {
-  const content = facility.content ?? {};
-  for (const key of ["locationDescription", "location", "position", "hint"]) {
-    const value = content[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
+  const value = facility.content.locationDescription;
+  if (value === undefined) return "";
+  if (typeof value !== "string") throw new Error(`Facility ${facility.id} locationDescription must be a string`);
+  return value.trim();
 }
 
-/** 楼层信息提示：约定 place.content.floorNotes，兜底 detail.facilityNotes。 */
+function facilityMedia(facility: PublicPlaceFacility): string[] {
+  const value = facility.content.media;
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`Facility ${facility.id} content.media must be an array`);
+  return value.map((raw, index) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error(`Facility ${facility.id} content.media[${index}] must be an object`);
+    }
+    const url = (raw as Record<string, unknown>).url;
+    if (typeof url !== "string" || !url.trim()) {
+      throw new Error(`Facility ${facility.id} content.media[${index}].url must be a non-empty string`);
+    }
+    return url;
+  });
+}
+
+/** 楼层信息提示来自 canonical detail.facts 的“楼层说明”。 */
 function floorNotes(content: Record<string, unknown>): string {
-  const direct = content.floorNotes;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
   const detail = content.detail;
-  if (detail && typeof detail === "object") {
-    const notes = (detail as Record<string, unknown>).facilityNotes;
-    if (typeof notes === "string" && notes.trim()) return notes.trim();
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
+    throw new Error("Place content.detail must be an object");
   }
-  return "";
+  const facts = (detail as Record<string, unknown>).facts;
+  if (!Array.isArray(facts)) throw new Error("Place detail.facts must be an array");
+  const rows = facts.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`Place detail.facts[${index}] must be an object`);
+    }
+    const row = item as Record<string, unknown>;
+    if (typeof row.label !== "string" || typeof row.value !== "string") {
+      throw new Error(`Place detail.facts[${index}] must contain string label and value`);
+    }
+    return row;
+  });
+  const row = rows.find((item) => item.label === "楼层说明");
+  return row ? String(row.value).trim() : "";
 }
 
 function floorLabel(floor: PublicPlaceFloor): string {
-  return floor.displayName?.trim() || floor.levelCode;
+  if (typeof floor.displayName !== "string" || !floor.displayName.trim()) {
+    throw new Error(`Floor ${floor.id} has an empty display name`);
+  }
+  return floor.displayName.trim();
 }
 
-/**
- * 楼层列表：优先用 release manifest 的 floors（发布态的权威骨架），缺失时回退到
- * 详情接口。manifest 是内容的唯一发布源，但早于 floors 字段的 artifact 里没有它，
- * 所以两条路都要留着。
- */
-function resolveFloors(
-  manifest: ReleaseManifest | null,
-  placeId: string,
-  fallback: PublicPlaceFloor[],
-): PublicPlaceFloor[] {
-  const fromManifest = (manifest?.floors ?? [])
+/** 楼层列表：只认 release manifest 的 floors（发布态的权威骨架）。 */
+function resolveFloors(manifest: ReleaseManifest, placeId: string): PublicPlaceFloor[] {
+  return manifest.floors
     .filter((floor) => floor.buildingPlaceId === placeId && floor.isPublic !== 0)
     .map((floor) => ({
       id: floor.id,
       levelCode: floor.levelCode,
       levelOrder: floor.levelOrder,
       displayName: floor.displayName,
-    }));
-  if (!fromManifest.length) return fallback;
-  return fromManifest.sort((a, b) => a.levelOrder - b.levelOrder);
+    }))
+    .sort((a, b) => a.levelOrder - b.levelOrder);
 }
 
 /**
- * 采集上来的楼层照片：审核采纳时按「楼层编号 → 已发布照片地址」写进
- * place content.floorMedia（floors 表没有照片列，也不该为此加列）。
+ * 采集上来的楼层照片存为 canonical detail.media，并以 floorLevelCode 关联楼层。
  */
 function floorMediaOf(content: Record<string, unknown>, levelCode: string): string[] {
-  const media = content.floorMedia;
-  if (!media || typeof media !== "object" || Array.isArray(media)) return [];
-  const urls = (media as Record<string, unknown>)[levelCode];
-  if (!Array.isArray(urls)) return [];
-  return urls.filter((url): url is string => typeof url === "string" && url.trim().length > 0);
+  const detail = content.detail;
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
+    throw new Error("Place content.detail must be an object");
+  }
+  const media = (detail as Record<string, unknown>).media;
+  if (!Array.isArray(media)) throw new Error("Place detail.media must be an array");
+  const urls: string[] = [];
+  for (const [index, item] of media.entries()) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`Place detail.media[${index}] must be an object`);
+    }
+    const row = item as Record<string, unknown>;
+    if (typeof row.url !== "string" || !row.url.trim()) {
+      throw new Error(`Place detail.media[${index}].url must be a non-empty string`);
+    }
+    if (row.floorLevelCode !== undefined && typeof row.floorLevelCode !== "string") {
+      throw new Error(`Place detail.media[${index}].floorLevelCode must be a string`);
+    }
+    if (row.floorLevelCode === levelCode) urls.push(row.url);
+  }
+  return urls;
 }
 
 type ViewMode = "list" | "plan";
@@ -79,27 +111,49 @@ type ViewMode = "list" | "plan";
 /**
  * M4/M5 楼层设施：列表版 + 平面图版。
  *
- * 楼层设施数据来自 GET /api/public/places/:id；平面图底图与设施锚点来自 active
- * release manifest（maps[] / locations[]），底图 SVG 走
- * GET /api/public/maps/:mapVersionId/asset。当前楼层没有已发布图纸时平面图入口
+ * 楼宇、楼层、设施骨架与平面图底图/锚点全部来自 active release manifest
+ * （places[] / floors[] / facilities[] / facilityTypes[] / maps[] / locations[]），
+ * 底图 SVG 走 GET /api/public/maps/:mapVersionId/asset。设施的运营状态另走
+ * GET /api/public/facility-status 实时覆盖。当前楼层没有已发布图纸时平面图入口
  * 隐藏，页面退回列表版，不报错。
  */
 export function FloorsPage() {
   const { placeId = "" } = useParams();
-  const { state } = useAsyncData((signal) => getPlace(placeId, signal), [placeId]);
-  const { release } = useRelease();
+  const releaseState = useRelease();
+  if (releaseState.status === "loading") {
+    return (
+      <div className="h-full bg-page">
+        <LoadingState label="正在加载楼层设施…" />
+      </div>
+    );
+  }
+  if (releaseState.status !== "ready") {
+    return (
+      <div className="h-full bg-page px-5 pt-16">
+        <EmptyState
+          title={releaseState.status === "error" ? "楼宇信息加载失败" : "暂无该楼宇信息"}
+          subtitle={releaseState.status === "error" ? "请稍后重试" : undefined}
+        />
+      </div>
+    );
+  }
+  return <ReadyFloorsPage manifest={releaseState.release.manifest} placeId={placeId} />;
+}
+
+function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; placeId: string }) {
   const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
+  // 运营状态盖在快照基线上，读取失败时在列表上方明确提示。
+  const facilityStatus = useFacilityStatus();
 
-  const data = state.status === "ready" ? state.data : undefined;
-  const manifest = release?.manifest ?? null;
-  const floors = useMemo(
-    () => resolveFloors(manifest, placeId, data?.floors ?? []),
-    [manifest, placeId, data],
+  const place = useMemo(
+    () => manifest.places.find((row) => row.id === placeId) ?? null,
+    [manifest, placeId],
   );
-  const facilities = useMemo(() => data?.facilities ?? [], [data]);
+  const floors = useMemo(() => resolveFloors(manifest, placeId), [manifest, placeId]);
+  const facilities = useMemo(() => releaseFacilitiesForPlace(manifest, placeId), [manifest, placeId]);
   const planByFloor = useMemo(() => floorMapVersionsByFloor(manifest), [manifest]);
 
   // 默认选中一层（levelOrder 最小且非地下）
@@ -151,26 +205,24 @@ export function FloorsPage() {
     [visibleFacilities, selectedFacilityId],
   );
 
-  if (state.status === "loading") {
-    return (
-      <div className="h-full bg-page">
-        <LoadingState label="正在加载楼层设施…" />
-      </div>
-    );
-  }
-  if (state.status === "error" || !data) {
+  if (!place) {
     return (
       <div className="h-full bg-page px-5 pt-16">
-        <EmptyState title="楼宇信息加载失败" subtitle={state.message ?? "请稍后重试"} />
+        <EmptyState title="暂无该楼宇信息" />
       </div>
     );
   }
 
-  const notes = floorNotes(data.place.content);
-  const kindLabel = KIND_LABELS[data.place.kindId] ?? "建筑";
+  if (!place.content) throw new Error(`Release place ${place.id} has no canonical content`);
+  const placeContent = place.content;
+  const notes = floorNotes(placeContent);
+  const kindLabel = place.kindName;
   const selectedFloor = floors.find((floor) => floor.id === selectedFloorId) ?? null;
-  const floorPhotos = selectedFloor ? floorMediaOf(data.place.content, selectedFloor.levelCode) : [];
+  const floorPhotos = selectedFloor ? floorMediaOf(placeContent, selectedFloor.levelCode) : [];
   const SelectedIcon = selectedFacility ? facilityIcon(selectedFacility.typeCode) : null;
+  const selectedFacilityStatusLabel = selectedFacility && facilityStatus.status === "ready"
+    ? facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, selectedFacility.id))
+    : null;
 
   function switchFloor(floorId: string) {
     setActiveFloorId(floorId);
@@ -182,7 +234,7 @@ export function FloorsPage() {
     <div className="flex h-full flex-col bg-page">
       <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
         <PageHeader
-          title={`${data.place.displayName} · 楼层设施`}
+          title={`${place.displayName} · 楼层设施`}
           subtitle={floors.length > 0 ? `${kindLabel} · 共 ${floors.length} 层` : kindLabel}
           right={
             floorPlan ? (
@@ -242,6 +294,13 @@ export function FloorsPage() {
           ) : null}
 
           {/* 信息提示（仅列表版；平面图态优先给图纸留高度） */}
+          {facilityStatus.status === "error" ? (
+            <div className="mx-4 mt-3 rounded-2xl bg-error-bg px-4 py-3 text-aux text-error">
+              设施实时状态加载失败：{facilityStatus.message}
+            </div>
+          ) : facilityStatus.status === "loading" && facilities.length > 0 ? (
+            <div className="mx-4 mt-3 rounded-2xl bg-page px-4 py-3 text-aux text-sub">正在加载设施实时状态…</div>
+          ) : null}
           {notes && effectiveMode === "list" ? (
             <div className="mx-4 mt-3 rounded-2xl bg-primary-container px-4 py-3.5">
               <div className="text-label text-sub">信息提示</div>
@@ -302,6 +361,7 @@ export function FloorsPage() {
               {/* 点徽章弹小卡 */}
               {selectedFacility ? (
                 <div className="absolute bottom-3 left-3 right-16 rounded-2xl bg-surface px-4 py-3 shadow-card">
+                  {facilityMedia(selectedFacility)[0] ? <img alt={selectedFacility.displayName || selectedFacility.typeName} className="mb-2 h-24 w-full rounded-xl object-cover" src={facilityMedia(selectedFacility)[0]} /> : null}
                   <div className="flex items-center gap-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-container text-primary">
                       {SelectedIcon ? <SelectedIcon size={16} /> : null}
@@ -313,6 +373,9 @@ export function FloorsPage() {
                       <div className="truncate text-aux text-sub">
                         {locationDescription(selectedFacility) || selectedFacility.typeName}
                       </div>
+                      {selectedFacilityStatusLabel ? (
+                        <div className="mt-0.5 text-label text-warning">{selectedFacilityStatusLabel}</div>
+                      ) : null}
                     </div>
                     <button
                       aria-label="关闭"
@@ -335,28 +398,41 @@ export function FloorsPage() {
                   subtitle={facilities.length === 0 ? "该楼宇的设施信息正在完善中" : "试试切换楼层或类别"}
                 />
               ) : (
-                visibleFacilities.map((facility, index) => (
-                  <div
-                    key={facility.id}
-                    className={`flex items-center gap-3 px-4 py-3.5 ${index > 0 ? "border-t border-line" : ""} ${
-                      facility.id === selectedFacilityId ? "bg-primary-container" : ""
-                    }`}
-                  >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: facilityDotColor(index) }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="text-body font-semibold text-ink">
-                        {facility.displayName || facility.typeName}
+                visibleFacilities.map((facility, index) => {
+                  const statusLabel = facilityStatus.status === "ready"
+                    ? facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, facility.id))
+                    : null;
+                  return (
+                    <div
+                      key={facility.id}
+                      className={`flex items-center gap-3 px-4 py-3.5 ${index > 0 ? "border-t border-line" : ""} ${
+                        facility.id === selectedFacilityId ? "bg-primary-container" : ""
+                      }`}
+                    >
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: facilityDotColor(index) }}
+                      />
+                      {facilityMedia(facility)[0] ? <img alt="" className="h-10 w-14 shrink-0 rounded-lg object-cover" src={facilityMedia(facility)[0]} /> : null}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-body font-semibold text-ink">
+                            {facility.displayName || facility.typeName}
+                          </span>
+                          {statusLabel ? (
+                            <span className="shrink-0 rounded-full bg-warning-bg px-2 py-0.5 text-label text-warning">
+                              {statusLabel}
+                            </span>
+                          ) : null}
+                        </div>
+                        {locationDescription(facility) ? (
+                          <div className="mt-0.5 truncate text-aux text-sub">{locationDescription(facility)}</div>
+                        ) : null}
                       </div>
-                      {locationDescription(facility) ? (
-                        <div className="mt-0.5 truncate text-aux text-sub">{locationDescription(facility)}</div>
-                      ) : null}
+                      <span className="text-sub">›</span>
                     </div>
-                    <span className="text-sub">›</span>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}

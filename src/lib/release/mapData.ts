@@ -1,17 +1,8 @@
-// Release-derived map data. The sole production content source is the active
-// release manifest (GET /api/public/releases/current). There is NO fallback to
-// bundled static business data; when no release is active the loader throws and
-// the UI renders an explicit empty state.
-//
-// Identity vs. rendering: a building's business identity is its stable place ID.
-// The SVG element id (carried in place content as legacySvgElementId) is used
-// ONLY as a selector for the SVG renderer — never as a business/POI id.
+// Release-derived map data. The active release is the only production source.
 
-import baoshanSvg from "../../../地图/宝山本部地图.svg?raw";
-import jiadingSvg from "../../../地图/嘉定校区地图.svg?raw";
-import yanchangSvg from "../../../地图/延长校区地图.svg?raw";
-import { getCurrentRelease } from "../api/public";
+import { fetchMapAssetSvg, getCurrentRelease } from "../api/public";
 import type {
+  PublicPlaceFacility,
   ReleaseLocation,
   ReleaseManifest,
   ReleasePlace,
@@ -24,13 +15,16 @@ import type {
   NavigationUrls,
   PoiDetailData,
 } from "../types";
+import { NAVIGATION_CRS } from "../../../shared/revision-contract";
 import { groupMerchantsByPlace } from "./merchants";
 
-export const campusConfigs: CampusConfig[] = [
-  {
-    key: "baoshan",
-    label: "宝山校区",
-    svgRaw: baoshanSvg,
+type CampusDisplayConfig = Omit<
+  CampusConfig,
+  "id" | "key" | "label" | "mapVersionId" | "svgRaw"
+>;
+
+const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
+  baoshan: {
     focusPoint: { x: 0.48, y: 0.43 },
     scaleMultiplier: 1.78,
     minScaleMultiplier: 1,
@@ -38,10 +32,7 @@ export const campusConfigs: CampusConfig[] = [
     selectionEdgePaddingRatio: 0.3,
     selectionScaleMultiplier: 2.15,
   },
-  {
-    key: "jiading",
-    label: "嘉定校区",
-    svgRaw: jiadingSvg,
+  jiading: {
     focusPoint: { x: 0.37, y: 0.5 },
     scaleMultiplier: 3.05,
     minScaleMultiplier: 1,
@@ -49,10 +40,7 @@ export const campusConfigs: CampusConfig[] = [
     selectionEdgePaddingRatio: 0.4,
     selectionScaleMultiplier: 2.4,
   },
-  {
-    key: "yanchang",
-    label: "延长校区",
-    svgRaw: yanchangSvg,
+  yanchang: {
     focusPoint: { x: 0.52, y: 0.46 },
     scaleMultiplier: 0.8,
     minScaleMultiplier: 1,
@@ -60,92 +48,110 @@ export const campusConfigs: CampusConfig[] = [
     selectionEdgePaddingRatio: 0.32,
     selectionScaleMultiplier: 1.35,
   },
-];
-
-export const campusByKey = Object.fromEntries(
-  campusConfigs.map((campus) => [campus.key, campus]),
-) as Record<CampusKey, CampusConfig>;
-
-export const filters: Array<{ key: FilterKey; label: string }> = [
-  { key: "teaching", label: "教学楼" },
-  { key: "library", label: "图书馆" },
-  { key: "dorm", label: "宿舍楼" },
-  { key: "canteen", label: "食堂" },
-  { key: "commercial", label: "商业" },
-  { key: "printing", label: "打印机" },
-  { key: "parking", label: "充电桩" },
-  { key: "powerBank", label: "充电宝" },
-];
-
-// Facility type codes that map onto user-facing filter chips. Derived building
-// summaries ("has a printer") come from hosted facility instances, per the v2
-// model, rather than independently maintained booleans.
-//
-// Keys are facility_types.code — the real seeded values. Facility rows only carry
-// facilityTypeId (`facility_type_printer`), so callers must resolve id -> code via
-// the manifest's facilityTypes dictionary first; looking codes up by id was why
-// these chips never matched anything. Codes absent from the schema (printing /
-// powerbank / parking) are gone: there is no parking facility type, so the
-// 停车场 chip has no facility-derived source and stays name-derived only.
-const FACILITY_FILTER_BY_TYPE_CODE: Record<string, FilterKey> = {
-  printer: "printing",
-  power_bank: "powerBank",
-  charging_station: "parking",
 };
 
-/** facilityTypeId -> facility_types.code, from the manifest dictionary. */
-function facilityTypeCodesById(manifest: ReleaseManifest): Map<string, string> {
-  const byId = new Map<string, string>();
-  for (const type of manifest.facilityTypes ?? []) {
-    if (type.id && type.code) byId.set(type.id, type.code);
-  }
-  return byId;
+function contractError(message: string): Error {
+  return new Error(`Release data contract violation: ${message}`);
 }
 
-// ---------------------------------------------------------------------------
-// Campus mapping
-// ---------------------------------------------------------------------------
-
-/** campuses[].code is like "campus_baoshan"; map to the local CampusKey. */
-function campusKeyFromCode(code: string | null | undefined): CampusKey | null {
-  if (!code) return null;
-  const normalized = code.replace(/^campus_/, "");
-  if (normalized === "baoshan" || normalized === "jiading" || normalized === "yanchang") {
-    return normalized;
-  }
-  return null;
+function campusKey(code: string): CampusKey {
+  if (code === "baoshan" || code === "jiading" || code === "yanchang") return code;
+  throw contractError(`unsupported campus code ${JSON.stringify(code)}`);
 }
 
-// ---------------------------------------------------------------------------
-// Detail + navigation assembly
-// ---------------------------------------------------------------------------
+function facilityTypesById(manifest: ReleaseManifest) {
+  return new Map(manifest.facilityTypes.map((type) => [type.id, type]));
+}
 
-function normalizePoiDetail(detail: unknown): PoiDetailData {
-  const source = (detail && typeof detail === "object" ? detail : {}) as Record<string, unknown>;
-  const media = Array.isArray(source.media)
-    ? (source.media as PoiDetailData["media"])
-    : ([
-        typeof source.coverImageUrl === "string" && source.coverImageUrl
-          ? { role: "cover" as const, url: String(source.coverImageUrl), alt: "" }
-          : null,
-        typeof source.galleryImageUrl === "string" && source.galleryImageUrl
-          ? { role: "gallery" as const, url: String(source.galleryImageUrl), alt: "" }
-          : null,
-      ].filter(Boolean) as PoiDetailData["media"]);
-  const facts = Array.isArray(source.facts)
-    ? (source.facts as PoiDetailData["facts"])
-    : ([
-        ["所属单位", source.organization],
-        ["进入方式", source.accessMethod],
-        ["开放时间", source.openHours],
-        ["联系电话", source.phone],
-      ]
-        .filter(([, value]) => typeof value === "string" && value)
-        .map(([label, value]) => ({ label: String(label), value: String(value) })) as PoiDetailData["facts"]);
+/** Published facilities hosted by a place, resolved through the release dictionary. */
+export function releaseFacilitiesForPlace(
+  manifest: ReleaseManifest,
+  placeId: string,
+): PublicPlaceFacility[] {
+  const typeById = facilityTypesById(manifest);
+  return manifest.facilities
+    .filter((facility) => facility.hostPlaceId === placeId)
+    .map((facility) => {
+      const type = typeById.get(facility.facilityTypeId);
+      if (!type) {
+        throw contractError(
+          `facility ${facility.id} references missing facility type ${facility.facilityTypeId}`,
+        );
+      }
+      return {
+        id: facility.id,
+        typeCode: type.code,
+        typeName: type.name,
+        displayName: facility.displayName,
+        operationalStatus: facility.operationalStatus,
+        floorId: facility.floorId,
+        content: facility.content,
+      };
+    });
+}
 
+function detailOf(place: ReleasePlace): PoiDetailData {
+  const content = place.content;
+  const raw = content.detail;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw contractError(`place ${place.id} content.detail must be an object`);
+  }
+  const detail = raw as Record<string, unknown>;
+  if (!Array.isArray(detail.media)) {
+    throw contractError(`place ${place.id} detail.media must be an array`);
+  }
+  const media = detail.media.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw contractError(`place ${place.id} detail.media[${index}] must be an object`);
+    }
+    const row = item as Record<string, unknown>;
+    if (typeof row.url !== "string" || !row.url.trim()) {
+      throw contractError(`place ${place.id} detail.media[${index}].url must be a non-empty string`);
+    }
+    if (row.role !== "cover" && row.role !== "gallery") {
+      throw contractError(`place ${place.id} detail.media[${index}].role must be cover or gallery`);
+    }
+    const role: "cover" | "gallery" = row.role;
+    if (row.id !== undefined && typeof row.id !== "string") {
+      throw contractError(`place ${place.id} detail.media[${index}].id must be a string`);
+    }
+    if (row.alt !== undefined && typeof row.alt !== "string") {
+      throw contractError(`place ${place.id} detail.media[${index}].alt must be a string`);
+    }
+    if (row.caption !== undefined && typeof row.caption !== "string") {
+      throw contractError(`place ${place.id} detail.media[${index}].caption must be a string`);
+    }
+    return {
+      ...(row.id === undefined ? {} : { id: row.id }),
+      role,
+      url: row.url,
+      ...(row.alt === undefined ? {} : { alt: row.alt }),
+      ...(row.caption === undefined ? {} : { caption: row.caption }),
+    };
+  });
+  if (!Array.isArray(detail.facts)) {
+    throw contractError(`place ${place.id} detail.facts must be an array`);
+  }
+  const facts = detail.facts.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw contractError(`place ${place.id} detail.facts[${index}] must be an object`);
+    }
+    const row = item as Record<string, unknown>;
+    if (typeof row.label !== "string" || typeof row.value !== "string") {
+      throw contractError(`place ${place.id} detail.facts[${index}] must contain string label and value`);
+    }
+    if (row.id !== undefined && typeof row.id !== "string") {
+      throw contractError(`place ${place.id} detail.facts[${index}].id must be a string`);
+    }
+    return {
+      ...(row.id === undefined ? {} : { id: row.id }),
+      label: row.label,
+      value: row.value,
+    };
+  });
   return {
-    summary: typeof source.summary === "string" ? source.summary : "",
-    description: typeof source.description === "string" ? source.description : "",
+    summary: place.summary ?? "",
+    description: place.description ?? "",
     media,
     facts,
   };
@@ -157,26 +163,46 @@ interface NavPoint {
   displayName: string;
 }
 
-/** Extract a navigation point from a place's primary navigation_target anchor. */
-function navPointFromLocation(location: ReleaseLocation | undefined, fallbackName: string): NavPoint | null {
-  if (!location?.geometry_json) return null;
-  try {
-    const geometry = JSON.parse(location.geometry_json) as { type?: string; coordinates?: [number, number] };
-    const coords = geometry.coordinates;
-    if (!Array.isArray(coords) || coords.length < 2) return null;
-    const [longitude, latitude] = coords;
-    if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return null;
-    const hint = typeof location.location_hint === "string" ? location.location_hint : "";
-    return { longitude, latitude, displayName: hint || fallbackName };
-  } catch {
-    return null;
+function navPoint(location: ReleaseLocation, placeName: string): NavPoint {
+  if (location.geometry_type !== "Point" || location.crs !== NAVIGATION_CRS) {
+    throw contractError(`navigation location ${location.id} must be a ${NAVIGATION_CRS} Point`);
   }
+  if (!location.geometry_json) {
+    throw contractError(`navigation location ${location.id} has no geometry`);
+  }
+  let geometry: { type?: string; coordinates?: unknown };
+  try {
+    geometry = JSON.parse(location.geometry_json) as { type?: string; coordinates?: unknown };
+  } catch {
+    throw contractError(`navigation location ${location.id} contains invalid geometry JSON`);
+  }
+  if (
+    geometry.type !== "Point" ||
+    !Array.isArray(geometry.coordinates) ||
+    geometry.coordinates.length !== 2 ||
+    typeof geometry.coordinates[0] !== "number" ||
+    typeof geometry.coordinates[1] !== "number" ||
+    !Number.isFinite(geometry.coordinates[0]) ||
+    !Number.isFinite(geometry.coordinates[1])
+  ) {
+    throw contractError(`navigation location ${location.id} must contain a finite GeoJSON Point`);
+  }
+  if (
+    geometry.coordinates[0] < -180 || geometry.coordinates[0] > 180
+    || geometry.coordinates[1] < -90 || geometry.coordinates[1] > 90
+  ) {
+    throw contractError(`navigation location ${location.id} has invalid longitude or latitude`);
+  }
+  return {
+    longitude: geometry.coordinates[0],
+    latitude: geometry.coordinates[1],
+    displayName: location.location_hint || placeName,
+  };
 }
 
-function buildNavigationUrls(nav: NavPoint | null): NavigationUrls | null {
-  if (!nav) return null;
-  const name = encodeURIComponent(nav.displayName);
-  const { longitude, latitude } = nav;
+function navigationUrls(point: NavPoint): NavigationUrls {
+  const name = encodeURIComponent(point.displayName);
+  const { longitude, latitude } = point;
   return {
     amap: `https://uri.amap.com/navigation?to=${longitude},${latitude},${name}&mode=car&policy=1&src=SHUMap&coordinate=gaode&callnative=0`,
     tencent: `https://apis.map.qq.com/uri/v1/routeplan?type=drive&tocoord=${latitude},${longitude}&to=${name}&referer=SHUMap`,
@@ -185,134 +211,151 @@ function buildNavigationUrls(nav: NavPoint | null): NavigationUrls | null {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Filter-group derivation (from canonical release records, not name matching)
-// ---------------------------------------------------------------------------
-
-function deriveFilterGroups(place: ReleasePlace, hostedFacilityFilters: Set<FilterKey>): FilterKey[] {
-  const groups = new Set<FilterKey>(hostedFacilityFilters);
-  const legacyCategory = typeof place.content?.legacyCategory === "string" ? place.content.legacyCategory : "";
-
-  switch (legacyCategory) {
-    case "dorm":
-      groups.add("dorm");
-      break;
-    case "canteen":
-      groups.add("canteen");
-      groups.add("commercial");
-      break;
-    case "library":
-      groups.add("library");
-      break;
-    case "other":
-      groups.add("commercial");
-      break;
-    case "building":
-    default: {
-      if (/行政|办公|中心|伟长/.test(place.displayName)) groups.add("teaching");
-      if (/馆/.test(place.displayName)) groups.add("library");
-      if (/楼|教学|实验|学院/.test(place.displayName)) groups.add("teaching");
-      break;
-    }
-  }
-  if (groups.size === 0) groups.add("teaching");
-  return Array.from(groups);
+function filterGroups(
+  manifest: ReleaseManifest,
+  place: ReleasePlace,
+  facilityTypeIds: Set<string>,
+  hasMerchants: boolean,
+): FilterKey[] {
+  return manifest.mapFilters
+    .filter((filter) =>
+      filter.placeKindIds.includes(place.kindId) ||
+      filter.facilityTypeIds.some((id) => facilityTypeIds.has(id)) ||
+      (filter.includesMerchants && hasMerchants),
+    )
+    .map((filter) => filter.key);
 }
 
-// ---------------------------------------------------------------------------
-// Manifest -> MapBuilding[]
-// ---------------------------------------------------------------------------
-
-/** Build the renderable + searchable building set from a release manifest. */
-export function buildMapBuildings(manifest: ReleaseManifest): MapBuilding[] {
-  const campusKeyById = new Map<string, CampusKey>();
-  const campusLabelById = new Map<string, string>();
-  for (const campus of manifest.campuses) {
-    const key = campusKeyFromCode(campus.code);
-    if (key) campusKeyById.set(campus.id, key);
-    campusLabelById.set(campus.id, campus.name);
-  }
-
-  // Primary navigation_target anchor per place.
-  const primaryNavByPlace = new Map<string, ReleaseLocation>();
+/** Build the map model and enforce every rendering relationship in the release. */
+export function buildMapBuildings(
+  manifest: ReleaseManifest,
+  campuses: CampusConfig[],
+): MapBuilding[] {
+  const campusByMapVersion = new Map(campuses.map((campus) => [campus.mapVersionId, campus]));
+  const footprintByPlace = new Map<string, ReleaseLocation>();
+  const navigationByPlace = new Map<string, ReleaseLocation>();
   for (const location of manifest.locations) {
     if (location.entityType !== "place") continue;
-    if (location.role !== "navigation_target" && location.role !== "primary_display") continue;
-    const existing = primaryNavByPlace.get(location.entityId);
-    if (!existing || location.isPrimary === 1) primaryNavByPlace.set(location.entityId, location);
+    if (location.role === "footprint") {
+      if (footprintByPlace.has(location.entityId)) {
+        throw contractError(`building ${location.entityId} has multiple footprint locations`);
+      }
+      footprintByPlace.set(location.entityId, location);
+    }
+    if (location.role === "navigation_target" && location.isPrimary === 1) {
+      if (navigationByPlace.has(location.entityId)) {
+        throw contractError(`place ${location.entityId} has multiple primary navigation locations`);
+      }
+      navigationByPlace.set(location.entityId, location);
+    }
   }
 
-  // Hosted facility filter chips per host place. facilities[] only carries the
-  // facility type *id*; the filter table is keyed by the business *code*, so the
-  // manifest's facilityTypes dictionary is what bridges the two.
-  const codeByTypeId = facilityTypeCodesById(manifest);
-
-  const facilityFiltersByPlace = new Map<string, Set<FilterKey>>();
+  const facilityTypeIdsByPlace = new Map<string, Set<string>>();
   for (const facility of manifest.facilities) {
     if (!facility.hostPlaceId) continue;
-    const typeCode = codeByTypeId.get(facility.facilityTypeId);
-    const filterKey = typeCode ? FACILITY_FILTER_BY_TYPE_CODE[typeCode] : undefined;
-    if (!filterKey) continue;
-    const set = facilityFiltersByPlace.get(facility.hostPlaceId) ?? new Set<FilterKey>();
-    set.add(filterKey);
-    facilityFiltersByPlace.set(facility.hostPlaceId, set);
+    const ids = facilityTypeIdsByPlace.get(facility.hostPlaceId) ?? new Set<string>();
+    ids.add(facility.facilityTypeId);
+    facilityTypeIdsByPlace.set(facility.hostPlaceId, ids);
   }
+  const merchantsByPlace = groupMerchantsByPlace(manifest.merchants);
 
-  // Merchant outlets grouped onto their host place (no standalone merchant page).
-  const merchantsByPlace = groupMerchantsByPlace(manifest.merchants ?? []);
-
-  const buildings: MapBuilding[] = [];
-  for (const place of manifest.places) {
-    const campusKey = place.campusId ? campusKeyById.get(place.campusId) : null;
-    if (!campusKey) continue; // Only render places bound to a known campus SVG.
-
-    const content = place.content ?? {};
-    const svgElementId = typeof content.legacySvgElementId === "string" ? content.legacySvgElementId : "";
-    const detail = normalizePoiDetail(content.detail);
-    const nav = navPointFromLocation(primaryNavByPlace.get(place.id), place.displayName);
-    const navigationUrls = buildNavigationUrls(nav);
-    const hostedFilters = new Set<FilterKey>(facilityFiltersByPlace.get(place.id) ?? []);
-    const merchants = merchantsByPlace.get(place.id) ?? [];
-    // Hosting an outlet is what makes a place commercial — derived, not curated.
-    if (merchants.length > 0) hostedFilters.add("commercial");
-
-    buildings.push({
-      id: place.id,
-      svgElementId,
-      name: place.displayName,
-      campusKey,
-      campusLabel: place.campusId ? campusLabelById.get(place.campusId) ?? "" : "",
-      category: typeof content.legacyCategory === "string" ? content.legacyCategory : place.kindId,
-      kindId: place.kindId,
-      filterGroups: deriveFilterGroups(place, hostedFilters),
-      tags: [],
-      detail,
-      navigationUrls,
-      poiKey: place.id,
-      merchants,
+  return manifest.places
+    .filter((place) => place.isBuilding)
+    .map((place) => {
+      const footprint = footprintByPlace.get(place.id);
+      if (!footprint) throw contractError(`building ${place.id} has no footprint location`);
+      if (!footprint.map_feature_id || !footprint.map_version_id || !footprint.sourceElementId) {
+        throw contractError(
+          `building ${place.id} footprint must include mapFeatureId, mapVersionId and sourceElementId`,
+        );
+      }
+      const campus = campusByMapVersion.get(footprint.map_version_id);
+      if (!campus) {
+        throw contractError(
+          `building ${place.id} footprint references map version ${footprint.map_version_id} outside campus maps`,
+        );
+      }
+      if (place.campusId !== campus.id) {
+        throw contractError(
+          `building ${place.id} campus ${place.campusId} conflicts with footprint map ${footprint.map_version_id}`,
+        );
+      }
+      const nav = navigationByPlace.get(place.id);
+      const merchants = merchantsByPlace.get(place.id) ?? [];
+      return {
+        id: place.id,
+        poiKey: place.id,
+        revisionId: place.revisionId,
+        mapFeatureId: footprint.map_feature_id,
+        mapVersionId: footprint.map_version_id,
+        sourceElementId: footprint.sourceElementId,
+        name: place.displayName,
+        campusKey: campus.key,
+        campusLabel: campus.label,
+        kindId: place.kindId,
+        kindName: place.kindName,
+        filterGroups: filterGroups(
+          manifest,
+          place,
+          facilityTypeIdsByPlace.get(place.id) ?? new Set<string>(),
+          merchants.length > 0,
+        ),
+        detail: detailOf(place),
+        navigationUrls: nav ? navigationUrls(navPoint(nav, place.displayName)) : null,
+        facilities: releaseFacilitiesForPlace(manifest, place.id),
+        merchants,
+      };
     });
+}
+
+async function loadCampuses(
+  manifest: ReleaseManifest,
+  signal?: AbortSignal,
+): Promise<[CampusConfig, ...CampusConfig[]]> {
+  const campusMaps = manifest.maps.filter((map) => map.floor_id === null);
+  const configs = await Promise.all(campusMaps.map(async (map) => {
+    if (!map.campus_id || !map.campusCode || !map.campusName) {
+      throw contractError(`campus map ${map.id} has incomplete campus metadata`);
+    }
+    const key = campusKey(map.campusCode);
+    return {
+      id: map.campus_id,
+      key,
+      label: map.campusName,
+      mapVersionId: map.id,
+      svgRaw: await fetchMapAssetSvg(map.id, signal),
+      ...CAMPUS_DISPLAY[key],
+    };
+  }));
+  const [firstConfig, ...remainingConfigs] = configs;
+  if (!firstConfig) throw contractError("release has no campus maps");
+  const keys = new Set<CampusKey>();
+  for (const config of configs) {
+    if (keys.has(config.key)) throw contractError(`duplicate campus map for ${config.key}`);
+    keys.add(config.key);
   }
-  return buildings;
+  return [firstConfig, ...remainingConfigs];
 }
 
 export interface LoadedRelease {
   releaseId: string;
   version: string;
   manifest: ReleaseManifest;
+  campuses: [CampusConfig, ...CampusConfig[]];
   buildings: MapBuilding[];
+  filters: Array<{ key: FilterKey; label: string }>;
 }
 
-/**
- * Load the active release and build the map model. Throws ApiError (including
- * isReleaseUnavailable) on failure — callers must handle the empty state
- * explicitly rather than falling back to stale bundled data.
- */
+/** Load the active artifact and every SVG needed before exposing ready state. */
 export async function loadRelease(signal?: AbortSignal): Promise<LoadedRelease> {
   const manifest = await getCurrentRelease(signal);
+  const campuses = await loadCampuses(manifest, signal);
   return {
     releaseId: manifest.release.id,
     version: manifest.release.version,
     manifest,
-    buildings: buildMapBuildings(manifest),
+    campuses,
+    buildings: buildMapBuildings(manifest, campuses),
+    filters: manifest.mapFilters.map((filter) => ({ key: filter.key, label: filter.label })),
   };
 }

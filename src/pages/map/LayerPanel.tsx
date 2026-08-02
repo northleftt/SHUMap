@@ -1,6 +1,5 @@
 import { Layers } from "lucide-react";
 import { Chip } from "../../components/ui/Chip";
-import { filters } from "../../lib/release/mapData";
 import type { FilterKey } from "../../lib/types";
 
 /**
@@ -10,15 +9,23 @@ import type { FilterKey } from "../../lib/types";
  */
 export function LayerPanel({
   eventCount,
+  eventStatus,
+  eventError,
+  onRetryEvents,
   eventsOn,
   onToggleEvents,
   activeFilter,
+  filters,
   onToggleFilter,
 }: {
   eventCount: number;
+  eventStatus: "loading" | "ready" | "error";
+  eventError: string | null;
+  onRetryEvents: () => void;
   eventsOn: boolean;
   onToggleEvents: () => void;
   activeFilter: FilterKey | null;
+  filters: Array<{ key: FilterKey; label: string }>;
   onToggleFilter: (key: FilterKey) => void;
 }) {
   return (
@@ -45,18 +52,27 @@ export function LayerPanel({
           <span className="h-4 w-4 rounded-full bg-white shadow-sm" />
         </span>
       </button>
+      {eventStatus === "loading" ? (
+        <p className="mt-2 text-label text-sub">正在加载运营事件…</p>
+      ) : eventStatus === "error" ? (
+        <div className="mt-2 rounded-xl bg-error-bg px-3 py-2 text-label text-error">
+          <p>运营事件加载失败：{eventError}</p>
+          <button type="button" className="mt-1 font-semibold underline" onClick={onRetryEvents}>重新加载</button>
+        </div>
+      ) : null}
 
-      <p className="mt-3.5 text-label text-sub">高亮类别</p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {filters.map((filter) => (
-          <Chip key={filter.key} active={activeFilter === filter.key} onClick={() => onToggleFilter(filter.key)}>
-            {filter.label}
-          </Chip>
-        ))}
-      </div>
-      <p className="mt-2.5 text-label leading-relaxed text-sub">
-        高亮与搜索里的快速筛选是同一状态；底图始终显示。
-      </p>
+      {filters.length > 0 ? (
+        <>
+          <p className="mt-3.5 text-label text-sub">高亮类别</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {filters.map((filter) => (
+              <Chip key={filter.key} active={activeFilter === filter.key} onClick={() => onToggleFilter(filter.key)}>
+                {filter.label}
+              </Chip>
+            ))}
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -1,29 +1,57 @@
-import type { Env } from "../types/cloudflare";
+import type { Env, R2ObjectBody } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json } from "../lib/http";
-import { isoNow, parseJson } from "../lib/values";
+import { isoNow, parseJsonArray, parseJsonObject } from "../lib/values";
+import type { ReleaseManifest } from "./releases";
 
-export async function getCurrentRelease(env: Env): Promise<Response> {
-  let releaseId = await env.RELEASE_KV.get("current_release_v2");
-  if (!releaseId) {
-    releaseId = (await first<{ id: string }>(env.DB, "select id from releases where status='active'"))?.id ?? null;
-  }
-  if (!releaseId) throw new HttpError(503, "release_unavailable", "No public release is active");
-  const release = await first<{ artifact_key: string; artifact_sha256: string; version: string }>(
+const MAX_RELEASE_ARTIFACT_BYTES = 16 * 1024 * 1024;
+const MAX_MAP_ASSET_BYTES = 50 * 1024 * 1024;
+
+interface ActiveReleaseArtifact {
+  release: { id: string; artifact_key: string; artifact_sha256: string; version: string };
+  object: R2ObjectBody;
+}
+
+async function activeReleaseArtifact(env: Env): Promise<ActiveReleaseArtifact> {
+  const release = await first<{ id: string; artifact_key: string | null; artifact_sha256: string | null; version: string }>(
     env.DB,
-    "select artifact_key,artifact_sha256,version from releases where id=? and status='active'",
-    [releaseId],
+    "select id,artifact_key,artifact_sha256,version from releases where status='active'",
   );
-  if (!release?.artifact_key) throw new HttpError(503, "release_unavailable", "The active release artifact is unavailable");
+  if (!release?.artifact_key || !release.artifact_sha256) {
+    throw new HttpError(503, "release_unavailable", "The active release artifact is unavailable");
+  }
   const object = await env.SHUMAP_BUCKET.get(release.artifact_key);
   if (!object) throw new HttpError(503, "release_unavailable", "The active release artifact is missing");
-  const body = await object.text();
-  return new Response(body, {
+  assertObjectSizeWithin(object.size, MAX_RELEASE_ARTIFACT_BYTES, `Release ${release.id}`);
+  return {
+    release: {
+      id: release.id,
+      artifact_key: release.artifact_key,
+      artifact_sha256: release.artifact_sha256,
+      version: release.version,
+    },
+    object,
+  };
+}
+
+async function activeReleaseManifest(env: Env): Promise<ReleaseManifest> {
+  const artifact = await activeReleaseArtifact(env);
+  const manifest = await artifact.object.json<ReleaseManifest>();
+  if (manifest.schemaVersion !== 2 || manifest.release.id !== artifact.release.id) {
+    throw new Error(`Active release ${artifact.release.id} artifact identity does not match`);
+  }
+  return manifest;
+}
+
+export async function getCurrentRelease(env: Env): Promise<Response> {
+  const { release, object } = await activeReleaseArtifact(env);
+  return new Response(object.body, {
     headers: {
       "content-type": "application/json; charset=utf-8",
+      "content-length": String(object.size),
       "cache-control": "public, max-age=60, stale-while-revalidate=300",
       "etag": `"${release.artifact_sha256}"`,
-      "x-shumap-release": releaseId,
+      "x-shumap-release": release.id,
       "x-shumap-version": release.version,
       "x-content-type-options": "nosniff",
     },
@@ -31,17 +59,19 @@ export async function getCurrentRelease(env: Env): Promise<Response> {
 }
 
 export async function getVersionedRelease(env: Env, releaseId: string): Promise<Response> {
-  const release = await first<{ artifact_key: string; artifact_sha256: string; version: string }>(
+  const release = await first<{ artifact_key: string | null; artifact_sha256: string | null; version: string }>(
     env.DB,
     "select artifact_key,artifact_sha256,version from releases where id=? and status in ('active','superseded')",
     [releaseId],
   );
-  if (!release?.artifact_key) throw new HttpError(404, "not_found", "Release does not exist");
+  if (!release?.artifact_key || !release.artifact_sha256) throw new HttpError(404, "not_found", "Release does not exist");
   const object = await env.SHUMAP_BUCKET.get(release.artifact_key);
   if (!object) throw new HttpError(503, "release_unavailable", "Release artifact is missing");
-  return new Response(await object.text(), {
+  assertObjectSizeWithin(object.size, MAX_RELEASE_ARTIFACT_BYTES, `Release ${releaseId}`);
+  return new Response(object.body, {
     headers: {
       "content-type": "application/json; charset=utf-8",
+      "content-length": String(object.size),
       "cache-control": "public, max-age=31536000, immutable",
       "etag": `"${release.artifact_sha256}"`,
       "x-shumap-release": releaseId,
@@ -69,9 +99,9 @@ const MAP_ASSET_CONTENT_TYPES: Record<string, string> = {
  * 响应强制 nosniff + sandbox CSP，避免 SVG 被当作可执行文档直接导航。
  */
 export async function getPublicMapAsset(env: Env, mapVersionId: string): Promise<Response> {
-  const row = await first<{ object_key: string; content_type: string; sha256: string; bucket_scope: string; status: string }>(
+  const row = await first<{ object_key: string; content_type: string; byte_size: number; sha256: string; bucket_scope: string; status: string }>(
     env.DB,
-    `select me.object_key,me.content_type,me.sha256,me.bucket_scope,me.status
+    `select me.object_key,me.content_type,me.byte_size,me.sha256,me.bucket_scope,me.status
        from release_map_versions rmv
        join releases rel on rel.id=rmv.release_id and rel.status='active'
        join map_versions mv on mv.id=rmv.map_version_id
@@ -88,9 +118,11 @@ export async function getPublicMapAsset(env: Env, mapVersionId: string): Promise
   if (!contentType) throw new HttpError(404, "not_found", "Map asset is not a renderable image");
   const object = await env.SHUMAP_BUCKET.get(row.object_key);
   if (!object) throw new HttpError(404, "not_found", "Map object is missing");
-  return new Response(await object.arrayBuffer(), {
+  assertStoredObjectSize(row.byte_size, object.size, MAX_MAP_ASSET_BYTES, `Map ${mapVersionId}`);
+  return new Response(object.body, {
     headers: {
       "content-type": contentType,
+      "content-length": String(object.size),
       "content-disposition": "inline",
       "cache-control": "public, max-age=604800, immutable",
       "etag": `"${row.sha256}"`,
@@ -98,6 +130,30 @@ export async function getPublicMapAsset(env: Env, mapVersionId: string): Promise
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     },
   });
+}
+
+export async function getAdminMapAsset(env: Env, mapVersionId: string): Promise<Response> {
+  const row = await first<{ object_key: string; content_type: string; byte_size: number; sha256: string; bucket_scope: string; status: string }>(
+    env.DB,
+    `select me.object_key,me.content_type,me.byte_size,me.sha256,me.bucket_scope,me.status
+       from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id
+      where mv.id=? and mv.lifecycle_status in ('ready','published')`,
+    [mapVersionId],
+  );
+  if (!row || !["private", "public"].includes(row.bucket_scope) || !["approved", "published"].includes(row.status)) {
+    throw new HttpError(404, "not_found", "Map asset is not readable");
+  }
+  const contentType = MAP_ASSET_CONTENT_TYPES[row.content_type.toLowerCase()];
+  if (!contentType) throw new HttpError(404, "not_found", "Map asset is not a renderable image");
+  const object = await env.SHUMAP_BUCKET.get(row.object_key);
+  if (!object) throw new HttpError(404, "not_found", "Map object is missing");
+  assertStoredObjectSize(row.byte_size, object.size, MAX_MAP_ASSET_BYTES, `Map ${mapVersionId}`);
+  return new Response(object.body, { headers: {
+    "content-type": contentType, "content-disposition": "inline", "cache-control": "private, max-age=60",
+    "content-length": String(object.size),
+    "etag": `"${row.sha256}"`, "x-content-type-options": "nosniff",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  } });
 }
 
 export async function publicSearch(request: Request, env: Env): Promise<Response> {
@@ -121,51 +177,79 @@ export async function publicSearch(request: Request, env: Env): Promise<Response
   );
   return json({ query, releaseId: release.id, results: results.map((row) => ({
     ...row,
-    facets: parseJson(String(row.facetsJson ?? "[]"), []),
-    mapTarget: parseJson(String(row.mapTargetJson ?? "null"), null),
+    facets: parseJsonArray(row.facetsJson, "search_documents.facets_json"),
+    mapTarget: row.mapTargetJson === null
+      ? null
+      : parseJsonObject(row.mapTargetJson, "search_documents.map_target_json"),
     facetsJson: undefined,
     mapTargetJson: undefined,
   })) }, { headers: { "cache-control": "public, max-age=30" } });
 }
 
 export async function publicPlace(env: Env, placeId: string): Promise<Response> {
-  const release = await first<{ id: string }>(env.DB, "select id from releases where status='active'");
-  if (!release) throw new HttpError(503, "release_unavailable", "No public release is active");
-  const membership = await first<{ revision_id: string }>(env.DB, "select revision_id from release_items where release_id=? and entity_type='place' and entity_id=?", [release.id, placeId]);
-  if (!membership?.revision_id) throw new HttpError(404, "not_found", "Place is not part of the current release");
-  const place = await first<Record<string, unknown>>(
-    env.DB,
-    `select p.id,p.kind_id as kindId,p.campus_id as campusId,p.lifecycle_status as lifecycleStatus,
-            r.display_name as displayName,r.summary,r.description,r.content_json as contentJson
-       from places p join place_revisions r on r.id=? where p.id=?`,
-    [membership.revision_id, placeId],
-  );
-  const [names, locations, facilities, floors] = await Promise.all([
-    all(env.DB, "select language,name,name_type as nameType from place_names where place_id=?", [placeId]),
-    all(env.DB, `select el.role,el.is_primary as isPrimary,la.* from entity_locations el join location_anchors la on la.id=el.anchor_id where el.entity_type='place' and el.entity_id=? and el.valid_to is null`, [placeId]),
-    all<Record<string, unknown>>(env.DB, `select f.id,t.code as typeCode,t.name as typeName,fr.display_name as displayName,f.operational_status as operationalStatus,f.floor_id as floorId,fr.content_json as contentJson
-       from facility_instances f join facility_types t on t.id=f.facility_type_id join release_items ri on ri.release_id=? and ri.entity_type='facility' and ri.entity_id=f.id
-       join facility_revisions fr on fr.id=ri.revision_id where f.host_place_id=?`, [release.id, placeId]),
-    all(env.DB, "select id,level_code as levelCode,level_order as levelOrder,display_name as displayName from floors where building_place_id=? and is_public=1 order by level_order", [placeId]),
-  ]);
-  const facilityItems = facilities.map(({ contentJson, ...facility }) => ({
-    ...facility,
-    content: parseJson(String(contentJson ?? "{}"), {}),
-  }));
-  return json({ releaseId: release.id, place: { ...place, content: parseJson(String(place?.contentJson ?? "{}"), {}), contentJson: undefined }, names, locations, facilities: facilityItems, floors }, { headers: { "cache-control": "public, max-age=60" } });
+  const manifest = await activeReleaseManifest(env);
+  const place = manifest.places.find((item) => item.id === placeId);
+  if (!place) throw new HttpError(404, "not_found", "Place is not part of the current release");
+  const typeById = new Map(manifest.facilityTypes.map((type) => [type.id, type]));
+  const facilities = manifest.facilities
+    .filter((facility) => facility.hostPlaceId === placeId)
+    .map((facility) => {
+      const type = typeById.get(facility.facilityTypeId);
+      if (!type) throw new Error(`Release facility ${facility.id} has no facility type`);
+      return {
+        id: facility.id,
+        typeCode: type.code,
+        typeName: type.name,
+        displayName: facility.displayName,
+        operationalStatus: facility.operationalStatus,
+        floorId: facility.floorId,
+        content: facility.content,
+      };
+    });
+  const locations = manifest.locations.filter((location) => location.entityType === "place" && location.entityId === placeId);
+  const floors = manifest.floors
+    .filter((floor) => floor.buildingPlaceId === placeId && floor.isPublic === 1)
+    .map((floor) => ({
+      id: floor.id,
+      levelCode: floor.levelCode,
+      levelOrder: floor.levelOrder,
+      displayName: floor.displayName,
+    }));
+  return json({
+    releaseId: manifest.release.id,
+    place: {
+      id: place.id,
+      kindId: place.kindId,
+      kindName: place.kindName,
+      isBuilding: place.isBuilding,
+      campusId: place.campusId,
+      lifecycleStatus: place.lifecycleStatus,
+      displayName: place.displayName,
+      summary: place.summary,
+      description: place.description,
+      content: place.content,
+      aliases: place.aliases,
+    },
+    locations,
+    facilities,
+    floors,
+  }, { headers: { "cache-control": "public, max-age=60" } });
 }
 
 export async function listPublicPlaces(env: Env): Promise<Response> {
-  const release = await first<{ id: string }>(env.DB, "select id from releases where status='active'");
-  if (!release) return json({ releaseId: null, items: [] }, { headers: { "cache-control": "public, max-age=30" } });
-  const items = await all(
-    env.DB,
-    `select p.id,p.kind_id as kindId,p.campus_id as campusId,r.display_name as displayName,r.summary
-       from release_items ri join places p on p.id=ri.entity_id join place_revisions r on r.id=ri.revision_id
-      where ri.release_id=? and ri.entity_type='place' order by r.display_name`,
-    [release.id],
-  );
-  return json({ releaseId: release.id, items }, { headers: { "cache-control": "public, max-age=60" } });
+  const manifest = await activeReleaseManifest(env);
+  const items = manifest.places
+    .map((place) => ({
+      id: place.id,
+      kindId: place.kindId,
+      kindName: place.kindName,
+      isBuilding: place.isBuilding,
+      campusId: place.campusId,
+      displayName: place.displayName,
+      summary: place.summary,
+    }))
+    .sort((left, right) => left.displayName.localeCompare(right.displayName, "zh-CN"));
+  return json({ releaseId: manifest.release.id, items }, { headers: { "cache-control": "public, max-age=60" } });
 }
 
 function normalize(value: string): string {
@@ -178,4 +262,15 @@ function escapeLike(value: string): string {
 
 export function publicHealth(): Response {
   return json({ status: "ok", architecture: 2, time: isoNow() }, { headers: { "cache-control": "no-store" } });
+}
+
+function assertObjectSizeWithin(actual: number, maximum: number, label: string): void {
+  if (!Number.isInteger(actual) || actual <= 0 || actual > maximum) {
+    throw new Error(`${label} object has invalid byte size ${actual}`);
+  }
+}
+
+function assertStoredObjectSize(expected: number, actual: number, maximum: number, label: string): void {
+  assertObjectSizeWithin(expected, maximum, `${label} database`);
+  if (actual !== expected) throw new Error(`${label} object size ${actual} does not match stored byte size ${expected}`);
 }

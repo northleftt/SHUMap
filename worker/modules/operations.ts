@@ -1,10 +1,98 @@
-import type { LocationInput, SessionPrincipal } from "../domain/types";
+import type { RevisionLocationInput } from "../../shared/revision-contract";
+import type { SessionPrincipal } from "../domain/types";
 import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, assertExists, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, jsonString, makeId, objectValue, optionalString, requiredString } from "../lib/values";
+import {
+  arrayValue,
+  exactObject,
+  isoNow,
+  jsonString,
+  makeId,
+  objectValue,
+  oneOf,
+  optionalString,
+  requiredString,
+} from "../lib/values";
+import { normalizeLocationInputs } from "../lib/revision-contracts";
 import { audit } from "./audit";
-import { createLocation, planLocation } from "./locations";
+import { planLocation } from "./locations";
+
+const EVENT_TYPES = ["maintenance", "activity", "closure", "notice"] as const;
+const EVENT_SEVERITIES = ["info", "warning", "critical"] as const;
+const EVENT_TARGET_TYPES = [
+  "place", "floor", "space", "facility", "merchant_outlet", "transit_stop", "transit_route", "transit_trip", "map_feature",
+] as const;
+const EVENT_LOCATION_ROLES = ["event_location", "impact_area", "route_shape"] as const;
+const EVENT_TARGET_TABLES: Record<(typeof EVENT_TARGET_TYPES)[number], string> = {
+  place: "places",
+  floor: "floors",
+  space: "indoor_spaces",
+  facility: "facility_instances",
+  merchant_outlet: "merchant_outlets",
+  transit_stop: "transit_stops",
+  transit_route: "transit_routes",
+  transit_trip: "transit_trips",
+  map_feature: "map_features",
+};
+const CAMPAIGN_ITEM_TYPES = ["rich_text", "place", "facility", "transit_route", "route", "external_link", "action"] as const;
+const MAX_EVENT_LOCATIONS = 10;
+
+interface EventTargetInput {
+  type: (typeof EVENT_TARGET_TYPES)[number];
+  id: string;
+  impactType: string;
+}
+
+function isoTimestamp(value: unknown, field: string): string {
+  const text = requiredString(value, field, 50);
+  const parsed = new Date(text);
+  if (!Number.isFinite(parsed.valueOf()) || parsed.toISOString() !== text) {
+    throw new HttpError(400, "validation_error", `${field} must be a canonical ISO timestamp`);
+  }
+  return text;
+}
+
+function nullableIsoTimestamp(value: unknown, field: string): string | null {
+  if (value === null) return null;
+  return isoTimestamp(value, field);
+}
+
+function eventTargets(value: unknown): EventTargetInput[] {
+  const targets = arrayValue(value, "targets", 100).map((raw, index) => {
+    const field = `targets[${index}]`;
+    const target = exactObject(raw, field, ["type", "id", "impactType"]);
+    return {
+      type: oneOf(target.type, `${field}.type`, EVENT_TARGET_TYPES),
+      id: requiredString(target.id, `${field}.id`, 100),
+      impactType: requiredString(target.impactType, `${field}.impactType`, 100),
+    };
+  });
+  const keys = targets.map((target) => `${target.type}\u0000${target.id}`);
+  if (new Set(keys).size !== keys.length) throw new HttpError(400, "validation_error", "targets must not contain duplicates");
+  return targets;
+}
+
+function eventLocations(value: unknown): RevisionLocationInput[] {
+  const locations = normalizeLocationInputs(value, "locations", MAX_EVENT_LOCATIONS);
+  for (const [index, location] of locations.entries()) {
+    if (!EVENT_LOCATION_ROLES.includes(location.role as (typeof EVENT_LOCATION_ROLES)[number])) {
+      throw new HttpError(400, "validation_error", `locations[${index}].role is not supported for operational events`);
+    }
+    const expectedGeometry = location.role === "event_location"
+      ? "Point"
+      : location.role === "impact_area"
+        ? "Polygon"
+        : "LineString";
+    if (location.geometryType !== expectedGeometry || location.geometry === null) {
+      throw new HttpError(400, "validation_error", `locations[${index}] must contain ${expectedGeometry} geometry`);
+    }
+    if (location.crs !== "svg_viewbox") {
+      throw new HttpError(400, "validation_error", `locations[${index}].crs must be svg_viewbox`);
+    }
+  }
+  return locations;
+}
 
 export async function listOperationalEvents(env: Env, publicOnly = false): Promise<Response> {
   const now = isoNow();
@@ -65,41 +153,48 @@ export async function createOperationalEvent(
   principal: SessionPrincipal,
   requestId: string,
 ): Promise<Response> {
-  const body = await readJson<Record<string, unknown>>(request);
-  const eventType = requiredString(body.eventType, "eventType", 100);
-  const severity = requiredString(body.severity, "severity", 20);
-  if (!["info", "warning", "critical"].includes(severity)) throw new HttpError(400, "validation_error", "Invalid severity");
+  const body = exactObject(await readJson<unknown>(request), "operation", [
+    "eventType", "severity", "title", "description", "startsAt", "expectedEndsAt", "autoExpireAt", "sourceId",
+    "responsibleOrganizationId", "targets", "locations",
+  ]);
+  const eventType = oneOf(body.eventType, "eventType", EVENT_TYPES);
+  const severity = oneOf(body.severity, "severity", EVENT_SEVERITIES);
   const title = requiredString(body.title, "title", 200);
   const description = optionalString(body.description, "description", 10_000);
-  const startsAt = requiredString(body.startsAt, "startsAt", 50);
-  const expectedEndsAt = optionalString(body.expectedEndsAt, "expectedEndsAt", 50);
-  const autoExpireAt = optionalString(body.autoExpireAt, "autoExpireAt", 50);
+  const startsAt = isoTimestamp(body.startsAt, "startsAt");
+  const expectedEndsAt = nullableIsoTimestamp(body.expectedEndsAt, "expectedEndsAt");
+  const autoExpireAt = nullableIsoTimestamp(body.autoExpireAt, "autoExpireAt");
+  if (expectedEndsAt !== null && expectedEndsAt <= startsAt) {
+    throw new HttpError(400, "validation_error", "expectedEndsAt must be after startsAt");
+  }
+  if (autoExpireAt !== null && autoExpireAt <= startsAt) {
+    throw new HttpError(400, "validation_error", "autoExpireAt must be after startsAt");
+  }
   const sourceId = optionalString(body.sourceId, "sourceId", 100);
   const organizationId = optionalString(body.responsibleOrganizationId, "responsibleOrganizationId", 100);
+  const targets = eventTargets(body.targets);
+  const locations = eventLocations(body.locations);
   await Promise.all([
     assertExists(env.DB, "data_sources", sourceId, "Data source"),
     assertExists(env.DB, "organizations", organizationId, "Responsible organization"),
+    ...targets.map((target) => assertExists(env.DB, EVENT_TARGET_TABLES[target.type], target.id, "Event target")),
   ]);
   const id = makeId("event");
   const now = isoNow();
-  await env.DB.prepare(
-    `insert into operational_events(id,event_type,severity,editorial_status,operational_status,title,description,starts_at,expected_ends_at,auto_expire_at,source_id,responsible_organization_id,created_by,created_at,updated_at)
-     values(?,?,?,'draft','scheduled',?,?,?,?,?,?,?,?,?,?)`,
-  ).bind(id, eventType, severity, title, description, startsAt, expectedEndsAt, autoExpireAt, sourceId, organizationId, principal.userId, now, now).run();
-
-  const targets = Array.isArray(body.targets) ? body.targets : [];
-  for (const raw of targets) {
-    const target = objectValue(raw, "target");
-    const targetType = requiredString(target.type, "target.type", 50);
-    const targetId = requiredString(target.id, "target.id", 100);
-    const impactType = optionalString(target.impactType, "target.impactType", 100) ?? "affected";
-    await env.DB.prepare("insert into operational_event_targets(event_id,target_type,target_id,impact_type) values(?,?,?,?)")
-      .bind(id, targetType, targetId, impactType).run();
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare(
+      `insert into operational_events(id,event_type,severity,editorial_status,operational_status,title,description,starts_at,expected_ends_at,auto_expire_at,source_id,responsible_organization_id,created_by,created_at,updated_at)
+       values(?,?,?,'draft','scheduled',?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(id, eventType, severity, title, description, startsAt, expectedEndsAt, autoExpireAt, sourceId, organizationId, principal.userId, now, now),
+    ...targets.map((target) => env.DB.prepare(
+      "insert into operational_event_targets(event_id,target_type,target_id,impact_type) values(?,?,?,?)",
+    ).bind(id, target.type, target.id, target.impactType)),
+  ];
+  for (const location of locations) {
+    const plan = await planLocation(env, "operational_event", id, location, principal, now);
+    statements.push(...plan.statements);
   }
-  const locations = Array.isArray(body.locations) ? body.locations : [];
-  for (const [index, raw] of locations.entries()) {
-    await createLocation(env, "operational_event", id, raw as never, principal, index === 0);
-  }
+  await env.DB.batch(statements);
   await audit(env, principal, "operational_event.create", "operational_event", id, requestId, null, body);
   return json({ id, editorialStatus: "draft", operationalStatus: "scheduled" }, { status: 201 });
 }
@@ -170,24 +265,36 @@ export async function listCampaigns(env: Env, publicOnly = false): Promise<Respo
 }
 
 export async function createCampaign(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = await readJson<Record<string, unknown>>(request);
+  const body = exactObject(await readJson<unknown>(request), "campaign", [
+    "title", "summary", "startsAt", "endsAt", "audience", "placements", "items",
+  ]);
   const title = requiredString(body.title, "title", 200);
   const summary = optionalString(body.summary, "summary", 500);
-  const startsAt = requiredString(body.startsAt, "startsAt", 50);
-  const endsAt = requiredString(body.endsAt, "endsAt", 50);
+  const startsAt = isoTimestamp(body.startsAt, "startsAt");
+  const endsAt = isoTimestamp(body.endsAt, "endsAt");
   if (endsAt <= startsAt) throw new HttpError(400, "validation_error", "endsAt must be after startsAt");
+  const audience = objectValue(body.audience, "audience");
+  const placements = arrayValue(body.placements, "placements", 100);
+  const items = arrayValue(body.items, "items", 100).map((raw, index) => {
+    const field = `items[${index}]`;
+    const item = exactObject(raw, field, ["type", "targetId", "content"]);
+    return {
+      type: oneOf(item.type, `${field}.type`, CAMPAIGN_ITEM_TYPES),
+      targetId: optionalString(item.targetId, `${field}.targetId`, 100),
+      content: objectValue(item.content, `${field}.content`),
+    };
+  });
   const id = makeId("campaign");
   const now = isoNow();
-  await env.DB.prepare(
-    `insert into campaigns(id,title,summary,editorial_status,lifecycle_status,starts_at,ends_at,audience_json,placements_json,created_by,created_at,updated_at)
-     values(?,?,?,'draft','scheduled',?,?,?,?,?,?,?)`,
-  ).bind(id, title, summary, startsAt, endsAt, jsonString(body.audience ?? {}), jsonString(body.placements ?? []), principal.userId, now, now).run();
-  const items = Array.isArray(body.items) ? body.items : [];
-  for (const [index, raw] of items.entries()) {
-    const item = objectValue(raw, "item");
-    await env.DB.prepare("insert into campaign_items(id,campaign_id,item_type,target_id,content_json,sort_order) values(?,?,?,?,?,?)")
-      .bind(makeId("citem"), id, requiredString(item.type, "item.type", 50), optionalString(item.targetId, "item.targetId", 100), jsonString(item.content ?? {}), index * 10).run();
-  }
+  await env.DB.batch([
+    env.DB.prepare(
+      `insert into campaigns(id,title,summary,editorial_status,lifecycle_status,starts_at,ends_at,audience_json,placements_json,created_by,created_at,updated_at)
+       values(?,?,?,'draft','scheduled',?,?,?,?,?,?,?)`,
+    ).bind(id, title, summary, startsAt, endsAt, jsonString(audience), jsonString(placements), principal.userId, now, now),
+    ...items.map((item, index) => env.DB.prepare(
+      "insert into campaign_items(id,campaign_id,item_type,target_id,content_json,sort_order) values(?,?,?,?,?,?)",
+    ).bind(makeId("citem"), id, item.type, item.targetId, jsonString(item.content), index * 10)),
+  ]);
   await audit(env, principal, "campaign.create", "campaign", id, requestId, null, body);
   return json({ id, editorialStatus: "draft" }, { status: 201 });
 }
@@ -195,8 +302,6 @@ export async function createCampaign(request: Request, env: Env, principal: Sess
 // ---------------------------------------------------------------------------
 // Geometry re-editing: PUT /api/admin/operations/:id/locations
 // ---------------------------------------------------------------------------
-
-const MAX_EVENT_LOCATIONS = 10;
 
 /**
  * Replace-all update of an event's locations. Old bindings and their anchors are
@@ -215,12 +320,8 @@ export async function replaceOperationalEventLocations(
   const event = await first<Record<string, unknown>>(env.DB, "select id from operational_events where id=?", [eventId]);
   if (!event) throw new HttpError(404, "not_found", "Event does not exist");
 
-  const body = await readJson<Record<string, unknown>>(request);
-  if (!Array.isArray(body.locations)) throw new HttpError(400, "validation_error", "locations must be an array");
-  const inputs = body.locations.map((raw, index) => objectValue(raw, `locations[${index}]`) as unknown as LocationInput);
-  if (inputs.length > MAX_EVENT_LOCATIONS) {
-    throw new HttpError(400, "validation_error", `An event supports at most ${MAX_EVENT_LOCATIONS} locations`);
-  }
+  const body = exactObject(await readJson<unknown>(request), "operationLocations", ["locations"]);
+  const inputs = eventLocations(body.locations);
 
   const previous = await all<{ bindingId: string; anchorId: string; role: string }>(
     env.DB,
@@ -233,8 +334,8 @@ export async function replaceOperationalEventLocations(
   // statement runs, so validation failures never delete the existing geometry.
   const now = isoNow();
   const planned = [];
-  for (const [index, input] of inputs.entries()) {
-    planned.push(await planLocation(env, "operational_event", eventId, input, principal, index === 0, now));
+  for (const input of inputs) {
+    planned.push(await planLocation(env, "operational_event", eventId, input, principal, now));
   }
 
   const statements: D1PreparedStatement[] = [
@@ -263,6 +364,6 @@ export async function replaceOperationalEventLocations(
   return json({
     id: eventId,
     removed: previous.length,
-    locations: planned.map((plan, index) => ({ id: plan.anchorId, role: inputs[index].role, isPrimary: index === 0 })),
+    locations: planned.map((plan, index) => ({ id: plan.anchorId, role: inputs[index].role, isPrimary: inputs[index].isPrimary })),
   });
 }

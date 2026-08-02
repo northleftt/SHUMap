@@ -1,7 +1,13 @@
 import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import * as admin from "../../lib/api/admin";
-import type { ServiceCalendarRow, TransitResponse } from "../adminTypes";
+import type {
+  ServiceCalendarRow,
+  TransitBookingPolicy,
+  TransitDropoffType,
+  TransitPickupType,
+  TransitResponse,
+} from "../adminTypes";
 import {
   EmptyState,
   ErrorBanner,
@@ -11,6 +17,7 @@ import {
   Panel,
   Pill,
   PrimaryButton,
+  Field,
   SelectField,
   errorMessage,
   fmtDay,
@@ -25,7 +32,7 @@ import {
 const WEEK_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
 const WEEK_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
-const POLICY_META: Record<string, { label: string; tone: "info" | "neutral" }> = {
+const POLICY_META: Record<TransitBookingPolicy, { label: string; tone: "info" | "neutral" }> = {
   required: { label: "需预约", tone: "info" },
   optional: { label: "可预约", tone: "info" },
   not_required: { label: "非预约", tone: "neutral" },
@@ -52,17 +59,18 @@ const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 interface StopDraft {
   stopId: string;
-  pickupType: string;
-  dropoffType: string;
+  pickupType: TransitPickupType;
+  dropoffType: TransitDropoffType;
 }
 
-/** 方向名兜底：没有取名的走向按去/回程显示，绝不显示内部编号。 */
-function directionLabel(name: string | null, directionId: number): string {
-  return name?.trim() || (directionId === 0 ? "去程" : "回程");
+function directionLabel(name: string, directionId: number): string {
+  const normalized = name.trim();
+  if (!normalized) throw new Error(`方向 ${directionId} 缺少名称`);
+  return normalized;
 }
 
-function calendarLabel(calendar: ServiceCalendarRow | undefined): string {
-  return calendar?.displayName || calendar?.name || "";
+function calendarLabel(calendar: ServiceCalendarRow): string {
+  return calendar.name;
 }
 
 function sameSequence(a: StopDraft[], b: StopDraft[]): boolean {
@@ -74,6 +82,13 @@ function sameSequence(a: StopDraft[], b: StopDraft[]): boolean {
 
 export function TransitPage() {
   const { state, reload } = useAsyncData<TransitResponse>((signal) => admin.listAdminTransit<TransitResponse>(signal), []);
+
+  if (state.status === "loading") return <LoadingState label="加载校车数据…" />;
+  if (state.status === "error") return <ErrorBanner message={state.message} />;
+  return <ReadyTransitPage data={state.data} reload={reload} />;
+}
+
+function ReadyTransitPage({ data, reload }: { data: TransitResponse; reload: () => void }) {
 
   const [routeId, setRouteId] = useState("");
   const [patternId, setPatternId] = useState("");
@@ -87,21 +102,36 @@ export function TransitPage() {
 
   const [editing, setEditing] = useState<"new" | string | null>(null);
   const [times, setTimes] = useState<string[]>([]);
-  const [policy, setPolicy] = useState("not_required");
+  const [policy, setPolicy] = useState<TransitBookingPolicy>("not_required");
   const [formCalendarId, setFormCalendarId] = useState("");
   const [tripBusy, setTripBusy] = useState(false);
   const [tripError, setTripError] = useState("");
   const [pendingDelete, setPendingDelete] = useState("");
+  const [createKind, setCreateKind] = useState<"stop" | "route" | "pattern" | "calendar" | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [createCode, setCreateCode] = useState("");
+  const [createDirection, setCreateDirection] = useState("0");
+  const [createPatternStops, setCreatePatternStops] = useState<StopDraft[]>([]);
+  const [createPatternStopId, setCreatePatternStopId] = useState("");
+  const [validFrom, setValidFrom] = useState(new Date().toLocaleDateString("en-CA"));
+  const [validTo, setValidTo] = useState(`${new Date().getFullYear()}-12-31`);
+  const [weekdays, setWeekdays] = useState([true, true, true, true, true, false, false]);
+  const [exceptions, setExceptions] = useState<Array<{ date: string; type: "added" | "removed"; label: string }>>([]);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createError, setCreateError] = useState("");
 
-  const data = state.status === "ready" ? state.data : undefined;
-  const stops = data?.stops ?? [];
-  const routes = data?.routes ?? [];
-  const patterns = data?.patterns ?? [];
-  const calendars = data?.calendars ?? [];
+  const stops = data.stops;
+  const routes = data.routes;
+  const patterns = data.patterns;
+  const calendars = data.calendars;
 
   const stopName = useMemo(() => {
     const map = new Map(stops.map((stop) => [stop.id, stop.name]));
-    return (id: string) => map.get(id) ?? "未知站点";
+    return (id: string) => {
+      const name = map.get(id);
+      if (name === undefined) throw new Error(`校车数据引用了不存在的站点 ${id}`);
+      return name;
+    };
   }, [stops]);
 
   const selectedRouteId = routeId || routes[0]?.id || "";
@@ -113,11 +143,11 @@ export function TransitPage() {
   /** 已落库的站点顺序，用作草稿基线。 */
   const savedSequence = useMemo<StopDraft[]>(
     () =>
-      (data?.patternStops ?? [])
+      data.patternStops
         .filter((row) => row.patternId === selectedPatternId)
         .sort((a, b) => a.stopSequence - b.stopSequence)
         .map((row) => ({ stopId: row.stopId, pickupType: row.pickupType, dropoffType: row.dropoffType })),
-    [data, selectedPatternId],
+    [data.patternStops, selectedPatternId],
   );
 
   // 切换走向或数据刷新后回到已落库状态，避免草稿串到别的走向。
@@ -131,23 +161,32 @@ export function TransitPage() {
   }, [savedSequence]);
 
   const trips = useMemo(
-    () => (data?.trips ?? []).filter((trip) => trip.patternId === selectedPatternId && trip.serviceCalendarId === selectedCalendarId),
-    [data, selectedPatternId, selectedCalendarId],
+    () => data.trips.filter((trip) => trip.patternId === selectedPatternId && trip.serviceCalendarId === selectedCalendarId),
+    [data.trips, selectedPatternId, selectedCalendarId],
   );
 
   const timesByTrip = useMemo(() => {
     const map = new Map<string, Array<{ stopSequence: number; arrivalTime: string | null; departureTime: string | null }>>();
-    for (const row of data?.stopTimes ?? []) {
-      const list = map.get(row.tripId) ?? [];
+    for (const row of data.stopTimes) {
+      let list = map.get(row.tripId);
+      if (list === undefined) {
+        list = [];
+        map.set(row.tripId, list);
+      }
       list.push(row);
-      map.set(row.tripId, list);
     }
     for (const list of map.values()) list.sort((a, b) => a.stopSequence - b.stopSequence);
     return map;
-  }, [data]);
+  }, [data.stopTimes]);
+
+  function rowsForTrip(tripId: string) {
+    const rows = timesByTrip.get(tripId);
+    if (rows === undefined) throw new Error(`班次 ${tripId} 缺少站点时刻`);
+    return rows;
+  }
 
   function tripTimes(tripId: string): string[] {
-    const rows = timesByTrip.get(tripId) ?? [];
+    const rows = rowsForTrip(tripId);
     return savedSequence.map((_, index) => (rows[index]?.departureTime ?? rows[index]?.arrivalTime ?? "").slice(0, 5));
   }
 
@@ -182,6 +221,35 @@ export function TransitPage() {
     setSequenceSaved(false);
   }
 
+  function openCreate(kind: "stop" | "route" | "pattern" | "calendar") {
+    setCreateKind(kind);
+    setCreateError("");
+    if (kind === "pattern") {
+      setCreatePatternStops([]);
+      setCreatePatternStopId("");
+    }
+  }
+
+  function appendCreatePatternStop() {
+    if (!createPatternStopId || createPatternStops.some((stop) => stop.stopId === createPatternStopId)) return;
+    setCreatePatternStops((current) => [...current, { stopId: createPatternStopId, pickupType: "regular", dropoffType: "regular" }]);
+    setCreatePatternStopId("");
+  }
+
+  function patchCreatePatternStop(index: number, patch: Partial<StopDraft>) {
+    setCreatePatternStops((current) => current.map((stop, i) => i === index ? { ...stop, ...patch } : stop));
+  }
+
+  function moveCreatePatternStop(index: number, delta: number) {
+    setCreatePatternStops((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   async function saveSequence() {
     setSequenceBusy(true);
     setSequenceError("");
@@ -198,6 +266,7 @@ export function TransitPage() {
   }
 
   function startAddTrip() {
+    if (!activeCalendar) throw new Error("添加班次前必须先创建服务日历");
     setEditing("new");
     setTimes(savedSequence.map(() => ""));
     setPolicy("not_required");
@@ -205,7 +274,7 @@ export function TransitPage() {
     setTripError("");
   }
 
-  function startEditTrip(tripId: string, bookingPolicy: string, tripCalendarId: string) {
+  function startEditTrip(tripId: string, bookingPolicy: TransitBookingPolicy, tripCalendarId: string) {
     setEditing(tripId);
     setTimes(tripTimes(tripId));
     setPolicy(bookingPolicy);
@@ -215,7 +284,7 @@ export function TransitPage() {
 
   async function saveTrip() {
     const trimmed = times.map((time) => time.trim());
-    if (!TIME_PATTERN.test(trimmed[0] ?? "")) {
+    if (!TIME_PATTERN.test(trimmed[0])) {
       setTripError("请填写发车时间，格式为 07:30");
       return;
     }
@@ -227,6 +296,8 @@ export function TransitPage() {
     setTripBusy(true);
     setTripError("");
     try {
+      const serviceCalendarId = formCalendarId || selectedCalendarId;
+      if (!serviceCalendarId) throw new Error("请选择服务日历");
       const stopTimes = trimmed.map((time) => ({
         arrivalTime: time || null,
         departureTime: time || null,
@@ -234,13 +305,16 @@ export function TransitPage() {
       if (editing === "new") {
         await admin.createTransitTrip({
           patternId: selectedPatternId,
-          serviceCalendarId: formCalendarId || selectedCalendarId,
+          serviceCalendarId,
+          publicLabel: null,
           bookingPolicy: policy,
+          bookingUrl: null,
+          sourceId: null,
           stopTimes,
         });
       } else if (editing) {
         await admin.updateTransitTrip(editing, {
-          serviceCalendarId: formCalendarId || selectedCalendarId,
+          serviceCalendarId,
           bookingPolicy: policy,
           stopTimes,
         });
@@ -268,8 +342,50 @@ export function TransitPage() {
     }
   }
 
-  if (state.status === "loading") return <LoadingState label="加载校车数据…" />;
-  if (state.status === "error") return <ErrorBanner message={state.message || "校车数据加载失败，请刷新重试"} />;
+  async function createEntity() {
+    if (!createKind || !createName.trim()) { setCreateError("请填写名称"); return; }
+    setCreateBusy(true); setCreateError("");
+    try {
+      if (createKind === "stop") {
+        await admin.createTransitStop({
+          name: createName.trim(),
+          code: createCode.trim() || null,
+          placeId: null,
+          campusId: null,
+          locations: [],
+        });
+      }
+      if (createKind === "route") await admin.createTransitRoute({
+        name: createName.trim(),
+        code: createCode.trim() || null,
+        operatorId: null,
+      });
+      if (createKind === "pattern") {
+        if (!selectedRouteId || createPatternStops.length < 2) throw new Error("请按顺序添加至少两个站点");
+        await admin.createTransitPattern({
+          routeId: selectedRouteId,
+          name: createName.trim(),
+          directionId: createDirection === "0" ? 0 : 1,
+          stops: createPatternStops,
+        });
+      }
+      if (createKind === "calendar") await admin.createTransitCalendar({
+        name: createName.trim(), validFrom, validTo,
+        weekdays: {
+          monday: weekdays[0],
+          tuesday: weekdays[1],
+          wednesday: weekdays[2],
+          thursday: weekdays[3],
+          friday: weekdays[4],
+          saturday: weekdays[5],
+          sunday: weekdays[6],
+        },
+        exceptions: exceptions.filter((item) => item.date).map((item) => ({ ...item, label: item.label.trim() || null })),
+        sourceId: null,
+      });
+      setCreateKind(null); setCreateName(""); setCreateCode(""); setCreatePatternStops([]); setCreatePatternStopId(""); reload();
+    } catch (err) { setCreateError(errorMessage(err, "新建失败")); } finally { setCreateBusy(false); }
+  }
 
   const tripEditor = (
     <div className="space-y-3">
@@ -285,12 +401,12 @@ export function TransitPage() {
               className="h-9 w-24 rounded-lg border border-line bg-surface px-3 text-body text-ink outline-none focus:border-primary"
               onChange={(e) => setTimes((current) => current.map((time, i) => (i === index ? e.target.value : time)))}
               placeholder={index === 0 ? "07:30" : "可留空"}
-              value={times[index] ?? ""}
+              value={times[index]}
             />
           </label>
         ))}
         <div className="w-32">
-          <SelectField label="乘车方式" onChange={setPolicy} options={POLICY_OPTIONS} value={policy} />
+          <SelectField label="乘车方式" onChange={(value) => setPolicy(value as TransitBookingPolicy)} options={POLICY_OPTIONS} value={policy} />
         </div>
         <div className="w-32">
           <SelectField
@@ -343,7 +459,56 @@ export function TransitPage() {
             value={selectedCalendarId}
           />
         </div>
+        <div className="ml-auto flex gap-2">
+          <GhostButton onClick={() => openCreate("stop")}><Plus size={14} />站点</GhostButton>
+          <GhostButton onClick={() => openCreate("route")}><Plus size={14} />线路</GhostButton>
+          <GhostButton disabled={!selectedRouteId} onClick={() => openCreate("pattern")}><Plus size={14} />方向</GhostButton>
+          <GhostButton onClick={() => openCreate("calendar")}><Plus size={14} />日历</GhostButton>
+        </div>
       </div>
+
+      {createKind ? <Panel title={`新建${{ stop: "站点", route: "线路", pattern: "方向", calendar: "服务日历" }[createKind]}`}>
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="名称" onChange={setCreateName} value={createName} />
+            {createKind === "stop" || createKind === "route" ? <Field label="代码" onChange={setCreateCode} value={createCode} /> : null}
+            {createKind === "pattern" ? <SelectField label="方向" onChange={setCreateDirection} options={[{ value: "0", label: "去程" }, { value: "1", label: "回程" }]} value={createDirection} /> : null}
+            {createKind === "calendar" ? <><Field label="开始日期" onChange={setValidFrom} type="date" value={validFrom} /><Field label="结束日期" onChange={setValidTo} type="date" value={validTo} /></> : null}
+          </div>
+          {createKind === "pattern" ? <div className="space-y-2">
+            {createPatternStops.map((stop, index) => <div className="rounded-lg border border-line p-3" key={stop.stopId}>
+              <div className="flex items-center gap-2">
+                <span className="grid h-6 w-6 place-items-center rounded-full bg-chip text-aux font-semibold text-sub">{index + 1}</span>
+                <span className="flex-1 text-body font-semibold text-ink">{stopName(stop.stopId)}</span>
+                <GhostButton disabled={index === 0} onClick={() => moveCreatePatternStop(index, -1)}><ArrowUp size={14} /></GhostButton>
+                <GhostButton disabled={index === createPatternStops.length - 1} onClick={() => moveCreatePatternStop(index, 1)}><ArrowDown size={14} /></GhostButton>
+                <GhostButton danger onClick={() => setCreatePatternStops((current) => current.filter((_, i) => i !== index))}><Trash2 size={14} /></GhostButton>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <SelectField label="上车规则" onChange={(pickupType) => patchCreatePatternStop(index, { pickupType: pickupType as TransitPickupType })} options={PICKUP_OPTIONS} value={stop.pickupType} />
+                <SelectField label="下车规则" onChange={(dropoffType) => patchCreatePatternStop(index, { dropoffType: dropoffType as TransitDropoffType })} options={DROPOFF_OPTIONS} value={stop.dropoffType} />
+              </div>
+            </div>)}
+            <div className="flex items-end gap-2">
+              <div className="flex-1"><SelectField label="添加站点" onChange={setCreatePatternStopId} options={stops.filter((stop) => !createPatternStops.some((item) => item.stopId === stop.id)).map((stop) => ({ value: stop.id, label: stop.name }))} placeholder="选择站点" value={createPatternStopId} /></div>
+              <GhostButton disabled={!createPatternStopId} onClick={appendCreatePatternStop}><Plus size={14} />添加</GhostButton>
+            </div>
+            {createPatternStops.length < 2 ? <InfoNote tone="warning">一个方向至少需要两个站点</InfoNote> : null}
+          </div> : null}
+          {createKind === "calendar" ? <div className="flex gap-2">{WEEK_LABELS.map((day, index) => <button className={`h-9 w-9 rounded-full text-body ${weekdays[index] ? "bg-primary text-white" : "bg-page text-sub"}`} key={day} onClick={() => setWeekdays((rows) => rows.map((value, i) => i === index ? !value : value))} type="button">{day}</button>)}</div> : null}
+          {createKind === "calendar" ? <div className="space-y-2">
+            {exceptions.map((item, index) => <div className="grid grid-cols-[150px_150px_1fr_auto] gap-2" key={index}>
+              <Field onChange={(date) => setExceptions((rows) => rows.map((row, i) => i === index ? { ...row, date } : row))} type="date" value={item.date} />
+              <SelectField onChange={(type) => setExceptions((rows) => rows.map((row, i) => i === index ? { ...row, type: type as "added" | "removed" } : row))} options={[{ value: "added", label: "增加服务" }, { value: "removed", label: "暂停服务" }]} value={item.type} />
+              <Field onChange={(label) => setExceptions((rows) => rows.map((row, i) => i === index ? { ...row, label } : row))} placeholder="说明" value={item.label} />
+              <GhostButton danger onClick={() => setExceptions((rows) => rows.filter((_, i) => i !== index))}><Trash2 size={14} /></GhostButton>
+            </div>)}
+            <GhostButton onClick={() => setExceptions((rows) => [...rows, { date: "", type: "added", label: "" }])}><Plus size={14} />例外日期</GhostButton>
+          </div> : null}
+          <ErrorBanner message={createError} />
+          <div className="flex gap-2"><PrimaryButton disabled={createBusy || (createKind === "pattern" && createPatternStops.length < 2)} onClick={createEntity}>保存</PrimaryButton><GhostButton onClick={() => setCreateKind(null)}>取消</GhostButton></div>
+        </div>
+      </Panel> : null}
 
       {routes.length === 0 ? <EmptyState label="暂无校车线路" /> : null}
 
@@ -402,7 +567,7 @@ export function TransitPage() {
                   <select
                     aria-label={`${stopName(stop.stopId)} 上车规则`}
                     className="h-8 flex-1 rounded-md border border-line bg-surface px-2 text-aux text-ink"
-                    onChange={(e) => patchStop(index, { pickupType: e.target.value })}
+                    onChange={(e) => patchStop(index, { pickupType: e.target.value as TransitPickupType })}
                     value={stop.pickupType}
                   >
                     {PICKUP_OPTIONS.map((option) => (
@@ -414,7 +579,7 @@ export function TransitPage() {
                   <select
                     aria-label={`${stopName(stop.stopId)} 下车规则`}
                     className="h-8 flex-1 rounded-md border border-line bg-surface px-2 text-aux text-ink"
-                    onChange={(e) => patchStop(index, { dropoffType: e.target.value })}
+                    onChange={(e) => patchStop(index, { dropoffType: e.target.value as TransitDropoffType })}
                     value={stop.dropoffType}
                   >
                     {DROPOFF_OPTIONS.map((option) => (
@@ -459,17 +624,14 @@ export function TransitPage() {
             <ErrorBanner message={sequenceError} />
 
             <InfoNote tone="warning">「仅预约班次可上车」的站点，非预约班次不会停靠</InfoNote>
-            {sequenceDirty && trips.length > 0 ? (
-              <InfoNote tone="info">调整顺序后，各班次已填的时间会跟着站点一起移动；被删掉的站点，其时间同时清除</InfoNote>
-            ) : null}
           </div>
         </Panel>
 
         <div className="space-y-4">
           <Panel
-            title={`班次时刻 · ${calendarLabel(activeCalendar)}`}
+            title={activeCalendar ? `班次时刻 · ${calendarLabel(activeCalendar)}` : "班次时刻"}
             action={
-              editing === null && savedSequence.length >= 2 ? (
+              editing === null && savedSequence.length >= 2 && activeCalendar ? (
                 <button className="flex items-center gap-1 text-aux font-medium text-primary" onClick={startAddTrip} type="button">
                   <Plus size={14} /> 添加班次
                 </button>
@@ -489,10 +651,10 @@ export function TransitPage() {
               </thead>
               <tbody className="divide-y divide-line">
                 {trips.map((trip) => {
-                  const rows = timesByTrip.get(trip.id) ?? [];
+                  const rows = rowsForTrip(trip.id);
                   const first = rows[0];
                   const last = rows[rows.length - 1];
-                  const meta = POLICY_META[trip.bookingPolicy] ?? POLICY_META.not_required;
+                  const meta = POLICY_META[trip.bookingPolicy];
                   if (editing === trip.id) {
                     return (
                       <tr key={trip.id} className="bg-primary-container/40">

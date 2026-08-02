@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 import { Avatar } from "../../components/ui/Avatar";
 import { StatusPill, type StatusTone } from "../../components/ui/StatusPill";
 import { useRelease } from "../../lib/release/ReleaseContext";
-import { useCollectionTasks } from "../../lib/storage/collectionTasks";
+import { useLocalStore } from "../../lib/storage/localStore";
+import type { CollectionTaskMap } from "../../lib/storage/collectionTasks";
 import { useFavorites } from "../../lib/storage/favorites";
 import { useIdentity } from "../../lib/storage/identity";
 import { useRecents } from "../../lib/storage/recents";
@@ -66,8 +67,9 @@ export function ProfilePage() {
   const { favorites } = useFavorites();
   const { recents } = useRecents();
   const { submissions } = useSubmissionsLog();
-  const { collectedCount } = useCollectionTasks();
-  const { release } = useRelease();
+  const [collectionTasks] = useLocalStore<CollectionTaskMap>("shumap.collection-tasks", {});
+  const collectedCount = Object.values(collectionTasks).filter((task) => task.status === "submitted" || task.status === "accepted").length;
+  const releaseState = useRelease();
   const [editing, setEditing] = useState(false);
 
   const menu = [
@@ -192,7 +194,7 @@ export function ProfilePage() {
       </div>
 
       <div className="mt-6 text-center text-label text-sub">
-        SHUMap v2.0 · 数据版本 {release ? release.version : "—"}
+        SHUMap v2.0 · 数据版本 {releaseState.status === "ready" ? releaseState.release.version : "—"}
       </div>
 
       {SHOW_LOGIN && editing ? <IdentityEditor onClose={() => setEditing(false)} /> : null}

@@ -1,18 +1,20 @@
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
-import { campusConfigs } from "../../lib/release/mapData";
-import type { CampusKey } from "../../lib/types";
+import type { CampusConfig, CampusKey } from "../../lib/types";
 
 /** M1 左上角校区切换 pill + 下拉。 */
 export function CampusSwitcher({
   selectedCampus,
+  campuses,
   onSelect,
 }: {
   selectedCampus: CampusKey;
+  campuses: CampusConfig[];
   onSelect: (campus: CampusKey) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const current = campusConfigs.find((campus) => campus.key === selectedCampus) ?? campusConfigs[0];
+  const current = campuses.find((campus) => campus.key === selectedCampus);
+  if (!current) throw new Error(`Map data contract violation: unknown campus ${selectedCampus}`);
 
   return (
     <div className="relative">
@@ -28,7 +30,7 @@ export function CampusSwitcher({
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-11 z-20 w-[128px] overflow-hidden rounded-2xl bg-surface p-1 shadow-floating">
-            {campusConfigs.map((option) => (
+            {campuses.map((option) => (
               <button
                 key={option.key}
                 type="button"

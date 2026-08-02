@@ -1,14 +1,12 @@
-import { Building2, SearchX } from "lucide-react";
+import { Building2, CircleAlert, SearchX } from "lucide-react";
 import { Chip, ChipRow } from "../../components/ui/Chip";
-import { EmptyState } from "../../components/ui/EmptyState";
+import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { SectionHeader } from "../../components/ui/SectionHeader";
-import { filters } from "../../lib/release/mapData";
-import { useRelease } from "../../lib/release/ReleaseContext";
 import { useRecents } from "../../lib/storage/recents";
 import type { FilterKey, MapBuilding } from "../../lib/types";
-import { categoryLabel } from "./category";
+import type { MapSearchStatus } from "./useMapPageState";
 
 function PlaceSquareIcon() {
   return (
@@ -23,26 +21,34 @@ export function SearchHomeSheet({
   query,
   activeFilter,
   searchActive,
+  searchStatus,
+  searchError,
   results,
+  buildings,
+  filters,
   onQueryChange,
   onQueryFocus,
   onClearQuery,
+  onRetrySearch,
   onFilterToggle,
   onResultClick,
 }: {
   query: string;
   activeFilter: FilterKey | null;
   searchActive: boolean;
+  searchStatus: MapSearchStatus;
+  searchError: string;
   results: MapBuilding[];
+  buildings: MapBuilding[];
+  filters: Array<{ key: FilterKey; label: string }>;
   onQueryChange: (value: string) => void;
   onQueryFocus: () => void;
   onClearQuery: () => void;
+  onRetrySearch: () => void;
   onFilterToggle: (key: FilterKey) => void;
   onResultClick: (poiKey: string) => void;
 }) {
   const { recents } = useRecents();
-  const { release } = useRelease();
-  const buildings = release?.buildings ?? [];
   const recentBuildings = recents
     .map((view) => buildings.find((building) => building.poiKey === view.placeId))
     .filter((building): building is MapBuilding => Boolean(building))
@@ -52,29 +58,44 @@ export function SearchHomeSheet({
     <div className="flex h-full flex-col gap-3 px-4 pt-1 pb-3">
       <SearchInput value={query} onChange={onQueryChange} onFocus={onQueryFocus} />
 
-      <div className="shrink-0">
-        <SectionHeader
-          title="标签筛选"
-          action={
-            activeFilter ? (
-              <button type="button" className="text-primary" onClick={() => onFilterToggle(activeFilter)}>
-                全部 ›
-              </button>
-            ) : null
-          }
-        />
-        <ChipRow className="mt-2.5">
-          {filters.map((filter) => (
-            <Chip key={filter.key} active={activeFilter === filter.key} onClick={() => onFilterToggle(filter.key)}>
-              {filter.label}
-            </Chip>
-          ))}
-        </ChipRow>
-      </div>
+      {filters.length > 0 ? (
+        <div className="shrink-0">
+          <SectionHeader
+            title="标签筛选"
+            action={
+              activeFilter ? (
+                <button type="button" className="text-primary" onClick={() => onFilterToggle(activeFilter)}>
+                  全部 ›
+                </button>
+              ) : null
+            }
+          />
+          <ChipRow className="mt-2.5">
+            {filters.map((filter) => (
+              <Chip key={filter.key} active={activeFilter === filter.key} onClick={() => onFilterToggle(filter.key)}>
+                {filter.label}
+              </Chip>
+            ))}
+          </ChipRow>
+        </div>
+      ) : null}
 
       {searchActive ? (
         <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl bg-surface">
-          {results.length === 0 ? (
+          {query.trim() && searchStatus === "loading" ? (
+            <LoadingState label="正在搜索…" />
+          ) : query.trim() && searchStatus === "error" ? (
+            <EmptyState
+              icon={<CircleAlert size={24} />}
+              title="搜索失败"
+              subtitle={searchError || "请检查网络后重试"}
+              action={
+                <button type="button" className="rounded-full bg-primary-container px-4 py-2 text-body text-primary" onClick={onRetrySearch}>
+                  重新搜索
+                </button>
+              }
+            />
+          ) : results.length === 0 ? (
             <EmptyState
               icon={<SearchX size={24} />}
               title="没有相关搜索结果"
@@ -91,7 +112,7 @@ export function SearchHomeSheet({
                   key={building.poiKey}
                   icon={<PlaceSquareIcon />}
                   title={building.name}
-                  subtitle={`${categoryLabel(building)} · ${building.campusLabel}`}
+                  subtitle={`${building.kindName} · ${building.campusLabel}`}
                   onClick={() => onResultClick(building.poiKey)}
                 />
               ))}
@@ -107,7 +128,7 @@ export function SearchHomeSheet({
                 key={building.poiKey}
                 icon={<PlaceSquareIcon />}
                 title={building.name}
-                subtitle={`${categoryLabel(building)} · ${building.campusLabel}`}
+                subtitle={`${building.kindName} · ${building.campusLabel}`}
                 onClick={() => onResultClick(building.poiKey)}
               />
             ))}

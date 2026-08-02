@@ -2,7 +2,6 @@ export interface Env {
   DB: D1Database;
   ASSETS?: Fetcher;
   SHUMAP_BUCKET: R2Bucket;
-  RELEASE_KV: KVNamespace;
   IMPORT_QUEUE: Queue;
   RELEASE_COORDINATOR: DurableObjectNamespace;
   ADMIN_BOOTSTRAP_SECRET?: string;
@@ -63,6 +62,8 @@ export interface R2ObjectBody {
   readonly key: string;
   readonly size: number;
   readonly httpMetadata?: { contentType?: string };
+  readonly body: ReadableStream;
+  readonly bodyUsed: boolean;
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
   json<T>(): Promise<T>;

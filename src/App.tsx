@@ -11,6 +11,8 @@ import { CollectionFormPage } from "./pages/profile/CollectionFormPage";
 import { CollectionListPage } from "./pages/profile/CollectionListPage";
 import { ProfilePage } from "./pages/profile/ProfilePage";
 import { ShuttlePage } from "./pages/shuttle/ShuttlePage";
+import { VolunteerAuthProvider } from "./lib/auth/VolunteerAuthContext";
+import { VolunteerGate } from "./pages/profile/VolunteerGate";
 
 export function App() {
   return (
@@ -23,8 +25,10 @@ export function App() {
         <Route path="/offcampus" element={<OffCampusPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/feedback" element={<FeedbackPage />} />
-        <Route path="/collect" element={<CollectionListPage />} />
-        <Route path="/collect/:buildingId" element={<CollectionFormPage />} />
+        <Route element={<VolunteerAuthProvider><VolunteerGate /></VolunteerAuthProvider>}>
+          <Route path="/collect" element={<CollectionListPage />} />
+          <Route path="/collect/:buildingId" element={<CollectionFormPage />} />
+        </Route>
         <Route path="/places/:placeId/floors" element={<FloorsPage />} />
         <Route path="/places/:placeId/operations" element={<OperationsPage />} />
       </Route>

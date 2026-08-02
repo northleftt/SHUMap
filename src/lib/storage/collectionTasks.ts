@@ -5,8 +5,10 @@ import {
   saveCollectionTask as saveCollectionTaskApi,
   submitCollectionTask as submitCollectionTaskApi,
 } from "../api/public";
-import type { CollectionTaskDto } from "../api/types";
-import { collectionDeviceId, useIdentity } from "./identity";
+import type { CollectionTaskDto, CollectionTaskStatus, OwnedCollectionTaskDto } from "../api/types";
+import type { CollectionPayload } from "../../../shared/submission-contract";
+export type { CollectedFacility, CollectedFloor } from "../../../shared/submission-contract";
+import { collectionDeviceId } from "./identity";
 import { useLocalStore } from "./localStore";
 
 const KEY = "shumap.collection-tasks";
@@ -16,35 +18,13 @@ const PENDING_KEY = "shumap.collection-pending";
 const POLL_INTERVAL_MS = 30_000;
 const SAVE_DELAY_MS = 500;
 
-export type CollectionStatus = "pending" | "collecting" | "submitted" | "accepted" | "needs_recollection";
+export type CollectionStatus = "pending" | CollectionTaskStatus;
 
-export interface CollectedFacility {
-  id: string;
-  typeCode: string;
-  name: string;
-  locationText: string;
-}
-
-export interface CollectedFloor {
-  id: string;
-  levelCode: string;
-  note: string;
-  facilities: CollectedFacility[];
-  /** 该层平面图照片，已上传到隔离区的 media id（最多 2 张）。 */
-  photoMediaIds?: string[];
-}
-
-export interface CollectionTask {
+export interface CollectionTask extends CollectionPayload {
   buildingId: string;
-  status: CollectionStatus;
+  status: CollectionTaskStatus;
   assignee: string | null;
   owned: boolean;
-  openHours: string;
-  phone: string;
-  organization: string;
-  floors: CollectedFloor[];
-  /** 大门照片，已上传到隔离区的 media id（最多 3 张）。 */
-  photoMediaIds: string[];
   lockExpiresAt: string | null;
   updatedAt: string | null;
   submittedAt: string | null;
@@ -66,25 +46,17 @@ export interface CollectionStats {
   needsRecollection: number;
 }
 
-function emptyTask(buildingId: string, assignee: string): CollectionTask {
+function emptyPayload(): CollectionPayload {
   return {
-    buildingId,
-    status: "collecting",
-    assignee,
-    owned: true,
     openHours: "",
     phone: "",
     organization: "",
     floors: [],
     photoMediaIds: [],
-    lockExpiresAt: null,
-    updatedAt: new Date().toISOString(),
-    submittedAt: null,
-    pendingSync: false,
   };
 }
 
-function payloadOf(task: CollectionTask): Record<string, unknown> {
+function payloadOf(task: CollectionTask): CollectionPayload {
   return {
     openHours: task.openHours,
     phone: task.phone,
@@ -98,31 +70,28 @@ function payloadOf(task: CollectionTask): Record<string, unknown> {
  * 服务端行 -> 本机任务。
  *
  * 状态、领取人、锁与时间戳始终以服务器为准（跨设备协作只有一个真相）。
- * `keepLocalDraft` 为真时保留本机草稿正文——那是还没写回服务器的更新改动，
- * 不能被服务器上较旧的版本盖掉。
- *
- * 反之，当这栋楼已经不在本机手上时，本机缓存的正文一律丢弃：那是上一轮领取
- * 留下的旧文字，继续显示会被误当成别人的当前进展。
+ * 未持有任务时服务端不返回草稿正文，本机也不保留上一轮领取留下的内容。
  */
-function fromDto(dto: CollectionTaskDto, cached?: CollectionTask, keepLocalDraft = false): CollectionTask {
-  const payload = keepLocalDraft ? {} : (dto.payload ?? {});
-  const fallback = keepLocalDraft || dto.owned ? cached : undefined;
+function fromDto(dto: CollectionTaskDto): CollectionTask {
+  const payload = dto.owned ? dto.payload : emptyPayload();
   return {
     buildingId: dto.buildingId,
     status: dto.status,
     assignee: dto.assignee,
     owned: dto.owned,
-    openHours: typeof payload.openHours === "string" ? payload.openHours : (fallback?.openHours ?? ""),
-    phone: typeof payload.phone === "string" ? payload.phone : (fallback?.phone ?? ""),
-    organization: typeof payload.organization === "string" ? payload.organization : (fallback?.organization ?? ""),
-    floors: Array.isArray(payload.floors) ? (payload.floors as CollectedFloor[]) : (fallback?.floors ?? []),
-    photoMediaIds: Array.isArray(payload.photoMediaIds)
-      ? (payload.photoMediaIds as string[])
-      : (fallback?.photoMediaIds ?? []),
+    ...payload,
     lockExpiresAt: dto.lockExpiresAt,
     updatedAt: dto.updatedAt,
     submittedAt: dto.submittedAt,
-    pendingSync: keepLocalDraft,
+    pendingSync: false,
+  };
+}
+
+function fromOwnedDtoWithDraft(dto: OwnedCollectionTaskDto, draft: CollectionTask): CollectionTask {
+  return {
+    ...fromDto(dto),
+    ...payloadOf(draft),
+    pendingSync: true,
   };
 }
 
@@ -133,7 +102,7 @@ function fromDto(dto: CollectionTaskDto, cached?: CollectionTask, keepLocalDraft
 function localDraftWins(dto: CollectionTaskDto, pendingAt: string | undefined): boolean {
   if (!pendingAt) return false;
   if (!dto.owned || dto.status !== "collecting") return false;
-  return !dto.updatedAt || pendingAt > dto.updatedAt;
+  return pendingAt > dto.updatedAt;
 }
 
 /**
@@ -177,8 +146,6 @@ export function collectionStats(buildingIds: string[], tasks: CollectionTaskMap,
       case "needs_recollection":
         stats.needsRecollection += 1;
         break;
-      default:
-        stats.pending += 1;
     }
   }
   return stats;
@@ -188,7 +155,6 @@ export function useCollectionTasks() {
   const [tasks, setTasks] = useLocalStore<CollectionTaskMap>(KEY, {});
   const [lastSyncAt, setLastSyncAt] = useLocalStore<string | null>(SYNC_KEY, null);
   const [pending, setPending] = useLocalStore<PendingMap>(PENDING_KEY, {});
-  const [identity] = useIdentity();
   const [polling, setPolling] = useState(false);
   const [error, setError] = useState("");
   const saveTimers = useRef(new Map<string, number>());
@@ -220,7 +186,12 @@ export function useCollectionTasks() {
       // 服务器已收下这一版；期间若又有新编辑（updatedAt 变了）则继续保持待同步。
       const latest = tasksRef.current[buildingId];
       const changedMeanwhile = Boolean(latest?.updatedAt && latest.updatedAt > attemptAt);
-      setTasks((all) => ({ ...all, [buildingId]: fromDto(task, all[buildingId], changedMeanwhile) }));
+      setTasks((all) => {
+        if (!changedMeanwhile) return { ...all, [buildingId]: fromDto(task) };
+        const draft = all[buildingId];
+        if (!draft) throw new Error(`Collection draft ${buildingId} is missing`);
+        return { ...all, [buildingId]: fromOwnedDtoWithDraft(task, draft) };
+      });
       if (!changedMeanwhile) markPending(buildingId, null);
       setLastSyncAt(new Date().toISOString());
       setError("");
@@ -246,12 +217,14 @@ export function useCollectionTasks() {
         const next: CollectionTaskMap = {};
         for (const dto of response.items) {
           const keepLocal = localDraftWins(dto, pendingNow[dto.buildingId]);
-          next[dto.buildingId] = fromDto(dto, current[dto.buildingId], keepLocal);
+          if (keepLocal) {
+            const draft = current[dto.buildingId];
+            if (!draft || !dto.owned) throw new Error(`Collection draft ${dto.buildingId} violates ownership`);
+            next[dto.buildingId] = fromOwnedDtoWithDraft(dto, draft);
+          } else {
+            next[dto.buildingId] = fromDto(dto);
+          }
           if (pendingNow[dto.buildingId] && !keepLocal) stale.push(dto.buildingId);
-        }
-        // 服务器上还没有的本机草稿（例如离线期间的编辑）不能丢。
-        for (const [buildingId, task] of Object.entries(current)) {
-          if (!next[buildingId] && pendingNow[buildingId]) next[buildingId] = { ...task, pendingSync: true };
         }
         return next;
       });
@@ -290,10 +263,10 @@ export function useCollectionTasks() {
 
   const startCollection = async (buildingId: string): Promise<boolean> => {
     try {
-      const response = await claimCollectionTask(buildingId, { deviceId, assigneeName: identity.name });
+      const response = await claimCollectionTask(buildingId, { deviceId });
       setTasks((current) => ({
         ...current,
-        [buildingId]: fromDto(response.task, current[buildingId] ?? emptyTask(buildingId, identity.name)),
+        [buildingId]: fromDto(response.task),
       }));
       setLastSyncAt(new Date().toISOString());
       setError("");
@@ -326,7 +299,7 @@ export function useCollectionTasks() {
     if (timer) window.clearTimeout(timer);
     try {
       const response = await submitCollectionTaskApi(buildingId, { deviceId, payload: payloadOf(current) });
-      setTasks((all) => ({ ...all, [buildingId]: fromDto(response.task, all[buildingId]) }));
+      setTasks((all) => ({ ...all, [buildingId]: fromDto(response.task) }));
       markPending(buildingId, null);
       setLastSyncAt(new Date().toISOString());
       setError("");

@@ -1,8 +1,8 @@
 import type { SessionPrincipal } from "../domain/types";
 import type { Env } from "../types/cloudflare";
 import { all, assertExists, first } from "../lib/db";
-import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, jsonString, makeId, objectValue, optionalString, requiredString, sha256 } from "../lib/values";
+import { HttpError, json, readBodyLimited, readJson } from "../lib/http";
+import { isoNow, jsonString, makeId, optionalString, requiredString, sha256 } from "../lib/values";
 import { audit } from "./audit";
 
 interface CreateMapUploadBody {
@@ -20,12 +20,11 @@ interface CreateImportJobBody {
   campusId?: string | null;
   floorId?: string | null;
   versionLabel: string;
-  coordinateSpaceType: "svg_viewbox" | "normalized_image" | "local_metric" | "geographic";
-  coordinateSpace: Record<string, unknown>;
 }
 
 const ASSET_TYPES = ["campus_svg", "floor_svg", "floor_image", "geojson", "source_cad", "source_bim", "source_pdf"];
 const IMPORT_CONTENT_TYPES = new Set(["image/svg+xml", "image/png", "image/jpeg", "application/pdf", "application/json", "application/octet-stream"]);
+const MAX_MAP_ASSET_BYTES = 50 * 1024 * 1024;
 
 export async function createMapUploadIntent(
   request: Request,
@@ -37,7 +36,7 @@ export async function createMapUploadIntent(
   const originalName = requiredString(body.originalName, "originalName", 300);
   const contentType = requiredString(body.contentType, "contentType", 100).toLowerCase();
   if (!IMPORT_CONTENT_TYPES.has(contentType)) throw new HttpError(415, "unsupported_media_type", "Unsupported map source type");
-  if (!Number.isSafeInteger(body.byteSize) || body.byteSize <= 0 || body.byteSize > 50 * 1024 * 1024) {
+  if (!Number.isSafeInteger(body.byteSize) || body.byteSize <= 0 || body.byteSize > MAX_MAP_ASSET_BYTES) {
     throw new HttpError(400, "validation_error", "Map source must be between 1 byte and 50 MiB");
   }
   if (!/^[a-f0-9]{64}$/i.test(body.sha256)) throw new HttpError(400, "validation_error", "sha256 must be a hexadecimal SHA-256 digest");
@@ -68,7 +67,10 @@ export async function uploadMapContent(
   if (!media) throw new HttpError(404, "not_found", "Media asset does not exist");
   if (media.uploaded_by !== principal.userId && !principal.permissions.includes("*")) throw new HttpError(403, "forbidden", "Only the creator can upload this asset");
   if (media.status !== "quarantined") throw new HttpError(409, "invalid_state", "Media asset is not accepting content");
-  const bytes = await request.arrayBuffer();
+  if (!Number.isSafeInteger(media.byte_size) || media.byte_size <= 0 || media.byte_size > MAX_MAP_ASSET_BYTES) {
+    throw new Error(`Media ${mediaId} has invalid stored byte size ${media.byte_size}`);
+  }
+  const bytes = await readBodyLimited(request, media.byte_size);
   if (bytes.byteLength !== media.byte_size) throw new HttpError(400, "size_mismatch", "Uploaded size does not match declared size");
   const digest = await sha256(bytes);
   if (digest !== media.sha256) throw new HttpError(400, "checksum_mismatch", "Uploaded checksum does not match declared checksum");
@@ -90,15 +92,21 @@ export async function enqueueMapImport(
   if ((campusId ? 1 : 0) + (floorId ? 1 : 0) !== 1) {
     throw new HttpError(400, "validation_error", "Exactly one of campusId or floorId is required");
   }
-  const media = await first<{ id: string; status: string }>(env.DB, "select id,status from media_assets where id=?", [mediaAssetId]);
+  const media = await first<{ id: string; status: string; content_type: string }>(
+    env.DB,
+    "select id,status,content_type from media_assets where id=?",
+    [mediaAssetId],
+  );
   if (!media || media.status !== "approved") throw new HttpError(409, "media_not_ready", "Media must be uploaded and approved first");
+  if (media.content_type !== "image/svg+xml") {
+    throw new HttpError(415, "unsupported_media_type", "Map import requires an SVG media asset");
+  }
   await Promise.all([
     assertExists(env.DB, "campuses", campusId, "Campus"),
     assertExists(env.DB, "floors", floorId, "Floor"),
   ]);
   const versionLabel = requiredString(body.versionLabel, "versionLabel", 100);
-  const coordinateSpace = objectValue(body.coordinateSpace, "coordinateSpace");
-  const payload = { mediaAssetId, campusId, floorId, versionLabel, coordinateSpaceType: body.coordinateSpaceType, coordinateSpace };
+  const payload = { mediaAssetId, campusId, floorId, versionLabel };
   const idempotencyKey = await sha256(jsonString(payload));
   const existing = await first<{ id: string; status: string }>(env.DB, "select id,status from jobs where idempotency_key=?", [idempotencyKey]);
   if (existing) return json(existing, { status: 202 });
@@ -125,8 +133,14 @@ export async function listMapFeatures(request: Request, env: Env): Promise<Respo
   const items = await all(
     env.DB,
     `select id,map_version_id as mapVersionId,stable_feature_key as stableFeatureKey,source_element_id as sourceElementId,
-            feature_kind as kind,label,geometry_json as geometryJson,bbox_json as bboxJson,shape_hash as shapeHash,
-            metadata_json as metadataJson
+            feature_kind as kind,label,geometry_json as geometryJson,json_extract(geometry_json,'$.type') as geometryType,
+            bbox_json as bboxJson,shape_hash as shapeHash,
+            metadata_json as metadataJson,
+            (select el.entity_id
+               from location_anchors la join entity_locations el on el.anchor_id=la.id
+              where la.map_feature_id=map_features.id and la.role='footprint' and la.valid_to is null
+                and el.entity_type='place' and el.role='footprint' and el.valid_to is null
+              limit 1) as footprintPlaceId
        from map_features where map_version_id=? order by feature_kind, coalesce(label, source_element_id)`,
     [mapVersionId],
   );

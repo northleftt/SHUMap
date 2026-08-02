@@ -10,6 +10,5 @@
     "isolatedModules": true,
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["./**/*.ts"],
-  "exclude": ["./index.ts"]
+  "include": ["./**/*.ts"]
 }

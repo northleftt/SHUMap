@@ -1,17 +1,15 @@
 import { Building2, ChevronLeft, ChevronRight, Clock, Heart, Navigation, Phone, Store, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getPlace } from "../../lib/api/public";
 import type { OperationalEvent } from "../../lib/api/types";
 import { IconBadge } from "../../components/ui/IconBadge";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SeverityBanner, severityOf } from "../../components/ui/SeverityBanner";
 import { facilityIcon } from "../../lib/facilityIcons";
-import { useAsyncData } from "../../lib/hooks/useAsyncData";
+import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
 import { MapAppSheet, type MapTarget } from "../../lib/nav";
 import { useFavorites } from "../../lib/storage/favorites";
 import type { MapBuilding, MerchantSummary, PoiDetailData } from "../../lib/types";
-import { categoryLabel } from "./category";
 
 const FACT_ICONS = [Clock, Building2, Phone];
 
@@ -22,17 +20,18 @@ export function PoiDetailSheet({
   initialMerchantId = null,
 }: {
   building: MapBuilding;
-  events: OperationalEvent[];
+  events: OperationalEvent[] | null;
   /** 深链/搜索命中商户时直接展开该商户视图。 */
   initialMerchantId?: string | null;
 }) {
   const navigate = useNavigate();
-  // 外部地图用「校区名 + 楼栋名」关键字定位，不依赖 release 里是否拾取过经纬度，
-  // 所以任何楼宇都能导航（旧实现缺坐标时按钮是禁用的）。
   const [navTarget, setNavTarget] = useState<MapTarget | null>(null);
   const [openMerchantId, setOpenMerchantId] = useState<string | null>(initialMerchantId);
   const { isFavorite, toggleFavorite } = useFavorites();
   const favorite = isFavorite(building.poiKey);
+  const buildingNavigationTarget = building.navigationUrls
+    ? { label: building.name, navigationUrls: building.navigationUrls }
+    : null;
 
   // 切换楼宇（或外部指定商户）时重置内嵌商户视图
   useEffect(() => {
@@ -42,19 +41,20 @@ export function PoiDetailSheet({
   const merchants = building.merchants;
   const openMerchant = merchants.find((merchant) => merchant.id === openMerchantId) ?? null;
 
-  const { state: placeState } = useAsyncData((signal) => getPlace(building.poiKey, signal), [building.poiKey]);
-  const facilities = placeState.status === "ready" && placeState.data ? placeState.data.facilities : [];
+  // 楼内设施来自发布快照；运营状态另走实时接口覆盖。
+  const facilityStatus = useFacilityStatus();
+  const facilities = building.facilities;
 
   // 运营信息槽位：targets 命中本楼或楼内设施的活动事件；无事件整体隐藏
   const facilityIds = new Set(facilities.map((facility) => facility.id));
-  const activeEvents = events.filter((event) =>
-    (event.targets ?? []).some(
+  const activeEvents = events?.filter((event) =>
+    event.targets.some(
       (target) =>
         (target.targetType === "place" && target.targetId === building.poiKey) ||
         (target.targetType === "facility" && facilityIds.has(target.targetId)),
     ),
-  );
-  const bannerEvent = activeEvents[0] ?? null;
+  ) ?? null;
+  const bannerEvent = activeEvents?.[0] ?? null;
 
   const facts = building.detail.facts;
   const media = building.detail.media.filter((item) => item.url.trim());
@@ -77,7 +77,7 @@ export function PoiDetailSheet({
         <div className="min-w-0 flex-1">
           <h2 className="text-detail">{building.name}</h2>
           <p className="mt-0.5 text-aux text-sub">
-            {categoryLabel(building)} · {building.campusLabel}
+            {building.kindName} · {building.campusLabel}
           </p>
         </div>
         <button
@@ -88,14 +88,16 @@ export function PoiDetailSheet({
         >
           <Heart size={19} className={favorite ? "fill-primary text-primary" : "text-sub"} />
         </button>
-        <button
-          type="button"
-          className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-primary px-4 text-body font-semibold text-white active:bg-primary-pressed"
-          onClick={() => setNavTarget({ campus: building.campusKey, placeName: building.name })}
-        >
-          <Navigation size={15} />
-          导航
-        </button>
+        {buildingNavigationTarget ? (
+          <button
+            type="button"
+            className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-primary px-4 text-body font-semibold text-white active:bg-primary-pressed"
+            onClick={() => setNavTarget(buildingNavigationTarget)}
+          >
+            <Navigation size={15} />
+            导航
+          </button>
+        ) : null}
       </div>
 
       <MapAppSheet target={navTarget} onClose={() => setNavTarget(null)} />
@@ -114,6 +116,10 @@ export function PoiDetailSheet({
       <div className="px-5">
         {/* 照片区：横滑轮播 + 真实分页点 */}
         <PhotoCarousel alt={building.name} media={media} />
+
+        {building.detail.summary.trim() ? (
+          <p className="mt-4 text-body font-medium leading-relaxed text-ink">{building.detail.summary}</p>
+        ) : null}
 
         {/* 信息字段行 */}
         {facts.length > 0 ? (
@@ -148,16 +154,32 @@ export function PoiDetailSheet({
               </button>
             }
           />
-          {facilities.length > 0 ? (
+          {facilityStatus.status === "error" && facilities.length > 0 ? (
+            <p className="mt-2 rounded-xl bg-error-bg px-3 py-2 text-aux text-error">
+              设施实时状态加载失败：{facilityStatus.message}
+            </p>
+          ) : null}
+          {facilityStatus.status === "loading" && facilities.length > 0 ? (
+            <p className="mt-2 text-aux text-sub">正在加载设施实时状态…</p>
+          ) : facilityStatus.status === "ready" && facilities.length > 0 ? (
             <div className="scrollbar-hidden mt-3 flex gap-4 overflow-x-auto pb-1">
               {facilities.map((facility) => {
                 const Icon = facilityIcon(facility.typeCode);
-                return <IconBadge key={facility.id} icon={<Icon size={16} />} label={facility.displayName || facility.typeName} />;
+                // 不可用的设施在指引里就标出来，免得点进楼层页才发现。
+                const statusLabel = facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, facility.id));
+                const name = facility.displayName || facility.typeName;
+                return (
+                  <IconBadge
+                    key={facility.id}
+                    icon={<Icon size={16} />}
+                    label={statusLabel ? `${name}（${statusLabel}）` : name}
+                  />
+                );
               })}
             </div>
-          ) : (
+          ) : facilities.length === 0 ? (
             <p className="mt-2 text-aux text-sub">该楼宇的设施信息正在完善中</p>
-          )}
+          ) : null}
         </div>
 
         {/* 楼内商户（release manifest merchants，按 hostPlaceId 归到本楼） */}
@@ -315,6 +337,7 @@ function MerchantDetailView({
       </div>
 
       <div className="px-5">
+        <PhotoCarousel alt={merchant.name} media={merchant.media} />
         {facts.length > 0 ? (
           <div className="mt-3 divide-y divide-line">
             {facts.map((fact) => {

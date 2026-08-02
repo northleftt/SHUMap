@@ -1,7 +1,7 @@
 import { ClipboardList, Plus, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { EmptyState } from "../../components/ui/EmptyState";
+import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SheetModal } from "../../components/ui/SheetModal";
@@ -9,6 +9,7 @@ import { listPublicFacilityTypes } from "../../lib/api/public";
 import { facilityIcon } from "../../lib/facilityIcons";
 import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
+import type { LoadedRelease } from "../../lib/release/mapData";
 import {
   isLockExpired,
   useCollectionTasks,
@@ -21,46 +22,77 @@ const MAX_ENTRANCE_PHOTOS = 3;
 const MAX_FLOOR_PHOTOS = 2;
 
 /**
- * 可选设施类型来自 GET /api/public/facility-types（只回启用中的类型），
- * 名称与后台「设施类型」维护界面完全一致；后台停用某个类型后这里立刻不再出现。
- * 取不到时留空，让志愿者只填其余字段，避免提交一批服务端会拒绝的类型编码。
+ * 设施类型身份来自 GET /api/public/facility-types；名称用于读取全部历史记录，
+ * 新增选项只取启用项。
  */
 interface FacilityTypeOption {
   code: string;
   label: string;
+  status: "active" | "disabled";
 }
+
+type FacilityTypeOptionsState =
+  | { status: "loading" }
+  | { status: "ready"; options: FacilityTypeOption[] }
+  | { status: "error"; message: string };
 
 let facilityTypeCache: FacilityTypeOption[] | null = null;
 
 function useFacilityTypeOptions() {
-  const [options, setOptions] = useState<FacilityTypeOption[]>(facilityTypeCache ?? []);
+  const [state, setState] = useState<FacilityTypeOptionsState>(() =>
+    facilityTypeCache === null
+      ? { status: "loading" }
+      : { status: "ready", options: facilityTypeCache },
+  );
 
   useEffect(() => {
-    if (facilityTypeCache) return;
+    if (facilityTypeCache !== null) return;
     const controller = new AbortController();
     listPublicFacilityTypes(controller.signal)
       .then((response) => {
-        facilityTypeCache = response.items.map((item) => ({ code: item.code, label: item.name }));
-        setOptions(facilityTypeCache);
+        facilityTypeCache = response.items.map((item) => ({
+          code: item.code,
+          label: item.name,
+          status: item.status,
+        }));
+        setState({ status: "ready", options: facilityTypeCache });
       })
-      .catch(() => {
-        // 类型表拉不到时保持空列表：下面的「添加设施」会提示稍后再试。
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({
+          status: "error",
+          message: error instanceof Error ? error.message : "设施种类加载失败",
+        });
       });
     return () => controller.abort();
   }, []);
 
   const labelFor = useCallback(
-    (code: string) => options.find((option) => option.code === code)?.label ?? code,
-    [options],
+    (code: string) => {
+      if (state.status !== "ready") throw new Error("设施类型身份表尚未加载完成");
+      const option = state.options.find((candidate) => candidate.code === code);
+      if (!option) throw new Error(`采集草稿引用了不存在的设施类型 ${code}`);
+      return option.label;
+    },
+    [state],
   );
 
-  return { options, labelFor };
+  return { ...state, labelFor };
 }
 
 let facilitySeq = 0;
 function nextLocalId(prefix: string): string {
   facilitySeq += 1;
   return `local_${prefix}_${Date.now().toString(36)}_${facilitySeq}`;
+}
+
+function normalizeLevelCode(value: string): string | null {
+  const raw = value.trim().toUpperCase();
+  const above = raw.match(/^F?(\d{1,3})$/);
+  if (above) return `F${Number(above[1])}`;
+  const below = raw.match(/^B(\d{1,2})$/);
+  if (below) return `B${Number(below[1])}`;
+  return null;
 }
 
 /**
@@ -128,12 +160,16 @@ function FloorDetailModal({
   onSave,
   onClose,
   typeOptions,
+  typeOptionsStatus,
+  typeOptionsMessage,
   typeLabelFor,
 }: {
   floor: CollectedFloor | null;
   onSave: (floor: CollectedFloor) => void;
   onClose: () => void;
   typeOptions: FacilityTypeOption[];
+  typeOptionsStatus: FacilityTypeOptionsState["status"];
+  typeOptionsMessage: string | null;
   typeLabelFor: (code: string) => string;
 }) {
   const [draft, setDraft] = useState<CollectedFloor | null>(floor);
@@ -219,7 +255,13 @@ function FloorDetailModal({
         </div>
 
         {addingType ? (
-          typeOptions.length ? (
+          typeOptionsStatus === "loading" ? (
+            <p className="mt-3 rounded-2xl bg-page px-4 py-3 text-aux text-sub">设施种类加载中…</p>
+          ) : typeOptionsStatus === "error" ? (
+            <p className="mt-3 rounded-2xl bg-error-bg px-4 py-3 text-aux text-error">
+              设施种类加载失败：{typeOptionsMessage}
+            </p>
+          ) : typeOptions.length ? (
             <div className="mt-3 flex flex-wrap gap-2">
               {typeOptions.map((option) => (
                 <button
@@ -243,7 +285,7 @@ function FloorDetailModal({
             </div>
           ) : (
             <p className="mt-3 rounded-2xl bg-page px-4 py-3 text-aux text-sub">
-              设施种类暂时读取不到，请检查网络后重新进入本页。
+              当前没有启用的设施种类。
             </p>
           )
         ) : (
@@ -259,7 +301,7 @@ function FloorDetailModal({
 
         <h3 className="mt-5 text-emphasis">现场照片（需要：该层平面图照片）</h3>
         <CollectionPhotoField
-          committed={draft.photoMediaIds ?? []}
+          committed={draft.photoMediaIds}
           maximum={MAX_FLOOR_PHOTOS}
           onCommittedChange={(ids) => setDraft({ ...draft, photoMediaIds: ids })}
           uploads={floorUploads}
@@ -272,7 +314,7 @@ function FloorDetailModal({
             // 新上传的照片在保存时并入该层，超出上限的多余项丢弃。
             onSave({
               ...draft,
-              photoMediaIds: [...(draft.photoMediaIds ?? []), ...floorUploads.mediaIds].slice(0, MAX_FLOOR_PHOTOS),
+              photoMediaIds: [...draft.photoMediaIds, ...floorUploads.mediaIds].slice(0, MAX_FLOOR_PHOTOS),
             });
             onClose();
           }}
@@ -286,14 +328,32 @@ function FloorDetailModal({
 
 /** M13 数据采集-表单。 */
 export function CollectionFormPage() {
+  const releaseState = useRelease();
+  if (releaseState.status === "loading") {
+    return <div className="h-full bg-page"><LoadingState label="正在加载采集楼宇…" /></div>;
+  }
+  if (releaseState.status !== "ready") {
+    return (
+      <div className="h-full bg-page px-5 pt-16">
+        <EmptyState
+          title={releaseState.status === "empty" ? "采集楼宇尚未发布" : "发布数据加载失败"}
+          subtitle={releaseState.status === "empty" ? "当前没有可采集的楼宇" : "请检查网络后重试"}
+        />
+      </div>
+    );
+  }
+  return <ReadyCollectionFormPage release={releaseState.release} />;
+}
+
+function ReadyCollectionFormPage({ release }: { release: LoadedRelease }) {
   const { buildingId = "" } = useParams();
   const navigate = useNavigate();
-  const { release } = useRelease();
   const { getTask, saveDraft, submitCollection, error } = useCollectionTasks();
-  const { options: typeOptions, labelFor: typeLabelFor } = useFacilityTypeOptions();
+  const typeOptionsState = useFacilityTypeOptions();
+  const typeLabelFor = typeOptionsState.labelFor;
 
   const building = useMemo(
-    () => release?.buildings.find((b) => b.poiKey === buildingId) ?? null,
+    () => release.buildings.find((b) => b.poiKey === buildingId) ?? null,
     [release, buildingId],
   );
   const task = getTask(buildingId);
@@ -306,7 +366,7 @@ export function CollectionFormPage() {
   const sessionIds = useRef(new Set<string>());
   for (const mediaId of entranceUploads.mediaIds) sessionIds.current.add(mediaId);
 
-  const draftPhotoIds = task?.photoMediaIds ?? [];
+  const draftPhotoIds = task === null ? [] : task.photoMediaIds;
   const entranceCommitted = draftPhotoIds.filter((id) => !sessionIds.current.has(id));
   const desiredPhotoIds = [...entranceCommitted, ...entranceUploads.mediaIds].slice(0, MAX_ENTRANCE_PHOTOS);
 
@@ -317,6 +377,15 @@ export function CollectionFormPage() {
     if (desiredKey === draftPhotoIds.join(",")) return;
     saveDraft(buildingId, { photoMediaIds: desiredKey ? desiredKey.split(",") : [] });
   }, [buildingId, desiredKey, draftPhotoIds, saveDraft, task]);
+
+  if (!building) {
+    return (
+      <div className="flex h-full flex-col bg-page">
+        <PageHeader title="数据采集" onBack={() => navigate("/collect")} />
+        <EmptyState title="楼宇不在当前发布版本中" subtitle="请返回采集列表选择已发布楼宇" />
+      </div>
+    );
+  }
 
   if (!task) {
     return (
@@ -335,6 +404,23 @@ export function CollectionFormPage() {
             </button>
           }
         />
+      </div>
+    );
+  }
+
+  if (typeOptionsState.status === "loading") {
+    return (
+      <div className="flex h-full flex-col bg-page">
+        <PageHeader title={`${building.name} · 数据采集`} onBack={() => navigate("/collect")} />
+        <LoadingState label="正在加载设施类型…" />
+      </div>
+    );
+  }
+  if (typeOptionsState.status === "error") {
+    return (
+      <div className="flex h-full flex-col bg-page">
+        <PageHeader title={`${building.name} · 数据采集`} onBack={() => navigate("/collect")} />
+        <EmptyState title="设施类型加载失败" subtitle={typeOptionsState.message} />
       </div>
     );
   }
@@ -365,7 +451,7 @@ export function CollectionFormPage() {
   return (
     <div className="flex h-full flex-col bg-page">
       <PageHeader
-        title={`${building?.name ?? "楼宇"} · 数据采集`}
+        title={`${building.name} · 数据采集`}
         onBack={() => navigate("/collect")}
       />
 
@@ -407,13 +493,23 @@ export function CollectionFormPage() {
                 task.floors.length > 0 ? "border-t border-line" : ""
               }`}
               onClick={() => {
-                const level = window.prompt("楼层名称（如 一层 / 3F）");
-                if (!level?.trim()) return;
+                const level = window.prompt("楼层编号（如 F3 / B1）");
+                if (level === null) return;
+                const levelCode = normalizeLevelCode(level);
+                if (levelCode === null) {
+                  window.alert("楼层编号格式无效，请填写 F3 或 B1");
+                  return;
+                }
+                if (task.floors.some((floor) => floor.levelCode === levelCode)) {
+                  window.alert("这个楼层已经存在");
+                  return;
+                }
                 const floor: CollectedFloor = {
                   id: nextLocalId("floor"),
-                  levelCode: level.trim(),
+                  levelCode,
                   note: "",
                   facilities: [],
+                  photoMediaIds: [],
                 };
                 saveDraft(buildingId, { floors: [...task.floors, floor] });
                 setEditingFloor(floor);
@@ -492,7 +588,9 @@ export function CollectionFormPage() {
           })
         }
         typeLabelFor={typeLabelFor}
-        typeOptions={typeOptions}
+        typeOptions={typeOptionsState.options.filter((option) => option.status === "active")}
+        typeOptionsMessage={null}
+        typeOptionsStatus={typeOptionsState.status}
       />
     </div>
   );

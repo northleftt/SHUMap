@@ -1,15 +1,8 @@
+import type { PublicPlaceFacility } from "./api/types";
+
 export type CampusKey = "baoshan" | "jiading" | "yanchang";
 
-export type FilterKey =
-  | "teaching"
-  | "office"
-  | "dorm"
-  | "canteen"
-  | "library"
-  | "commercial"
-  | "printing"
-  | "parking"
-  | "powerBank";
+export type FilterKey = string;
 
 export type MapSheetMode =
   | "fullscreen_map"
@@ -57,6 +50,7 @@ export interface MerchantSummary {
   phone: string;
   avgPrice: string;
   summary: string;
+  media: PoiDetailData["media"];
   floorId: string | null;
   menu: MerchantMenuItem[];
 }
@@ -69,8 +63,10 @@ export interface NavigationUrls {
 }
 
 export interface CampusConfig {
+  id: string;
   key: CampusKey;
   label: string;
+  mapVersionId: string;
   svgRaw: string;
   focusPoint: { x: number; y: number };
   scaleMultiplier: number;
@@ -83,24 +79,33 @@ export interface CampusConfig {
 /**
  * A release-derived building rendered on the campus map.
  *
- * - `id` / `poiKey`: the stable place ID — the sole business identity.
- * - `svgElementId`: render-only selector for the campus SVG. Never a business ID.
+ * `id` / `poiKey` is the stable place ID and the sole business identity.
  */
 export interface MapBuilding {
   id: string;
   poiKey: string;
-  svgElementId: string;
+  revisionId: string;
+  mapFeatureId: string;
+  mapVersionId: string;
+  sourceElementId: string;
   name: string;
   campusKey: CampusKey;
   campusLabel: string;
-  category: string;
   kindId: string;
+  kindName: string;
   filterGroups: FilterKey[];
-  tags: string[];
   detail: PoiDetailData;
   navigationUrls: NavigationUrls | null;
+  /** 楼内设施已经由同一 release 解析并挂到楼宇。 */
+  facilities: PublicPlaceFacility[];
   /** 楼内商户（release manifest 的 merchants 按 hostPlaceId 归组）。 */
   merchants: MerchantSummary[];
+}
+
+/** The only rendering identity MapCanvas accepts from application code. */
+export interface MapFeatureBinding {
+  id: string;
+  sourceElementId: string;
 }
 
 export interface MapViewport {

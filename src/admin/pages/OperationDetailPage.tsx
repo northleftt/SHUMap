@@ -2,10 +2,13 @@ import { Hexagon, MapPin, Route } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
+import { parseGeoGeometryJson } from "../../lib/geoGeometry";
+import { oneOf } from "../../lib/dataContract";
 import { useAuth } from "../AuthContext";
 import type { OperationalEventRow, SpacesResponse } from "../adminTypes";
 import {
   Chip,
+  EmptyState,
   ErrorBanner,
   EVENT_TYPE_LABELS,
   GhostButton,
@@ -37,39 +40,35 @@ interface EventUpdate {
   createdAt: string;
 }
 
+type OperationDetailEvent = OperationalEventRow & {
+  targets: Array<{ targetType: string; targetId: string }>;
+  updates: EventUpdate[];
+  locations: admin.OperationLocationRow[];
+};
+
 const UPDATE_STATUS_META: Record<string, { label: string; tone: "info" | "warning" | "ok" }> = {
   progress: { label: "进展", tone: "info" },
   delayed: { label: "延期", tone: "warning" },
   resolved: { label: "恢复", tone: "ok" },
 };
 
-const GEOMETRY_ROLE_META: Record<string, { label: string; icon: typeof MapPin }> = {
+const OPERATION_LOCATION_ROLES = ["event_location", "impact_area", "route_shape"] as const;
+
+const GEOMETRY_ROLE_META: Record<admin.OperationLocationRole, { label: string; icon: typeof MapPin }> = {
   event_location: { label: "事件位置", icon: MapPin },
   impact_area: { label: "影响区域", icon: Hexagon },
   route_shape: { label: "绕行路径", icon: Route },
 };
 
 /** "12 顶点" / "x 431 · y 208" 之类的尺寸摘要，用于几何概要行。 */
-function geometrySummary(raw: string | null): string {
-  if (!raw) return "";
-  try {
-    const geometry = JSON.parse(raw) as { type?: string; coordinates?: unknown };
-    if (geometry.type === "Point" && Array.isArray(geometry.coordinates)) {
-      const [x, y] = geometry.coordinates as number[];
-      return `x ${x} · y ${y}`;
-    }
-    if (geometry.type === "LineString" && Array.isArray(geometry.coordinates)) {
-      return `${geometry.coordinates.length} 顶点`;
-    }
-    if (geometry.type === "Polygon" && Array.isArray(geometry.coordinates)) {
-      const ring = (geometry.coordinates as unknown[])[0];
-      // GeoJSON 环首尾重复，顶点数减一
-      if (Array.isArray(ring)) return `${Math.max(ring.length - 1, 0)} 顶点`;
-    }
-    return "";
-  } catch {
-    return "";
+function geometrySummary(raw: string | null, locationId: string): string {
+  const geometry = parseGeoGeometryJson(raw, `operation location ${locationId}.geometryJson`);
+  if (geometry.type === "Point") {
+    const [x, y] = geometry.coordinates;
+    return `x ${x} · y ${y}`;
   }
+  if (geometry.type === "LineString") return `${geometry.coordinates.length} 顶点`;
+  return `${geometry.coordinates[0].length - 1} 顶点`;
 }
 
 export function OperationDetailPage() {
@@ -80,15 +79,21 @@ export function OperationDetailPage() {
 
   const { state, reload } = useAsyncData(async (signal) => {
     const [list, spaces] = await Promise.all([
-      admin.listAdminOperations<OperationalEventRow & {
-        targets?: Array<{ targetType: string; targetId: string }>;
-        updates?: EventUpdate[];
-        locations?: admin.OperationLocationRow[];
-      }>(signal),
+      admin.listAdminOperations<OperationDetailEvent>(signal),
       admin.listSpaces<SpacesResponse>(signal),
     ]);
     const event = list.items.find((e) => e.id === id);
     if (!event) throw new Error("事件不存在");
+    if (!Array.isArray(event.targets)) throw new Error(`事件 ${id} 缺少关联对象列表`);
+    if (!Array.isArray(event.updates)) throw new Error(`事件 ${id} 缺少进展列表`);
+    if (!Array.isArray(event.locations)) throw new Error(`事件 ${id} 缺少位置列表`);
+    for (const location of event.locations) {
+      oneOf(location.role, `operation location ${location.id}.role`, OPERATION_LOCATION_ROLES);
+      const geometry = parseGeoGeometryJson(location.geometryJson, `operation location ${location.id}.geometryJson`);
+      if (location.geometryType !== geometry.type) {
+        throw new Error(`Data contract violation: operation location ${location.id}.geometryType must match geometryJson.type`);
+      }
+    }
     return { event, campuses: spaces.campuses };
   }, [id]);
 
@@ -102,8 +107,8 @@ export function OperationDetailPage() {
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
   const event = state.data!.event;
   const campuses = state.data!.campuses;
-  const locations = event.locations ?? [];
-  const updates = (event.updates ?? []).slice().sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
+  const locations = event.locations;
+  const updates = event.updates.slice().sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1));
   const ended = event.operationalStatus === "resolved" || event.operationalStatus === "expired" || event.operationalStatus === "cancelled";
 
   async function publishUpdate() {
@@ -184,10 +189,10 @@ export function OperationDetailPage() {
       >
         <div className="space-y-2 p-5">
           {locations.length === 0 ? (
-            <InfoNote>该事件尚未标注地图几何{canWrite ? "，可通过「编辑几何」在地图上绘制位置 / 影响区域 / 绕行路径。" : "。"}</InfoNote>
+            <EmptyState label="暂无地图几何" />
           ) : (
             locations.map((location) => {
-              const meta = GEOMETRY_ROLE_META[location.role] ?? { label: location.role, icon: MapPin };
+              const meta = GEOMETRY_ROLE_META[location.role];
               const Icon = meta.icon;
               const campus = campuses.find((row) => row.id === location.campusId);
               return (
@@ -196,7 +201,7 @@ export function OperationDetailPage() {
                     <Icon size={15} className="shrink-0 text-primary" />
                     <span className="font-medium">{meta.label}</span>
                     <span className="truncate text-sub">
-                      {geometrySummary(location.geometryJson)}
+                      {geometrySummary(location.geometryJson, location.id)}
                     </span>
                   </div>
                   <div className="flex shrink-0 items-center gap-1.5">

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { parseSvgViewBox, type SvgViewBox } from "../../../shared/svg-geometry.mjs";
 import { fetchMapAssetSvg } from "../../lib/api/public";
 import { facilityIcon } from "../../lib/facilityIcons";
+import { sanitizeSvg } from "../../lib/svg/sanitize";
 import { EmptyState, LoadingState } from "../ui/EmptyState";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +32,6 @@ type Size = { width: number; height: number };
 type Point = { x: number; y: number };
 type ViewWindow = { x: number; y: number; width: number; height: number };
 
-const FALLBACK_VIEWBOX = { x: 0, y: 0, width: 1000, height: 1000 };
 const DEFAULT_CONTAINER: Size = { width: 390, height: 520 };
 const MAX_ZOOM = 8;
 const EDGE_PADDING_RATIO = 0.12;
@@ -40,44 +41,13 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-function parseViewBox(svgRaw: string) {
-  const match = svgRaw.match(/viewBox\s*=\s*"([^"]+)"/i);
-  if (!match) return FALLBACK_VIEWBOX;
-  const [x, y, width, height] = match[1].trim().split(/[\s,]+/).map(Number);
-  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) return FALLBACK_VIEWBOX;
-  return { x, y, width, height };
-}
-
 /**
  * 底图 SVG 来自上传资产而非仓库内静态文件，内联进应用 DOM 前先净化：
  * innerHTML 不执行 <script>，但 on* 事件属性、javascript: href、foreignObject
  * 里的 HTML 都会活过来。白名单之外一律剥掉，解析失败返回 null 由调用方报错。
  */
-function sanitizeSvg(raw: string): string | null {
-  const doc = new DOMParser().parseFromString(raw, "image/svg+xml");
-  const root = doc.documentElement;
-  if (!root || root.tagName.toLowerCase() !== "svg" || doc.querySelector("parsererror")) return null;
-  const banned = ["script", "foreignObject", "iframe", "object", "embed", "animate", "set"];
-  for (const tag of banned) {
-    for (const node of Array.from(doc.getElementsByTagName(tag))) node.remove();
-  }
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
-  const elements: Element[] = [root];
-  while (walker.nextNode()) elements.push(walker.currentNode as Element);
-  for (const element of elements) {
-    for (const attr of Array.from(element.attributes)) {
-      const name = attr.name.toLowerCase();
-      const value = attr.value.trim().toLowerCase();
-      if (name.startsWith("on")) element.removeAttribute(attr.name);
-      else if ((name === "href" || name === "xlink:href") && !value.startsWith("#")) element.removeAttribute(attr.name);
-      else if (name === "style" && value.includes("url(")) element.removeAttribute(attr.name);
-    }
-  }
-  return new XMLSerializer().serializeToString(root);
-}
-
 /** 整图适配容器（保持容器宽高比，短边留白居中）。 */
-function fitWindow(viewBox: typeof FALLBACK_VIEWBOX, container: Size): ViewWindow {
+function fitWindow(viewBox: SvgViewBox, container: Size): ViewWindow {
   const containerAspect = container.width / Math.max(container.height, 1);
   const boxAspect = viewBox.width / viewBox.height;
   let width = viewBox.width;
@@ -98,7 +68,7 @@ function fitWindow(viewBox: typeof FALLBACK_VIEWBOX, container: Size): ViewWindo
  */
 function clampWindow(
   window: ViewWindow,
-  viewBox: typeof FALLBACK_VIEWBOX,
+  viewBox: SvgViewBox,
   minWidth: number,
   maxWidth: number,
 ): ViewWindow {
@@ -148,7 +118,7 @@ export function FloorPlanCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const windowRef = useRef<ViewWindow>({ ...FALLBACK_VIEWBOX });
+  const windowRef = useRef<ViewWindow | null>(null);
   const initializedRef = useRef(false);
   const gestureRef = useRef({
     pointers: new Map<number, Point>(),
@@ -157,22 +127,29 @@ export function FloorPlanCanvas({
   });
 
   const [svgRaw, setSvgRaw] = useState<string | null>(null);
+  const [viewBox, setViewBox] = useState<SvgViewBox | null>(null);
   const [loadError, setLoadError] = useState("");
   const [container, setContainer] = useState<Size>(DEFAULT_CONTAINER);
-  const [viewWindow, setViewWindow] = useState<ViewWindow>({ ...FALLBACK_VIEWBOX });
+  const [viewWindow, setViewWindow] = useState<ViewWindow | null>(null);
 
-  const viewBox = useMemo(() => (svgRaw ? parseViewBox(svgRaw) : FALLBACK_VIEWBOX), [svgRaw]);
-  const maxWidth = useMemo(() => fitWindow(viewBox, container).width, [viewBox, container]);
-  const minWidth = maxWidth / MAX_ZOOM;
+  const maxWidth = useMemo(() => viewBox ? fitWindow(viewBox, container).width : null, [viewBox, container]);
+  const minWidth = maxWidth === null ? null : maxWidth / MAX_ZOOM;
 
   // 切换楼层 = 换 mapVersionId，重新取图并重置视野
   useEffect(() => {
     const controller = new AbortController();
     setSvgRaw(null);
+    setViewBox(null);
+    setViewWindow(null);
+    windowRef.current = null;
     setLoadError("");
     initializedRef.current = false;
     fetchMapAssetSvg(mapVersionId, controller.signal)
-      .then(setSvgRaw)
+      .then((raw) => {
+        const parsedViewBox = parseSvgViewBox(raw);
+        setViewBox(parsedViewBox);
+        setSvgRaw(raw);
+      })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setLoadError(error instanceof Error ? error.message : "底图读取失败");
@@ -215,7 +192,7 @@ export function FloorPlanCanvas({
     svg.prepend(style);
     svgRef.current = svg;
     const current = windowRef.current;
-    svg.setAttribute("viewBox", `${current.x} ${current.y} ${current.width} ${current.height}`);
+    if (current) svg.setAttribute("viewBox", `${current.x} ${current.y} ${current.width} ${current.height}`);
     return () => {
       svgRef.current = null;
       host.innerHTML = "";
@@ -224,13 +201,14 @@ export function FloorPlanCanvas({
 
   // 首次拿到底图尺寸/容器尺寸后适配整图；之后容器变化只保持中心与覆盖范围
   useEffect(() => {
-    if (!svgRaw) return;
+    if (!svgRaw || !viewBox || minWidth === null || maxWidth === null) return;
     if (!initializedRef.current) {
       initializedRef.current = true;
       setViewWindow(clampWindow(fitWindow(viewBox, container), viewBox, minWidth, maxWidth));
       return;
     }
     setViewWindow((current) => {
+      if (!current) return clampWindow(fitWindow(viewBox, container), viewBox, minWidth, maxWidth);
       const centerX = current.x + current.width / 2;
       const centerY = current.y + current.height / 2;
       const aspect = container.width / Math.max(container.height, 1);
@@ -241,13 +219,16 @@ export function FloorPlanCanvas({
   }, [svgRaw, viewBox, container, minWidth, maxWidth]);
 
   useEffect(() => {
+    if (!viewWindow) return;
     windowRef.current = viewWindow;
     svgRef.current?.setAttribute("viewBox", `${viewWindow.x} ${viewWindow.y} ${viewWindow.width} ${viewWindow.height}`);
   }, [viewWindow]);
 
   /** 以容器内某点为锚做缩放。 */
   function zoomAt(local: Point, factor: number) {
+    if (!viewBox || minWidth === null || maxWidth === null) return;
     setViewWindow((current) => {
+      if (!current) return null;
       const ratioX = local.x / Math.max(container.width, 1);
       const ratioY = local.y / Math.max(container.height, 1);
       const worldX = current.x + current.width * ratioX;
@@ -282,12 +263,15 @@ export function FloorPlanCanvas({
       gesture.pinch = null;
     } else if (gesture.pointers.size === 2) {
       const [a, b] = Array.from(gesture.pointers.values());
+      const currentWindow = windowRef.current;
+      if (!currentWindow) return;
       gesture.panFrom = null;
-      gesture.pinch = { distance: distance(a, b), window: windowRef.current, center: toLocal(midpoint(a, b)) };
+      gesture.pinch = { distance: distance(a, b), window: currentWindow, center: toLocal(midpoint(a, b)) };
     }
   }
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!viewBox || minWidth === null || maxWidth === null) return;
     const gesture = gestureRef.current;
     if (!gesture.pointers.has(event.pointerId)) return;
     gesture.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -315,7 +299,7 @@ export function FloorPlanCanvas({
     const dy = event.clientY - gesture.panFrom.y;
     gesture.panFrom = { x: event.clientX, y: event.clientY };
     setViewWindow((current) =>
-      clampWindow(
+      current ? clampWindow(
         {
           ...current,
           x: current.x - (dx / Math.max(container.width, 1)) * current.width,
@@ -324,7 +308,7 @@ export function FloorPlanCanvas({
         viewBox,
         minWidth,
         maxWidth,
-      ),
+      ) : null,
     );
   }
 
@@ -343,7 +327,7 @@ export function FloorPlanCanvas({
       </div>
     );
   }
-  if (!svgRaw) {
+  if (!svgRaw || !viewBox || !viewWindow) {
     return (
       <div className="grid h-full place-items-center">
         <LoadingState label="正在加载平面图…" />

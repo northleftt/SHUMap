@@ -31,23 +31,40 @@ import { SubmissionsPage } from "./pages/SubmissionsPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { FacilityTypesPage } from "./pages/FacilityTypesPage";
+import { MapFiltersPage } from "./pages/MapFiltersPage";
 
 // ===========================================================================
 // v2 管理后台（A1-A14）。深蓝侧边栏 + 顶栏 + 嵌套路由；
 // 各页面在 ./pages，共享原语在 ./components/primitives。
 // ===========================================================================
 
-const NAV = [
-  { to: "/admin", end: true, label: "概览", icon: LayoutGrid },
-  { to: "/admin/content", end: false, label: "内容管理", icon: FileText },
-  { to: "/admin/facility-types", end: false, label: "设施类型", icon: Tags },
-  { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
-  { to: "/admin/operations", end: false, label: "运营信息", icon: Megaphone },
-  { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus, permission: "write:transit" },
-  { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
-  { to: "/admin/submissions", end: false, label: "用户提交", icon: Inbox, permission: "review:content" },
-  { to: "/admin/releases", end: false, label: "发布中心", icon: Rocket, permission: "publish:release" },
-  { to: "/admin/users", end: false, label: "账户管理", icon: Users, permission: "manage:users" },
+const NAV_GROUPS = [
+  {
+    label: "内容与地图",
+    items: [
+      { to: "/admin/content", end: false, label: "内容管理", icon: FileText },
+      { to: "/admin/facility-types", end: false, label: "设施类型", icon: Tags },
+      { to: "/admin/map-filters", end: false, label: "地图标签", icon: Tags },
+      { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
+      { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
+      { to: "/admin/releases", end: false, label: "发布中心", icon: Rocket, permission: "publish:release" },
+    ],
+  },
+  {
+    label: "实时运营",
+    items: [
+      { to: "/admin/operations", end: false, label: "运营信息", icon: Megaphone },
+      { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus, permission: "write:transit" },
+      { to: "/admin/submissions", end: false, label: "用户提交", icon: Inbox, permission: "review:content" },
+    ],
+  },
+  {
+    label: "系统",
+    items: [
+      { to: "/admin", end: true, label: "概览", icon: LayoutGrid },
+      { to: "/admin/users", end: false, label: "账户管理", icon: Users, permission: "manage:users" },
+    ],
+  },
 ] as const;
 
 function titleFor(pathname: string): string {
@@ -57,6 +74,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/content/merchants/")) return "内容管理 · 商户编辑";
   if (pathname.startsWith("/admin/content")) return "内容管理";
   if (pathname.startsWith("/admin/facility-types")) return "设施类型管理";
+  if (pathname.startsWith("/admin/map-filters")) return "地图标签管理";
   if (pathname.startsWith("/admin/review")) return "审核中心";
   if (pathname.startsWith("/admin/operations/new")) return "新建运营事件 · 地图编辑器";
   if (pathname.endsWith("/edit") && pathname.startsWith("/admin/operations/")) return "运营事件 · 编辑几何";
@@ -98,7 +116,7 @@ function LoginPage() {
     <div className="grid h-full w-full place-items-center bg-page text-ink">
       <form className="w-[380px] rounded-2xl bg-surface p-7 shadow-card" onSubmit={submit}>
         <p className="text-detail">SHUMap 管理后台</p>
-        <p className="mt-1.5 text-body text-sub">使用管理员账号登录。会话通过安全 Cookie 维持。</p>
+        <p className="mt-1.5 text-body text-sub">请使用管理员账号登录</p>
         <div className="mt-6 space-y-4">
           <Field label="邮箱" value={email} onChange={setEmail} placeholder="admin@example.com" type="email" />
           <label className="block">
@@ -130,7 +148,12 @@ function LoginPage() {
 
 function Sidebar({ displayName, email }: { displayName: string; email: string }) {
   const { hasPermission } = useAuth();
-  const items = NAV.filter((item) => !("permission" in item) || !item.permission || hasPermission(item.permission));
+  const groups = NAV_GROUPS
+    .map((group) => ({
+      label: group.label,
+      items: group.items.filter((item) => !("permission" in item) || !item.permission || hasPermission(item.permission)),
+    }))
+    .filter((group) => group.items.length > 0);
   return (
     <aside className="flex min-h-0 w-[232px] shrink-0 flex-col bg-primary-pressed px-3 py-5 text-white">
       <div className="flex items-center gap-2.5 px-2 pb-6">
@@ -142,21 +165,26 @@ function Sidebar({ displayName, email }: { displayName: string; email: string })
           <p className="text-[10px] text-white/60">校园地图管理后台</p>
         </div>
       </div>
-      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto">
-        {items.map((item) => (
-          <NavLink
-            key={item.to}
-            end={item.end}
-            to={item.to}
-            className={({ isActive }) =>
-              `flex h-9.5 items-center gap-2.5 rounded-lg px-3 text-body font-medium transition-colors ${
-                isActive ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/8 hover:text-white"
-              }`
-            }
-          >
-            <item.icon size={16} />
-            {item.label}
-          </NavLink>
+      <nav className="min-h-0 flex-1 space-y-5 overflow-y-auto">
+        {groups.map((group) => (
+          <div className="space-y-1" key={group.label}>
+            <p className="px-3 pb-1 text-label font-semibold tracking-wide text-white/45">{group.label}</p>
+            {group.items.map((item) => (
+              <NavLink
+                key={item.to}
+                end={item.end}
+                to={item.to}
+                className={({ isActive }) =>
+                  `flex h-9.5 items-center gap-2.5 rounded-lg px-3 text-body font-medium transition-colors ${
+                    isActive ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/8 hover:text-white"
+                  }`
+                }
+              >
+                <item.icon size={16} />
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
       <div className="flex items-center gap-2.5 rounded-lg bg-white/8 p-3">
@@ -219,7 +247,7 @@ function Topbar({ displayName }: { displayName: string }) {
 // ---------------------------------------------------------------------------
 
 export function AdminPage() {
-  const { auth, loading, hasPermission } = useAuth();
+  const { auth, loading, sessionError, refresh, hasPermission, logout } = useAuth();
 
   const routes = useMemo(
     () => (
@@ -230,6 +258,7 @@ export function AdminPage() {
         <Route path="content/facilities/:id" element={hasPermission("write:content") ? <FacilityEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="content/merchants/:id" element={hasPermission("write:content") ? <MerchantEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="facility-types" element={<FacilityTypesPage />} />
+        <Route path="map-filters" element={hasPermission("write:content") ? <MapFiltersPage /> : <Navigate to="/admin" replace />} />
         <Route path="review" element={hasPermission("review:content") ? <ReviewPage /> : <Navigate to="/admin" replace />} />
         <Route path="operations" element={<OperationsPage />} />
         <Route path="operations/new" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />
@@ -254,7 +283,39 @@ export function AdminPage() {
     );
   }
 
+  if (sessionError) {
+    return (
+      <div className="grid h-full w-full place-items-center bg-page px-5 text-ink">
+        <div className="w-full max-w-md rounded-2xl bg-surface p-7 shadow-card">
+          <h1 className="text-detail">无法检查登录状态</h1>
+          <div className="mt-4"><ErrorBanner message={sessionError} /></div>
+          <button
+            className="mt-5 w-full rounded-lg bg-primary px-4 py-3 text-body font-semibold text-white"
+            onClick={() => void refresh()}
+            type="button"
+          >
+            重新加载
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!auth) return <LoginPage />;
+  if (!hasPermission("read:admin")) {
+    return (
+      <div className="grid h-full w-full place-items-center bg-page px-5 text-ink">
+        <div className="w-full max-w-md rounded-2xl bg-surface p-7 shadow-card">
+          <h1 className="text-detail">无后台访问权限</h1>
+          <p className="mt-2 text-body text-sub">当前账号仅可使用志愿者数据采集功能。</p>
+          <div className="mt-5 flex gap-3">
+            <button className="flex-1 rounded-lg bg-primary px-4 py-3 text-body font-semibold text-white" onClick={() => window.location.assign("/collect")} type="button">前往数据采集</button>
+            <button className="rounded-lg border border-line px-4 py-3 text-body font-semibold" onClick={() => void logout()} type="button">退出账号</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-page text-ink">

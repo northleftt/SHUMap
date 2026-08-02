@@ -19,33 +19,48 @@ const { groupMerchantsByPlace, normalizeMerchant } = await import(modulePath);
 
 test.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
+function merchant(overrides = {}) {
+  return {
+    id: "merchant_default",
+    organizationId: null,
+    hostPlaceId: "place_default",
+    floorId: null,
+    indoorSpaceId: null,
+    revisionId: "merchant_revision_default",
+    displayName: "门店",
+    businessType: null,
+    openingHours: null,
+    contact: null,
+    content: {},
+    contentHash: "hash",
+    ...overrides,
+  };
+}
+
 test("merchants group onto their host place and sort by name", () => {
   const grouped = groupMerchantsByPlace([
-    { id: "m2", hostPlaceId: "place_lib", displayName: "B 咖啡" },
-    { id: "m1", hostPlaceId: "place_lib", displayName: "A 面馆" },
-    { id: "m3", hostPlaceId: "place_canteen", displayName: "三食堂窗口" },
+    merchant({ id: "m2", hostPlaceId: "place_lib", displayName: "B 咖啡" }),
+    merchant({ id: "m1", hostPlaceId: "place_lib", displayName: "A 面馆" }),
+    merchant({ id: "m3", hostPlaceId: "place_canteen", displayName: "三食堂窗口" }),
   ]);
   assert.deepEqual([...grouped.keys()].sort(), ["place_canteen", "place_lib"]);
   assert.deepEqual(grouped.get("place_lib").map((m) => m.id), ["m1", "m2"]);
   assert.equal(grouped.get("place_canteen").length, 1);
 });
 
-test("outlets without a host place are dropped (no standalone merchant page)", () => {
-  const grouped = groupMerchantsByPlace([
-    { id: "m1", hostPlaceId: null, displayName: "无绑定门店" },
-    { id: "m2", hostPlaceId: "", displayName: "空绑定门店" },
-  ]);
-  assert.equal(grouped.size, 0);
+test("outlets without a host place violate the release contract", () => {
+  assert.throws(
+    () => groupMerchantsByPlace([merchant({ id: "m1", hostPlaceId: null })]),
+    /hostPlaceId must identify the place/,
+  );
 });
 
-test("a missing merchants array yields an empty grouping", () => {
-  assert.equal(groupMerchantsByPlace(undefined).size, 0);
-  assert.equal(groupMerchantsByPlace(null).size, 0);
+test("an empty merchants array yields an empty grouping", () => {
   assert.equal(groupMerchantsByPlace([]).size, 0);
 });
 
 test("extension fields are read from the merchant revision payload", () => {
-  const merchant = normalizeMerchant({
+  const normalized = normalizeMerchant(merchant({
     id: "m1",
     hostPlaceId: "place_lib",
     floorId: "floor_1",
@@ -54,63 +69,66 @@ test("extension fields are read from the merchant revision payload", () => {
     openingHours: { text: "08:00 - 20:00" },
     contact: { phone: "6613 5200" },
     content: { avgPrice: "¥15", stallCode: "A12", summary: "图书馆一层西侧" },
-  });
-  assert.equal(merchant.businessType, "咖啡轻食");
-  assert.equal(merchant.openingHours, "08:00 - 20:00");
-  assert.equal(merchant.phone, "6613 5200");
-  assert.equal(merchant.avgPrice, "¥15");
-  assert.equal(merchant.stallCode, "A12");
-  assert.equal(merchant.summary, "图书馆一层西侧");
-  assert.equal(merchant.floorId, "floor_1");
+  }));
+  assert.equal(normalized.businessType, "咖啡轻食");
+  assert.equal(normalized.openingHours, "08:00 - 20:00");
+  assert.equal(normalized.phone, "6613 5200");
+  assert.equal(normalized.avgPrice, "¥15");
+  assert.equal(normalized.stallCode, "A12");
+  assert.equal(normalized.summary, "图书馆一层西侧");
+  assert.equal(normalized.floorId, "floor_1");
 });
 
-test("opening hours and contact accept plain strings as well as objects", () => {
-  const merchant = normalizeMerchant({
-    id: "m1",
-    hostPlaceId: "place_lib",
-    displayName: "窗口",
-    openingHours: "07:00 - 19:00",
-    contact: "6613 0000",
-  });
-  assert.equal(merchant.openingHours, "07:00 - 19:00");
-  assert.equal(merchant.phone, "6613 0000");
+test("opening hours and contact require their canonical object shapes", () => {
+  assert.throws(
+    () => normalizeMerchant(merchant({ openingHours: "07:00 - 19:00" })),
+    /openingHours must be an object or null/,
+  );
+  assert.throws(
+    () => normalizeMerchant(merchant({ contact: "6613 0000" })),
+    /contact must be an object or null/,
+  );
 });
 
-test("content.menu is normalized: unnamed entries dropped, prices stringified", () => {
-  const merchant = normalizeMerchant({
+test("content.menu follows one exact schema", () => {
+  const normalized = normalizeMerchant(merchant({
     id: "m1",
     hostPlaceId: "place_lib",
     displayName: "校园咖啡",
     content: {
       menu: [
-        { name: "拿铁", price: 15, description: "中杯" },
+        { name: "拿铁", price: "¥15", description: "中杯" },
         { name: "美式" },
-        { price: "¥9" },
-        "not an object",
-        null,
       ],
     },
-  });
-  assert.deepEqual(merchant.menu, [
-    { name: "拿铁", price: "15", description: "中杯" },
+  }));
+  assert.deepEqual(normalized.menu, [
+    { name: "拿铁", price: "¥15", description: "中杯" },
     { name: "美式", price: "", description: "" },
   ]);
+  assert.throws(
+    () => normalizeMerchant(merchant({ content: { menu: [{ name: "拿铁", price: 15 }] } })),
+    /content\.menu\[0\]\.price must be a string/,
+  );
+  assert.throws(
+    () => normalizeMerchant(merchant({ content: { menu: [{ price: "¥9" }] } })),
+    /content\.menu\[0\]\.name must be non-empty/,
+  );
 });
 
-test("absent optional fields normalize to empty strings rather than undefined", () => {
-  const merchant = normalizeMerchant({ id: "m1", hostPlaceId: "place_lib", displayName: "窗口" });
-  assert.equal(merchant.businessType, "");
-  assert.equal(merchant.openingHours, "");
-  assert.equal(merchant.stallCode, "");
-  assert.equal(merchant.avgPrice, "");
-  assert.deepEqual(merchant.menu, []);
-  assert.equal(merchant.floorId, null);
+test("absent optional fields stay empty in the display model", () => {
+  const normalized = normalizeMerchant(merchant({ id: "m1", hostPlaceId: "place_lib", displayName: "窗口" }));
+  assert.equal(normalized.businessType, "");
+  assert.equal(normalized.openingHours, "");
+  assert.equal(normalized.stallCode, "");
+  assert.equal(normalized.avgPrice, "");
+  assert.deepEqual(normalized.menu, []);
+  assert.equal(normalized.floorId, null);
 });
 
 test("release search documents cover merchant outlets and inherit the host campus", () => {
   const releases = fs.readFileSync(path.join(root, "worker/modules/releases.ts"), "utf8");
   assert.match(releases, /merchant_outlet/);
   assert.match(releases, /campusByPlace/);
-  assert.match(releases, /fallbackCampusId/);
   assert.match(releases, /merchantSearchText/);
 });

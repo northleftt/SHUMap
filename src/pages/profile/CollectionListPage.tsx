@@ -2,10 +2,11 @@ import { Check, CloudOff, Lock, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Chip, ChipRow } from "../../components/ui/Chip";
-import { EmptyState } from "../../components/ui/EmptyState";
+import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useNow } from "../../lib/hooks/useNow";
 import { useRelease } from "../../lib/release/ReleaseContext";
+import type { LoadedRelease } from "../../lib/release/mapData";
 import {
   collectionStats,
   isLockExpired,
@@ -36,13 +37,30 @@ function syncLabel(lastSyncAt: string | null, now: number): string {
  * 因此任何设备都能看到所有志愿者的进展：谁在采哪栋、采到哪一步。
  */
 export function CollectionListPage() {
+  const releaseState = useRelease();
+  if (releaseState.status === "loading") {
+    return <div className="h-full bg-page"><LoadingState label="正在加载采集楼宇…" /></div>;
+  }
+  if (releaseState.status !== "ready") {
+    return (
+      <div className="h-full bg-page px-5 pt-16">
+        <EmptyState
+          title={releaseState.status === "empty" ? "采集楼宇尚未发布" : "发布数据加载失败"}
+          subtitle={releaseState.status === "empty" ? "当前没有可采集的楼宇" : "请检查网络后重试"}
+        />
+      </div>
+    );
+  }
+  return <ReadyCollectionListPage release={releaseState.release} />;
+}
+
+function ReadyCollectionListPage({ release }: { release: LoadedRelease }) {
   const navigate = useNavigate();
-  const { release } = useRelease();
   const { tasks, startCollection, lastSyncAt, polling, error, reload, pendingCount } = useCollectionTasks();
   const [campus, setCampus] = useState<string | null>(null);
   const now = useNow(30_000);
 
-  const buildings = useMemo(() => release?.buildings ?? [], [release]);
+  const buildings = release.buildings;
   const campusLabels = useMemo(
     () => Array.from(new Set(buildings.map((b) => b.campusLabel).filter(Boolean))),
     [buildings],

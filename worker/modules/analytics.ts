@@ -12,7 +12,7 @@ export async function recordAnalyticsEvent(request: Request, env: Env): Promise<
   if (eventType !== "map_view" && eventType !== "poi_view") {
     throw new HttpError(400, "validation_error", "Invalid analytics eventType");
   }
-  const metadata = objectValue(body.meta, "meta");
+  const metadata = body.meta === undefined ? {} : objectValue(body.meta, "meta");
   await env.DB.prepare(
     `insert into analytics_events(id,event_type,campus,place_id,place_name,metadata_json,created_at)
      values(?,?,?,?,?,?,?)`,

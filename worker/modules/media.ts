@@ -1,7 +1,7 @@
 import type { SessionPrincipal } from "../domain/types";
 import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
-import { HttpError, json } from "../lib/http";
+import { HttpError, json, readBodyLimited } from "../lib/http";
 import { enforcePublicRateLimit } from "../lib/public-rate-limit";
 import { isoNow, makeId, sha256 } from "../lib/values";
 
@@ -26,11 +26,7 @@ export async function createPublicMediaUpload(request: Request, env: Env): Promi
   if (!PUBLIC_UPLOAD_TYPES.has(contentType)) {
     throw new HttpError(415, "unsupported_media_type", "Only image/jpeg, image/png and image/webp are accepted");
   }
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > MAX_PUBLIC_UPLOAD_BYTES) {
-    throw new HttpError(413, "payload_too_large", "Each photo must be at most 2 MiB");
-  }
-  const bytes = await request.arrayBuffer();
+  const bytes = await readBodyLimited(request, MAX_PUBLIC_UPLOAD_BYTES);
   if (bytes.byteLength === 0) throw new HttpError(400, "validation_error", "Photo body is empty");
   if (bytes.byteLength > MAX_PUBLIC_UPLOAD_BYTES) {
     throw new HttpError(413, "payload_too_large", "Each photo must be at most 2 MiB");
@@ -77,11 +73,7 @@ export async function createAdminMediaUpload(
   if (!PUBLIC_UPLOAD_TYPES.has(contentType)) {
     throw new HttpError(415, "unsupported_media_type", "Only image/jpeg, image/png and image/webp are accepted");
   }
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declared) && declared > MAX_ADMIN_UPLOAD_BYTES) {
-    throw new HttpError(413, "payload_too_large", "Each image must be at most 8 MiB");
-  }
-  const bytes = await request.arrayBuffer();
+  const bytes = await readBodyLimited(request, MAX_ADMIN_UPLOAD_BYTES);
   if (bytes.byteLength === 0) throw new HttpError(400, "validation_error", "Image body is empty");
   if (bytes.byteLength > MAX_ADMIN_UPLOAD_BYTES) {
     throw new HttpError(413, "payload_too_large", "Each image must be at most 8 MiB");
@@ -111,20 +103,23 @@ export async function createAdminMediaUpload(
  * 任一不满足即 404，隔离区与私有底图因此不可能从公共侧被读到。
  */
 export async function getPublicMedia(env: Env, mediaId: string): Promise<Response> {
-  const asset = await first<{ object_key: string; content_type: string; sha256: string; status: string }>(
+  const asset = await first<{ objectKey: string; contentType: string; byteSize: number; sha256: string; status: string }>(
     env.DB,
-    "select object_key,content_type,sha256,status from media_assets where id=? and bucket_scope='public'",
+    `select object_key as objectKey,content_type as contentType,byte_size as byteSize,sha256,status
+       from media_assets where id=? and bucket_scope='public'`,
     [mediaId],
   );
-  if (!asset || asset.status !== "published" || !asset.object_key.startsWith(PUBLIC_MEDIA_PREFIX)) {
+  if (!asset || asset.status !== "published" || !asset.objectKey.startsWith(PUBLIC_MEDIA_PREFIX)) {
     throw new HttpError(404, "not_found", "Media asset does not exist");
   }
-  const object = await env.SHUMAP_BUCKET.get(asset.object_key);
+  const object = await env.SHUMAP_BUCKET.get(asset.objectKey);
   if (!object) throw new HttpError(404, "not_found", "Media object is missing");
-  const safeType = allowedPublicContentType(asset.content_type);
-  return new Response(await object.arrayBuffer(), {
+  assertStoredObjectSize(asset.byteSize, object.size, MAX_ADMIN_UPLOAD_BYTES, mediaId);
+  const safeType = allowedPublicContentType(asset.contentType);
+  return new Response(object.body, {
     headers: {
       "content-type": safeType,
+      "content-length": String(object.size),
       "content-disposition": "inline",
       "cache-control": "public, max-age=31536000, immutable",
       "etag": `"${asset.sha256}"`,
@@ -139,17 +134,19 @@ export async function getPublicMedia(env: Env, mediaId: string): Promise<Respons
  * 调用点已要求 read:admin 会话，响应 no-store 且强制 nosniff/sandbox。
  */
 export async function getAdminMediaContent(env: Env, _principal: SessionPrincipal, mediaId: string): Promise<Response> {
-  const asset = await first<{ object_key: string; content_type: string; sha256: string }>(
+  const asset = await first<{ objectKey: string; contentType: string; byteSize: number; sha256: string }>(
     env.DB,
-    "select object_key,content_type,sha256 from media_assets where id=?",
+    "select object_key as objectKey,content_type as contentType,byte_size as byteSize,sha256 from media_assets where id=?",
     [mediaId],
   );
   if (!asset) throw new HttpError(404, "not_found", "Media asset does not exist");
-  const object = await env.SHUMAP_BUCKET.get(asset.object_key);
+  const object = await env.SHUMAP_BUCKET.get(asset.objectKey);
   if (!object) throw new HttpError(404, "not_found", "Media object is missing");
-  return new Response(await object.arrayBuffer(), {
+  assertStoredObjectSize(asset.byteSize, object.size, MAX_ADMIN_UPLOAD_BYTES, mediaId);
+  return new Response(object.body, {
     headers: {
-      "content-type": allowedPublicContentType(asset.content_type),
+      "content-type": allowedPublicContentType(asset.contentType),
+      "content-length": String(object.size),
       "content-disposition": "inline",
       "cache-control": "private, no-store",
       "etag": `"${asset.sha256}"`,
@@ -166,6 +163,7 @@ export interface SubmissionPhoto {
   status: string;
   contentType: string;
   objectKey: string;
+  byteSize: number;
 }
 
 /** 一条提交关联的照片，按提交时的顺序。 */
@@ -173,7 +171,7 @@ export async function listSubmissionPhotos(env: Env, submissionId: string): Prom
   return all<SubmissionPhoto>(
     env.DB,
     `select sm.media_asset_id as mediaAssetId,sm.sort_order as sortOrder,ma.bucket_scope as bucketScope,
-            ma.status,ma.content_type as contentType,ma.object_key as objectKey
+            ma.status,ma.content_type as contentType,ma.object_key as objectKey,ma.byte_size as byteSize
        from submission_media sm join media_assets ma on ma.id=sm.media_asset_id
       where sm.submission_id=? order by sm.sort_order`,
     [submissionId],
@@ -225,23 +223,6 @@ export async function assertAttachablePhotos(env: Env, mediaIds: unknown, maximu
 }
 
 /**
- * 宽松版：丢掉已不可挂载的 id 而不是报错。采集草稿会长期留在
- * payload_json 里（needs_recollection 后重新提交时旧照片已被上一条提交占用），
- * 不能因为历史 id 就让整次提交失败。
- */
-export async function filterAttachablePhotos(env: Env, mediaIds: unknown, maximum: number): Promise<string[]> {
-  const unique = normalizePhotoIds(mediaIds, maximum);
-  const usable: string[] = [];
-  for (const mediaId of unique) {
-    const asset = await attachableState(env, mediaId);
-    if (asset && asset.bucket_scope === "quarantine" && asset.status === "quarantined" && asset.used === 0) {
-      usable.push(mediaId);
-    }
-  }
-  return usable;
-}
-
-/**
  * submission_media 的插入语句（提交创建时与主插入同批执行）。
  *
  * `where exists` 是给采集提交用的：那条 content_submissions 插入本身带锁条件，
@@ -270,22 +251,48 @@ export interface PhotoPromotion {
  * R2 拷贝先做（幂等：同 key 重复 put 无害），DB 更新以语句形式返回给调用方，
  * 和审核决定写在同一个 batch 里，避免出现「对象已公开但行未发布」之外的组合。
  */
-export async function promoteSubmissionPhotos(env: Env, submissionId: string): Promise<PhotoPromotion> {
+export async function promoteSubmissionPhotos(
+  env: Env,
+  submissionId: string,
+  mediaAssetIds: readonly string[],
+): Promise<PhotoPromotion> {
   const photos = await listSubmissionPhotos(env, submissionId);
+  const requested = new Set(mediaAssetIds);
+  if (requested.size !== mediaAssetIds.length) {
+    throw new Error(`Submission ${submissionId} photo promotion contains duplicate media ids`);
+  }
+  const attached = new Set(photos.map((photo) => photo.mediaAssetId));
+  for (const mediaAssetId of requested) {
+    if (!attached.has(mediaAssetId)) {
+      throw new Error(`Media ${mediaAssetId} is not attached to submission ${submissionId}`);
+    }
+  }
   const urls: string[] = [];
   const statements: D1PreparedStatement[] = [];
   const now = isoNow();
   for (const photo of photos) {
+    if (!requested.has(photo.mediaAssetId)) continue;
     if (photo.bucketScope === "public" && photo.status === "published") {
+      if (!photo.objectKey.startsWith(PUBLIC_MEDIA_PREFIX)) {
+        throw new Error(`Published media ${photo.mediaAssetId} has an invalid object key`);
+      }
+      allowedPublicContentType(photo.contentType);
       urls.push(publicMediaPath(photo.mediaAssetId));
       continue;
     }
-    if (photo.bucketScope !== "quarantine") continue;
+    if (photo.bucketScope !== "quarantine" || photo.status !== "quarantined") {
+      throw new Error(`Submission media ${photo.mediaAssetId} has invalid state ${photo.bucketScope}/${photo.status}`);
+    }
+    if (!photo.objectKey.startsWith(QUARANTINE_PREFIX)) {
+      throw new Error(`Quarantined media ${photo.mediaAssetId} has an invalid object key`);
+    }
+    const contentType = allowedPublicContentType(photo.contentType);
     const publicKey = `${PUBLIC_MEDIA_PREFIX}${photo.mediaAssetId}.${extensionOf(photo.contentType)}`;
     const object = await env.SHUMAP_BUCKET.get(photo.objectKey);
-    if (!object) continue;
-    await env.SHUMAP_BUCKET.put(publicKey, await object.arrayBuffer(), {
-      httpMetadata: { contentType: allowedPublicContentType(photo.contentType), cacheControl: "public, max-age=31536000, immutable" },
+    if (!object) throw new Error(`Quarantined media object ${photo.objectKey} is missing`);
+    assertStoredObjectSize(photo.byteSize, object.size, MAX_PUBLIC_UPLOAD_BYTES, photo.mediaAssetId);
+    await env.SHUMAP_BUCKET.put(publicKey, object.body, {
+      httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" },
       customMetadata: { scope: "public", submissionId },
     });
     statements.push(
@@ -298,15 +305,11 @@ export async function promoteSubmissionPhotos(env: Env, submissionId: string): P
   return { urls, statements };
 }
 
-/** 提升成功后清掉隔离区副本；失败不影响已发布结果，交给后续清理。 */
+/** 提升成功后清掉隔离区副本。 */
 export async function dropQuarantineCopies(env: Env, photos: SubmissionPhoto[]): Promise<void> {
   const keys = photos.filter((photo) => photo.objectKey.startsWith(QUARANTINE_PREFIX)).map((photo) => photo.objectKey);
   if (!keys.length) return;
-  try {
-    await env.SHUMAP_BUCKET.delete(keys);
-  } catch (error) {
-    console.error("quarantine cleanup failed", error);
-  }
+  await env.SHUMAP_BUCKET.delete(keys);
 }
 
 export function publicMediaPath(mediaId: string): string {
@@ -319,10 +322,10 @@ function extensionOf(contentType: string): string {
       return "png";
     case "image/webp":
       return "webp";
-    case "image/avif":
-      return "avif";
-    default:
+    case "image/jpeg":
       return "jpg";
+    default:
+      throw new Error(`Unsupported stored media content type: ${contentType}`);
   }
 }
 
@@ -346,9 +349,17 @@ function allowedPublicContentType(contentType: string): string {
     case "image/png":
     case "image/jpeg":
     case "image/webp":
-    case "image/avif":
       return contentType.toLowerCase();
     default:
-      return "application/octet-stream";
+      throw new Error(`Unsupported stored media content type: ${contentType}`);
+  }
+}
+
+function assertStoredObjectSize(expected: number, actual: number, maximum: number, mediaId: string): void {
+  if (!Number.isInteger(expected) || expected <= 0 || expected > maximum) {
+    throw new Error(`Media ${mediaId} has invalid stored byte size ${expected}`);
+  }
+  if (actual !== expected) {
+    throw new Error(`Media ${mediaId} object size ${actual} does not match stored byte size ${expected}`);
   }
 }

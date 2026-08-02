@@ -215,7 +215,9 @@ test("the public map asset endpoint is registered without a session gate", () =>
 test("floor imports bind the map version to a floor, not a campus", () => {
   const jobs = fs.readFileSync(path.join(root, "worker/modules/jobs.ts"), "utf8");
   assert.match(jobs, /payload\.floorId \? "floor_svg" : "campus_svg"/);
-  assert.match(jobs, /payload\.campusId \?\? null, payload\.floorId \?\? null/);
+  assert.match(jobs, /\.bind\(mapVersionId, payload\.campusId, payload\.floorId,/);
+  assert.match(jobs, /Map import payload must identify exactly one campus or floor/);
+  assert.match(jobs, /job\.job_type === "floor_import" && payload\.floorId === null/);
 
   const maps = fs.readFileSync(path.join(root, "worker/modules/maps.ts"), "utf8");
   // Exactly one of campusId/floorId, matching the map_versions check constraint.

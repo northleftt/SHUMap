@@ -1,7 +1,7 @@
 import { ArrowRight, CirclePlus, Rocket } from "lucide-react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
-import { getCurrentRelease } from "../../lib/api/public";
+import { getOptionalCurrentRelease } from "../../lib/api/public";
 import type { ReleaseManifest } from "../../lib/api/types";
 import type {
   FacilityListItem,
@@ -64,8 +64,8 @@ export function OverviewPage() {
       admin.listFacilities<FacilityListItem>(signal),
       admin.listMerchants<MerchantListItem>(signal),
       admin.listSubmissions(signal),
-      admin.listAdminOperations<OperationalEventRow>(signal).catch(() => ({ items: [] as OperationalEventRow[] })),
-      getCurrentRelease(signal).catch(() => null),
+      admin.listAdminOperations<OperationalEventRow>(signal),
+      getOptionalCurrentRelease(signal),
     ]);
     return {
       spaces,

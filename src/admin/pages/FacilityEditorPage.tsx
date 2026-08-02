@@ -1,9 +1,19 @@
 import { MapPin, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { fetchMapAssetSvg } from "../../lib/api/public";
 import * as admin from "../../lib/api/admin";
-import type { FacilityDetailResponse, FacilityListItem, PlaceListItem, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
+import {
+  arrayValue,
+  jsonObject,
+  nullablePositiveInteger,
+  nullableSingleTextObject,
+  nullableString,
+  objectValue,
+  oneOf,
+  optionalString,
+  requiredString,
+} from "../../lib/dataContract";
+import type { FacilityDetailResponse, PlaceListItem, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   EditorialPill,
   ErrorBanner,
@@ -19,15 +29,16 @@ import {
   errorMessage,
   useAsyncData,
 } from "../components/primitives";
+import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
+import { locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { sanitizeSvg } from "../../lib/svg/sanitize";
+import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
+import type { FacilityContent } from "../../../shared/revision-contract";
 
 // ---------------------------------------------------------------------------
 // A11 设施编辑器
 //
-// 两条保存通道（同地点编辑器）：
-//   1. 名称 / 服务时间 / 收费 / 位置描述 / 备注 → 新建修订草稿，经审核发布；
-//   2. 设施类型 / 所属楼宇 / 楼层 / 服务位置落点 → 即时生效。
-//
-// 第二类在修订表里没有对应列（修订只存文案），因此直接写库并记审计。
+// 文案、设施挂接关系与楼层图服务落点统一进入修订审核。
 // ---------------------------------------------------------------------------
 
 interface PlanPoint {
@@ -35,81 +46,142 @@ interface PlanPoint {
   y: number;
 }
 
+type FacilityOperationalStatus = "available" | "partially_available" | "unavailable" | "unknown";
+
+interface FacilityEditorRevision {
+  displayName: string;
+  facilityTypeId: string;
+  hostPlaceId: string;
+  floorId: string;
+  indoorSpaceId: string;
+  quantity: number | null;
+  operationalStatus: FacilityOperationalStatus;
+  serviceHours: string;
+  content: FacilityContent;
+  media: MediaRow[];
+  fee: string;
+  locationDescription: string;
+  note: string;
+  sourceId: string;
+  editorialStatus: "draft" | "in_review" | "approved" | "rejected" | "superseded";
+  locations: LocationDraft[];
+}
+
+function parseFacilityEditorRevision(response: FacilityDetailResponse): FacilityEditorRevision {
+  const facility = objectValue(response.facility, "facility");
+  const structure = jsonObject(facility.structure_json, "facility_revisions.structure_json");
+  const content = jsonObject(facility.content_json, "facility_revisions.content_json");
+  const locations = arrayValue(structure.locations, "facility_revisions.structure_json.locations")
+    .map((location, index) => locationDraftFromApi(objectValue(location, `facility_revisions.structure_json.locations[${index}]`), index));
+  return {
+    displayName: requiredString(facility.display_name, "facility_revisions.display_name"),
+    facilityTypeId: requiredString(structure.facilityTypeId, "facility_revisions.structure_json.facilityTypeId"),
+    hostPlaceId: nullableString(structure.hostPlaceId, "facility_revisions.structure_json.hostPlaceId") ?? "",
+    floorId: nullableString(structure.floorId, "facility_revisions.structure_json.floorId") ?? "",
+    indoorSpaceId: nullableString(structure.indoorSpaceId, "facility_revisions.structure_json.indoorSpaceId") ?? "",
+    quantity: nullablePositiveInteger(structure.quantity, "facility_revisions.structure_json.quantity"),
+    operationalStatus: oneOf(
+      structure.operationalStatus,
+      "facility_revisions.structure_json.operationalStatus",
+      ["available", "partially_available", "unavailable", "unknown"] as const,
+    ),
+    serviceHours: nullableSingleTextObject(facility.service_hours_json, "facility_revisions.service_hours_json", "text"),
+    content: content as FacilityContent,
+    media: readMedia(content.media),
+    fee: optionalString(content.fee, "facility_revisions.content_json.fee") ?? "",
+    locationDescription: optionalString(content.locationDescription, "facility_revisions.content_json.locationDescription") ?? "",
+    note: optionalString(content.note, "facility_revisions.content_json.note") ?? "",
+    sourceId: nullableString(facility.source_id, "facility_revisions.source_id") ?? "",
+    editorialStatus: oneOf(
+      facility.editorial_status,
+      "facility_revisions.editorial_status",
+      ["draft", "in_review", "approved", "rejected", "superseded"] as const,
+    ),
+    locations,
+  };
+}
+
 export function FacilityEditorPage() {
   const { id = "" } = useParams();
   const isNew = id === "new";
   const navigate = useNavigate();
 
-  const { state, reload } = useAsyncData(async (signal) => {
-    const [ref, spaces, places, facilities, detail, maps] = await Promise.all([
+  const { state } = useAsyncData(async (signal) => {
+    const [ref, spaces, places, detail, maps] = await Promise.all([
       admin.listReferenceData<ReferenceDataResponse>(signal),
       admin.listSpaces<SpacesResponse>(signal),
       admin.listAdminPlaces<PlaceListItem>(signal),
-      isNew ? Promise.resolve({ items: [] as FacilityListItem[] }) : admin.listFacilities<FacilityListItem>(signal),
       isNew ? Promise.resolve(null) : admin.getFacility<FacilityDetailResponse>(id, signal),
       admin.listMapVersions(signal),
     ]);
-    return { ref, spaces, places: places.items, facilities: facilities.items, detail, maps: maps.items };
+    return {
+      ref,
+      spaces,
+      places: places.items,
+      detail,
+      editor: detail ? parseFacilityEditorRevision(detail) : null,
+      maps: maps.items,
+    };
   }, [id, isNew]);
 
   const [name, setName] = useState("");
   const [typeId, setTypeId] = useState("");
   const [hostPlaceId, setHostPlaceId] = useState("");
   const [floorId, setFloorId] = useState("");
+  const [indoorSpaceId, setIndoorSpaceId] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [operationalStatus, setOperationalStatus] = useState<FacilityOperationalStatus>("unknown");
   const [hours, setHours] = useState("");
   const [fee, setFee] = useState("");
   const [locationText, setLocationText] = useState("");
   const [note, setNote] = useState("");
   const [sourceId, setSourceId] = useState("");
-  const [baseContent, setBaseContent] = useState<Record<string, unknown>>({});
+  const [baseContent, setBaseContent] = useState<FacilityContent>({});
+  const [media, setMedia] = useState<MediaRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>([]);
 
   useEffect(() => {
     if (state.status !== "ready" || isNew) return;
-    const item = state.data!.facilities.find((f) => f.id === id);
-    const detail = state.data!.detail?.facility;
-    if (!item) return;
-    setName(String(item.displayName ?? ""));
-    setTypeId(String(item.facilityTypeId ?? ""));
-    setHostPlaceId(item.hostPlaceId ? String(item.hostPlaceId) : "");
-    setFloorId(item.floorId ? String(item.floorId) : "");
-    if (!detail) return;
-    try {
-      const serviceHours = JSON.parse(String(detail.service_hours_json ?? "null")) as { text?: unknown } | null;
-      setHours(typeof serviceHours?.text === "string" ? serviceHours.text : "");
-    } catch {
-      setHours("");
-    }
-    let content: Record<string, unknown> = {};
-    try {
-      content = JSON.parse(String(detail.content_json ?? "{}")) as Record<string, unknown>;
-    } catch {
-      content = {};
-    }
-    setBaseContent(content);
-    setFee(typeof content.fee === "string" ? content.fee : "");
-    setLocationText(typeof content.locationDescription === "string" ? content.locationDescription : "");
-    setNote(typeof content.note === "string" ? content.note : "");
-    setSourceId(detail.source_id ? String(detail.source_id) : "");
+    const editor = state.data!.editor;
+    if (!editor) throw new Error("Facility detail is missing");
+    setName(editor.displayName);
+    setTypeId(editor.facilityTypeId);
+    setHostPlaceId(editor.hostPlaceId);
+    setFloorId(editor.floorId);
+    setIndoorSpaceId(editor.indoorSpaceId);
+    setQuantity(editor.quantity === null ? "" : String(editor.quantity));
+    setOperationalStatus(editor.operationalStatus);
+    setHours(editor.serviceHours);
+    setBaseContent(editor.content);
+    setMedia(editor.media);
+    setFee(editor.fee);
+    setLocationText(editor.locationDescription);
+    setNote(editor.note);
+    setSourceId(editor.sourceId);
+    setLocationDrafts(editor.locations);
   }, [state, id, isNew]);
 
   if (state.status === "loading") return <LoadingState label="加载设施…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
   const data = state.data!;
-  const item = isNew ? null : data.facilities.find((f) => f.id === id) ?? null;
-  const reviewLocked = item?.editorialStatus === "in_review";
+  const editor = data.editor;
+  const reviewLocked = editor?.editorialStatus === "in_review";
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
-  const existingAnchor = (data.detail?.locations ?? [])[0] as Record<string, unknown> | undefined;
+  const indoorSpaces = data.spaces.spaces.filter((space) => !floorId || space.floorId === floorId);
+  const existingAnchor = locationDrafts.find((location) => location.role === "service_position");
 
   async function save(thenSubmit: boolean) {
     if (!name.trim()) { setError("请填写名称"); return; }
     if (!typeId) { setError("请选择设施类型"); return; }
+    const parsedQuantity = quantity.trim() ? Number(quantity) : null;
+    if (parsedQuantity !== null && (!Number.isInteger(parsedQuantity) || parsedQuantity <= 0)) { setError("数量必须是正整数"); return; }
     setBusy(true);
     setError("");
-    setNotice("");
     const content = { ...baseContent };
+    if (media.length) content.media = media;
+    else delete content.media;
     for (const [key, value] of [["fee", fee], ["locationDescription", locationText], ["note", note]] as const) {
       if (value.trim()) content[key] = value.trim();
       else delete content[key];
@@ -118,27 +190,36 @@ export function FacilityEditorPage() {
       let revisionId = "";
       if (isNew) {
         const created = await admin.createFacility({
-          facilityTypeId: typeId,
-          hostPlaceId: hostPlaceId || undefined,
-          floorId: floorId || undefined,
           displayName: name.trim(),
-          serviceHours: hours.trim() ? { text: hours.trim() } : undefined,
+          serviceHours: hours.trim() ? { text: hours.trim() } : null,
           content,
-          sourceId: sourceId || undefined,
+          sourceId: sourceId || null,
+          structure: {
+            facilityTypeId: typeId,
+            hostPlaceId: hostPlaceId || null,
+            floorId: floorId || null,
+            indoorSpaceId: indoorSpaceId || null,
+            quantity: parsedQuantity,
+            operationalStatus,
+            locations: locationDrafts.map(locationInput),
+          },
         });
         revisionId = created.revisionId;
       } else {
-        // 挂接关系先落库（即时生效），再提交正文修订（走审核）。
-        await admin.updateFacility(id, {
-          facilityTypeId: typeId,
-          hostPlaceId: hostPlaceId || null,
-          floorId: floorId || null,
-        });
         const created = await admin.createFacilityRevision(id, {
           displayName: name.trim(),
-          serviceHours: hours.trim() ? { text: hours.trim() } : undefined,
+          serviceHours: hours.trim() ? { text: hours.trim() } : null,
           content,
-          sourceId: sourceId || undefined,
+          sourceId: sourceId || null,
+          structure: {
+            facilityTypeId: typeId,
+            hostPlaceId: hostPlaceId || null,
+            floorId: floorId || null,
+            indoorSpaceId: indoorSpaceId || null,
+            quantity: parsedQuantity,
+            operationalStatus,
+            locations: locationDrafts.map(locationInput),
+          },
         });
         revisionId = created.id;
       }
@@ -161,7 +242,7 @@ export function FacilityEditorPage() {
             placeholder="设施名称"
             value={name}
           />
-          {item ? <EditorialPill status={item.editorialStatus} /> : null}
+          {editor ? <EditorialPill status={editor.editorialStatus} /> : null}
         </div>
         <div className="space-y-4 p-5">
           <div>
@@ -176,18 +257,26 @@ export function FacilityEditorPage() {
               />
               <SelectField
                 label="所属楼宇"
-                onChange={(v) => { setHostPlaceId(v); setFloorId(""); }}
+                onChange={(v) => { setHostPlaceId(v); setFloorId(""); setIndoorSpaceId(""); }}
                 options={data.places.map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
                 placeholder="选择楼宇"
                 value={hostPlaceId}
               />
               <SelectField
                 label="楼层"
-                onChange={setFloorId}
+                onChange={(value) => { setFloorId(value); setIndoorSpaceId(""); }}
                 options={floors.map((f) => ({ value: f.id, label: f.displayName }))}
                 placeholder={hostPlaceId ? (floors.length ? "选择楼层" : "该楼宇暂无楼层") : "先选楼宇"}
                 value={floorId}
               />
+              <SelectField
+                label="室内空间"
+                onChange={setIndoorSpaceId}
+                options={indoorSpaces.map((space) => ({ value: space.id, label: space.displayName }))}
+                placeholder={floorId ? "不指定" : "先选楼层"}
+                value={indoorSpaceId}
+              />
+              <Field label="数量" onChange={setQuantity} placeholder="如 2" type="number" value={quantity} />
             </div>
             {hostPlaceId && floors.length === 0 ? (
               <p className="mt-2 text-label text-sub">该楼宇还没有楼层，可在对应地点的编辑页添加。</p>
@@ -209,14 +298,8 @@ export function FacilityEditorPage() {
             placeholder="不指定"
             value={sourceId}
           />
-          {!isNew ? (
-            <InfoNote tone="info">
-              设施类型、所属楼宇和楼层保存后立即生效；名称、服务时间、收费和位置描述需提交审核通过并发布后对用户可见。
-            </InfoNote>
-          ) : null}
           {reviewLocked ? <InfoNote tone="warning">当前修订正在审核，处理完成后才能继续编辑。</InfoNote> : null}
           <ErrorBanner message={error} />
-          {notice ? <InfoNote tone="info">{notice}</InfoNote> : null}
           <div className="flex gap-3">
             <GhostButton className="flex-1" disabled={busy || reviewLocked} onClick={() => save(false)}>保存草稿</GhostButton>
             <PrimaryButton className="flex-[2]" disabled={busy || reviewLocked} onClick={() => save(true)}>
@@ -227,19 +310,24 @@ export function FacilityEditorPage() {
       </Panel>
 
       <div className="space-y-4 self-start">
-        {isNew ? (
-          <Panel title="服务位置">
-            <InfoNote>保存设施后可在此标注它在楼层图上的位置。</InfoNote>
-          </Panel>
-        ) : (
-          <ServicePositionPanel
-            existingAnchor={existingAnchor}
-            facilityId={id}
-            floorId={floorId}
-            mapVersions={data.maps}
-            onDone={(message) => { setNotice(message); reload(); }}
-          />
-        )}
+        <MediaPanel disabled={reviewLocked} media={media} onChange={setMedia} />
+        <ServicePositionPanel
+          buildingPlaceId={hostPlaceId}
+          disabled={reviewLocked}
+          existingAnchor={existingAnchor}
+          floorId={floorId}
+          indoorSpaceId={indoorSpaceId}
+          mapVersions={data.maps}
+          onChange={(next) => {
+            setLocationDrafts((rows) => {
+              const index = rows.findIndex((location) => location.role === "service_position");
+              if (!next) return index === -1 ? rows : rows.filter((_, rowIndex) => rowIndex !== index);
+              const normalized = { ...next, isPrimary: index === -1 ? !rows.some((location) => location.isPrimary) : rows[index].isPrimary };
+              if (index === -1) return [...rows, normalized];
+              return rows.map((location, rowIndex) => rowIndex === index ? normalized : location);
+            });
+          }}
+        />
       </div>
     </div>
   );
@@ -249,48 +337,44 @@ export function FacilityEditorPage() {
 // 服务位置：楼层图点选落点，或无图时填文字引导
 // ---------------------------------------------------------------------------
 
-function parseViewBox(svgRaw: string) {
-  const match = svgRaw.match(/viewBox\s*=\s*"([^"]+)"/i);
-  if (!match) return { x: 0, y: 0, width: 1000, height: 1000 };
-  const [x, y, width, height] = match[1].trim().split(/[\s,]+/).map(Number);
-  if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
-    return { x: 0, y: 0, width: 1000, height: 1000 };
+function pointFromAnchor(anchor: LocationDraft | undefined): PlanPoint | null {
+  const geometry = anchor?.origin?.geometry;
+  if (geometry === undefined || geometry === null) return null;
+  if (!geometry || typeof geometry !== "object" || Array.isArray(geometry)) {
+    throw new Error("Facility service position geometry must be an object");
   }
-  return { x, y, width, height };
-}
-
-function pointFromAnchor(anchor: Record<string, unknown> | undefined): PlanPoint | null {
-  const raw = anchor?.geometry_json;
-  if (typeof raw !== "string") return null;
-  try {
-    const geometry = JSON.parse(raw) as { type?: string; coordinates?: unknown };
-    if (geometry.type !== "Point" || !Array.isArray(geometry.coordinates)) return null;
-    const [x, y] = geometry.coordinates as number[];
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    return { x, y };
-  } catch {
-    return null;
+  const { type, coordinates } = geometry as Record<string, unknown>;
+  if (type !== "Point" || !Array.isArray(coordinates) || coordinates.length !== 2) {
+    throw new Error("Facility service position must be a GeoJSON Point");
   }
+  const [x, y] = coordinates;
+  if (typeof x !== "number" || !Number.isFinite(x) || typeof y !== "number" || !Number.isFinite(y)) {
+    throw new Error("Facility service position coordinates must be finite numbers");
+  }
+  return { x, y };
 }
 
 function ServicePositionPanel({
-  facilityId,
+  buildingPlaceId,
+  disabled,
   floorId,
+  indoorSpaceId,
   mapVersions,
   existingAnchor,
-  onDone,
+  onChange,
 }: {
-  facilityId: string;
+  buildingPlaceId: string;
+  disabled: boolean;
   floorId: string;
+  indoorSpaceId: string;
   mapVersions: admin.MapVersionRow[];
-  existingAnchor: Record<string, unknown> | undefined;
-  onDone: (message: string) => void;
+  existingAnchor: LocationDraft | undefined;
+  onChange: (value: LocationDraft | null) => void;
 }) {
   const [point, setPoint] = useState<PlanPoint | null>(null);
   const [hint, setHint] = useState("");
   const [svgRaw, setSvgRaw] = useState<string | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -308,7 +392,7 @@ function ServicePositionPanel({
 
   useEffect(() => {
     setPoint(pointFromAnchor(existingAnchor));
-    setHint(typeof existingAnchor?.location_hint === "string" ? existingAnchor.location_hint : "");
+    setHint(existingAnchor?.locationHint ?? "");
   }, [existingAnchor]);
 
   useEffect(() => {
@@ -316,7 +400,7 @@ function ServicePositionPanel({
     const controller = new AbortController();
     setSvgRaw(null);
     setLoadError("");
-    fetchMapAssetSvg(plan.id, controller.signal)
+    admin.fetchAdminMapAssetSvg(plan.id, controller.signal)
       .then(setSvgRaw)
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
@@ -325,13 +409,15 @@ function ServicePositionPanel({
     return () => controller.abort();
   }, [plan]);
 
-  const viewBox = useMemo(() => (svgRaw ? parseViewBox(svgRaw) : null), [svgRaw]);
+  const viewBox = useMemo(() => (svgRaw ? parseSvgViewBox(svgRaw) : null), [svgRaw]);
 
   // 底图内联展示：只读，点击落点由外层容器接管。
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !svgRaw) return;
-    host.innerHTML = svgRaw;
+    const safeSvg = sanitizeSvg(svgRaw);
+    if (!safeSvg) return;
+    host.innerHTML = safeSvg;
     const svg = host.querySelector("svg");
     if (svg) {
       svg.setAttribute("width", "100%");
@@ -343,21 +429,44 @@ function ServicePositionPanel({
     return () => { host.innerHTML = ""; };
   }, [svgRaw]);
 
-  async function persist(nextPoint: PlanPoint | null, nextHint: string) {
-    setBusy(true);
+  function apply(nextPoint: PlanPoint | null, nextHint: string) {
     setError("");
-    try {
-      await admin.replaceFacilityLocation(facilityId, {
-        point: nextPoint,
-        mapVersionId: nextPoint && plan ? plan.id : null,
-        locationHint: nextHint.trim() || null,
-      });
-      onDone(nextPoint ? "已保存服务位置落点" : nextHint.trim() ? "已保存位置引导文字" : "已清除服务位置");
-    } catch (err) {
-      setError(errorMessage(err, "保存位置失败"));
-    } finally {
-      setBusy(false);
+    const trimmedHint = nextHint.trim();
+    if (!nextPoint && !trimmedHint) {
+      onChange(null);
+      return;
     }
+    if (!floorId) {
+      setError("请先选择设施所在楼层");
+      return;
+    }
+    let mapVersionId: string | null = null;
+    if (nextPoint) {
+      if (!plan) {
+        setError("当前楼层没有可用于坐标绑定的平面图");
+        return;
+      }
+      mapVersionId = plan.id;
+    }
+    onChange(locationDraftFromApi({
+      campusId: null,
+      buildingPlaceId: buildingPlaceId || null,
+      floorId,
+      indoorSpaceId: indoorSpaceId || null,
+      role: "service_position",
+      isPrimary: existingAnchor?.isPrimary ?? true,
+      geometryType: nextPoint ? "Point" : null,
+      ...(nextPoint ? { geometry: { type: "Point", coordinates: [nextPoint.x, nextPoint.y] } } : {}),
+      crs: nextPoint ? "svg_viewbox" : null,
+      mapVersionId,
+      mapFeatureId: null,
+      locationHint: trimmedHint || null,
+      precisionLevel: nextPoint ? "exact" : "floor",
+      accuracyMeters: null,
+      sourceId: null,
+      validFrom: null,
+      validTo: null,
+    }, 0));
   }
 
   /** 容器内点击 → viewBox 坐标。底图按 xMidYMid meet 居中等比缩放，需还原留白。 */
@@ -429,21 +538,20 @@ function ServicePositionPanel({
         />
 
         <div className="flex gap-2">
-          <PrimaryButton className="flex-1" disabled={busy} onClick={() => persist(point, hint)}>
-            {busy ? "处理中…" : "保存位置"}
+          <PrimaryButton className="flex-1" disabled={disabled} onClick={() => apply(point, hint)}>
+            应用到修订草稿
           </PrimaryButton>
           {point || hint.trim() ? (
             <GhostButton
               danger
-              disabled={busy}
-              onClick={() => { setPoint(null); setHint(""); void persist(null, ""); }}
+              disabled={disabled}
+              onClick={() => { setPoint(null); setHint(""); apply(null, ""); }}
             >
               <Trash2 size={14} />
               清除
             </GhostButton>
           ) : null}
         </div>
-        <InfoNote tone="info">位置标注保存后，会出现在用户看到的楼层图上。</InfoNote>
         <ErrorBanner message={error} />
       </div>
     </Panel>

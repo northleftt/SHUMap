@@ -1,0 +1,26 @@
+[
+  {
+    "campusId": "campus_baoshan",
+    "key": "baoshan",
+    "sourcePath": "地图/宝山本部地图.svg",
+    "objectKey": "maps/campus/baoshan.svg",
+    "byteSize": 99023,
+    "sha256": "3adb52704178c185e5ae183d016704a4cad791d80a0e4e7258c59413deeb3b74"
+  },
+  {
+    "campusId": "campus_jiading",
+    "key": "jiading",
+    "sourcePath": "地图/嘉定校区地图.svg",
+    "objectKey": "maps/campus/jiading.svg",
+    "byteSize": 17612,
+    "sha256": "da43db6668a0a1834b14a6c4323ac43471587fd7ff770d07f04a1ad7d57763be"
+  },
+  {
+    "campusId": "campus_yanchang",
+    "key": "yanchang",
+    "sourcePath": "地图/延长校区地图.svg",
+    "objectKey": "maps/campus/yanchang.svg",
+    "byteSize": 18630,
+    "sha256": "dcec1d33741e5d122b17e22ac5bbea59bd0e86e22f898fa2fc6cc3bb8530266f"
+  }
+]

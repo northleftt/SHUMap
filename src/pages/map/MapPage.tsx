@@ -4,6 +4,7 @@ import { MapCanvas, type MapViewWindow } from "../../components/map/MapCanvas";
 import { MapEventOverlay, buildEventOverlayItems } from "../../components/map/MapEventOverlay";
 import { useSheetDrag } from "../../components/sheet/useSheetDrag";
 import { SearchInput } from "../../components/ui/SearchInput";
+import { LoadingState } from "../../components/ui/EmptyState";
 import { SeverityIcon, severityOf } from "../../components/ui/SeverityBanner";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useOperations } from "../../lib/hooks/useOperations";
@@ -13,7 +14,7 @@ import { LayerPanel } from "./LayerPanel";
 import { OperationDetailSheet } from "./OperationDetailSheet";
 import { PoiDetailSheet } from "./PoiDetailSheet";
 import { SearchHomeSheet } from "./SearchHomeSheet";
-import { useMapPageState, CAMPUS_ID_BY_KEY, type MapSheetMode } from "./useMapPageState";
+import { useMapPageState, type MapSheetMode } from "./useMapPageState";
 
 const TAB_BAR_PX = 64;
 
@@ -23,7 +24,7 @@ const TAB_BAR_PX = 64;
  */
 export function MapPage() {
   const state = useMapPageState();
-  const { activeEvents } = useOperations();
+  const operations = useOperations();
   const breakpoint = useBreakpoint();
   const isMobile = breakpoint === "mobile";
 
@@ -47,13 +48,12 @@ export function MapPage() {
   const [detailEventId, setDetailEventId] = useState<string | null>(null);
   // 几何坐标是各校区的 svg_viewbox，只渲染当前校区的事件（campusId 为空视为通用）
   const overlayItems = useMemo(
-    () =>
-      buildEventOverlayItems(activeEvents).filter(
-        (item) =>
-          !item.campusId ||
-          item.campusId === CAMPUS_ID_BY_KEY[state.selectedCampus],
-      ),
-    [activeEvents, state.selectedCampus],
+    () => operations.status === "ready"
+      ? buildEventOverlayItems(operations.activeEvents).filter(
+        (item) => !item.campusId || item.campusId === state.campus?.id,
+      )
+      : [],
+    [operations, state.campus?.id],
   );
   const eventById = (id: string | null) =>
     id ? (overlayItems.find((item) => item.event.id === id)?.event ?? null) : null;
@@ -117,6 +117,22 @@ export function MapPage() {
     [isMobile, sheetTop, containerHeight],
   );
 
+  if (state.releaseStatus === "loading") {
+    return (
+      <div className="h-full bg-map-ground">
+        <LoadingState label="正在加载校园地图…" />
+      </div>
+    );
+  }
+
+  if (state.releaseStatus !== "ready") {
+    return (
+      <div className="grid h-full place-items-center bg-map-ground px-8 text-center text-body text-sub">
+        {state.releaseStatus === "empty" ? "地图内容暂未上线" : "地图内容加载失败，请稍后重试"}
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className="flex h-full w-full overflow-hidden">
       {/* D1 左信息栏（≥768px） */}
@@ -125,11 +141,14 @@ export function MapPage() {
       <div className="relative min-w-0 flex-1">
         <MapCanvas
           campus={state.campus}
-          currentBuildingIds={state.campusBuildings.map((building) => building.svgElementId)}
-          matchedIds={state.matchedIds}
-          selectedId={state.selectedPoi?.svgElementId ?? null}
+          featureBindings={state.campusBuildings.map((building) => ({
+            id: building.mapFeatureId,
+            sourceElementId: building.sourceElementId,
+          }))}
+          matchedFeatureIds={state.matchedFeatureIds}
+          selectedFeatureId={state.selectedPoi?.mapFeatureId ?? null}
           selectionFocusBounds={selectionFocusBounds}
-          onSelectBuilding={state.openPoiBySvgId}
+          onSelectFeature={state.openPoiByFeatureId}
           onTapEmpty={() => {
             if (selectedEventId) setSelectedEventId(null);
             else if (layerPanelOpen) setLayerPanelOpen(false);
@@ -158,7 +177,7 @@ export function MapPage() {
         {/* 顶部浮层：校区切换（仅移动端） + 图层开关 + 回中 */}
         <div className="absolute inset-x-4 top-4 z-30 flex items-start justify-between">
           {isMobile ? (
-            <CampusSwitcher selectedCampus={state.selectedCampus} onSelect={state.resetForCampus} />
+            <CampusSwitcher campuses={state.campuses} selectedCampus={state.selectedCampus} onSelect={state.resetForCampus} />
           ) : (
             <span />
           )}
@@ -195,12 +214,16 @@ export function MapPage() {
           <div className="absolute right-4 top-[120px] z-40">
             <LayerPanel
               eventCount={overlayItems.length}
+              eventStatus={operations.status}
+              eventError={operations.status === "error" ? operations.message : null}
+              onRetryEvents={operations.reload}
               eventsOn={layerOn}
               onToggleEvents={() => {
                 setLayerOn((on) => !on);
                 setSelectedEventId(null);
               }}
               activeFilter={state.activeFilter}
+              filters={state.releaseData.filters}
               onToggleFilter={state.handleFilterHighlight}
             />
           </div>
@@ -254,18 +277,6 @@ export function MapPage() {
           </div>
         ) : null}
 
-        {/* 地图内容不可用时的空态/错误 */}
-        {state.releaseStatus === "empty" || state.releaseStatus === "error" ? (
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 z-20 flex -translate-y-1/2 justify-center px-8">
-            <div className="pointer-events-auto max-w-[300px] rounded-2xl bg-surface px-5 py-4 text-center shadow-floating">
-              <p className="text-emphasis">{state.releaseStatus === "empty" ? "地图内容暂未上线" : "地图内容加载失败"}</p>
-              <p className="mt-1.5 text-aux leading-relaxed text-sub">
-                {state.releaseStatus === "empty" ? "校园地图正在准备中，请稍后再来看看。" : "请检查网络后重试。"}
-              </p>
-            </div>
-          </div>
-        ) : null}
-
         {/* D1 选中 POI 的地图小卡（桌面端） */}
         {!isMobile && state.selectedPoi ? (
           <PoiMapCard
@@ -289,7 +300,7 @@ export function MapPage() {
             <div className="min-h-0 flex-1 overflow-y-auto pt-4">
               <PoiDetailSheet
                 building={state.selectedPoi}
-                events={activeEvents}
+                events={operations.status === "ready" ? operations.activeEvents : null}
                 initialMerchantId={state.selectedMerchantId}
               />
             </div>
@@ -342,7 +353,7 @@ export function MapPage() {
                 <div className="h-full overflow-y-auto pt-2">
                   <PoiDetailSheet
                     building={state.selectedPoi}
-                    events={activeEvents}
+                    events={operations.status === "ready" ? operations.activeEvents : null}
                     initialMerchantId={state.selectedMerchantId}
                   />
                 </div>
@@ -352,10 +363,15 @@ export function MapPage() {
                     query={state.query}
                     activeFilter={state.activeFilter}
                     searchActive={state.searchActive}
+                    searchStatus={state.searchStatus}
+                    searchError={state.searchError}
                     results={state.filteredResults}
+                    buildings={state.releaseData.buildings}
+                    filters={state.releaseData.filters}
                     onQueryChange={state.handleQueryChange}
                     onQueryFocus={state.handleQueryFocus}
                     onClearQuery={state.clearQuery}
+                    onRetrySearch={state.retrySearch}
                     onFilterToggle={state.handleFilterToggle}
                     onResultClick={(poiKey) => state.openPoi(poiKey, "search_result")}
                   />
@@ -368,6 +384,7 @@ export function MapPage() {
         {/* 事件详情卡：摘要卡「查看详情」的落地面板，数据取自已选中的事件 */}
         <OperationDetailSheet
           event={detailEvent}
+          buildings={state.releaseData.buildings}
           variant={isMobile ? "sheet" : "panel"}
           onClose={() => setDetailEventId(null)}
         />

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CampusConfig } from "../../lib/types";
+import type { CampusConfig, MapFeatureBinding } from "../../lib/types";
 
 type Size = { width: number; height: number };
 type Point = { x: number; y: number };
 type ViewWindow = { x: number; y: number; width: number; height: number };
 
-const FALLBACK_VIEWBOX_SIZE = 1000;
 const DEFAULT_CONTAINER_SIZE: Size = { width: 390, height: 844 };
 const MAX_ZOOM_SCALE = 6;
 const DRAG_THRESHOLD_PX = 2;
@@ -17,12 +16,16 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function parseViewBox(svgRaw: string) {
-  const match = svgRaw.match(/viewBox="([^"]+)"/);
-  if (!match) {
-    return { width: FALLBACK_VIEWBOX_SIZE, height: FALLBACK_VIEWBOX_SIZE };
+  const match = svgRaw.match(/\bviewBox\s*=\s*["']([^"']+)["']/i);
+  if (!match) throw new Error("Map SVG data contract violation: missing viewBox");
+  const values = match[1].trim().split(/[\s,]+/).map(Number);
+  if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) {
+    throw new Error("Map SVG data contract violation: viewBox must contain four finite numbers");
   }
-  const [, values] = match;
-  const [, , width, height] = values.split(/\s+/).map(Number);
+  const [, , width, height] = values;
+  if (width <= 0 || height <= 0) {
+    throw new Error("Map SVG data contract violation: viewBox width and height must be positive");
+  }
   return { width, height };
 }
 
@@ -128,14 +131,15 @@ function createMapStyle() {
   `;
 }
 
-function findBuildingId(target: Element | null, validIds: string[]) {
+function findFeatureId(target: Element | null, featureIdBySourceElementId: Map<string, string>) {
   let current: Element | null = target;
 
   while (current) {
-    const candidateId = current.getAttribute("id");
-    if (candidateId && validIds.includes(candidateId)) {
-      return candidateId;
-    }
+    const sourceElementId = current.getAttribute("id");
+    const featureId = sourceElementId
+      ? featureIdBySourceElementId.get(sourceElementId)
+      : undefined;
+    if (featureId) return featureId;
     current = current.parentElement;
   }
 
@@ -163,14 +167,14 @@ export type MapViewWindow = ViewWindow;
 
 interface MapCanvasProps {
   campus: CampusConfig;
-  currentBuildingIds: string[];
-  matchedIds: string[];
-  selectedId: string | null;
+  featureBindings: MapFeatureBinding[];
+  matchedFeatureIds: string[];
+  selectedFeatureId: string | null;
   selectionFocusBounds?: {
     top: number;
     bottom: number;
   };
-  onSelectBuilding: (svgElementId: string) => void;
+  onSelectFeature: (featureId: string) => void;
   onTapEmpty?: () => void;
   /** M8 事件叠加层：渲染为手势层内 svgHost 的兄弟节点，与地图同一坐标系 */
   overlay?: React.ReactNode;
@@ -186,11 +190,11 @@ interface MapCanvasProps {
 
 export function MapCanvas({
   campus,
-  currentBuildingIds,
-  matchedIds,
-  selectedId,
+  featureBindings,
+  matchedFeatureIds,
+  selectedFeatureId,
   selectionFocusBounds,
-  onSelectBuilding,
+  onSelectFeature,
   onTapEmpty,
   overlay,
   onTapOverlayEvent,
@@ -201,8 +205,23 @@ export function MapCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgHostRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  const buildingIdsRef = useRef<string[]>(currentBuildingIds);
-  const onSelectBuildingRef = useRef(onSelectBuilding);
+  const featureIdBySourceElementId = useMemo(
+    () => {
+      const result = new Map<string, string>();
+      for (const binding of featureBindings) {
+        if (result.has(binding.sourceElementId)) {
+          throw new Error(
+            `Map data contract violation: multiple features reference element ${binding.sourceElementId}`,
+          );
+        }
+        result.set(binding.sourceElementId, binding.id);
+      }
+      return result;
+    },
+    [featureBindings],
+  );
+  const featureIdBySourceElementIdRef = useRef(featureIdBySourceElementId);
+  const onSelectFeatureRef = useRef(onSelectFeature);
   const onTapEmptyRef = useRef(onTapEmpty);
   const onTapOverlayEventRef = useRef(onTapOverlayEvent);
   const viewWindowRef = useRef<ViewWindow>({
@@ -237,12 +256,12 @@ export function MapCanvas({
   });
 
   useEffect(() => {
-    buildingIdsRef.current = currentBuildingIds;
-  }, [currentBuildingIds]);
+    featureIdBySourceElementIdRef.current = featureIdBySourceElementId;
+  }, [featureIdBySourceElementId]);
 
   useEffect(() => {
-    onSelectBuildingRef.current = onSelectBuilding;
-  }, [onSelectBuilding]);
+    onSelectFeatureRef.current = onSelectFeature;
+  }, [onSelectFeature]);
 
   useEffect(() => {
     onTapEmptyRef.current = onTapEmpty;
@@ -273,15 +292,11 @@ export function MapCanvas({
   }, []);
 
   useEffect(() => {
-    if (!svgHostRef.current) {
-      return;
-    }
+    if (!svgHostRef.current) return;
 
     svgHostRef.current.innerHTML = campus.svgRaw;
     const svg = svgHostRef.current.querySelector("svg");
-    if (!svg) {
-      return;
-    }
+    if (!svg) throw new Error("Map SVG data contract violation: document has no svg root");
 
     svg.setAttribute("width", "100%");
     svg.setAttribute("height", "100%");
@@ -375,24 +390,36 @@ export function MapCanvas({
     const svg = svgRef.current;
     if (!svg) return;
 
-    const matchedSet = new Set(matchedIds);
-    for (const id of currentBuildingIds) {
-      const group = svg.querySelector<SVGGElement>(`g[id="${id}"]`);
-      if (!group) continue;
-      group.dataset.match = matchedSet.has(id) ? "true" : "false";
-      group.dataset.selected = selectedId === id ? "true" : "false";
-      group.style.cursor = "pointer";
+    const elementBySourceId = new Map(
+      Array.from(svg.querySelectorAll<SVGElement>("[id]")).map((element) => [element.id, element]),
+    );
+    const matchedSet = new Set(matchedFeatureIds);
+    for (const binding of featureBindings) {
+      const element = elementBySourceId.get(binding.sourceElementId);
+      if (!element) {
+        throw new Error(
+          `Map SVG data contract violation: feature ${binding.id} references missing element ${binding.sourceElementId}`,
+        );
+      }
+      element.dataset.match = matchedSet.has(binding.id) ? "true" : "false";
+      element.dataset.selected = selectedFeatureId === binding.id ? "true" : "false";
+      element.style.cursor = "pointer";
     }
-  }, [currentBuildingIds, matchedIds, selectedId]);
+  }, [campus.svgRaw, featureBindings, matchedFeatureIds, selectedFeatureId]);
 
   useEffect(() => {
-    if (!selectedId || !svgRef.current) {
+    if (!selectedFeatureId || !svgRef.current) {
       return;
     }
 
-    const target = svgRef.current.querySelector<SVGGElement>(`g[id="${selectedId}"]`);
+    const binding = featureBindings.find((item) => item.id === selectedFeatureId);
+    if (!binding) throw new Error(`Map data contract violation: unknown feature ${selectedFeatureId}`);
+    const target = Array.from(svgRef.current.querySelectorAll<SVGGraphicsElement>("[id]"))
+      .find((element) => element.id === binding.sourceElementId);
     if (!target) {
-      return;
+      throw new Error(
+        `Map SVG data contract violation: feature ${binding.id} references missing element ${binding.sourceElementId}`,
+      );
     }
 
     const box = target.getBBox();
@@ -440,7 +467,8 @@ export function MapCanvas({
     campus.selectionEdgePaddingRatio,
     campus.selectionScaleMultiplier,
     containerSize,
-    selectedId,
+    featureBindings,
+    selectedFeatureId,
     selectionFocusBounds,
     viewBox,
   ]);
@@ -621,9 +649,9 @@ export function MapCanvas({
         gestureRef.current.dragged = false;
         return;
       }
-      const svgElementId = findBuildingId(hit, buildingIdsRef.current);
-      if (svgElementId) {
-        onSelectBuildingRef.current(svgElementId);
+      const featureId = findFeatureId(hit, featureIdBySourceElementIdRef.current);
+      if (featureId) {
+        onSelectFeatureRef.current(featureId);
       } else {
         onTapEmptyRef.current?.();
       }

@@ -5,14 +5,17 @@ import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SheetModal } from "../../components/ui/SheetModal";
 import type { TransitStop } from "../../lib/api/types";
+import { useAsyncData } from "../../lib/hooks/useAsyncData";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useNow } from "../../lib/hooks/useNow";
 import { MapAppSheet, type MapTarget } from "../../lib/nav";
 import { useRelease } from "../../lib/release/ReleaseContext";
+import type { LoadedRelease } from "../../lib/release/mapData";
 import {
   BUCKET_LABELS,
   buildTripPreview,
   fetchSchedules,
+  fetchTripStops,
   formatDate,
   getCurrentDateBucket,
   getDaysInMonth,
@@ -21,7 +24,6 @@ import {
   isSameDay,
   mergeSchedulesByTime,
   parseTime,
-  stopToPoiKey,
   type ScheduleItem,
   type ScheduleStatus,
 } from "../../lib/transit/schedule";
@@ -32,8 +34,6 @@ type ScheduleState =
   | { status: "loading" }
   | { status: "ready"; schedules: ScheduleItem[] }
   | { status: "error"; message: string };
-
-const EMPTY_SCHEDULES: ScheduleItem[] = [];
 
 /** 倒计时文案：「5分钟后」/「1小时内」等，departure 已过返回 null。 */
 function countdownLabel(departureTime: string, now: Date): string | null {
@@ -212,23 +212,42 @@ function TripPreviewContent({
   schedule,
   fromStop,
   toStop,
+  release,
   onClose,
 }: {
   schedule: ScheduleItem;
   fromStop: TransitStop | null;
   toStop: TransitStop | null;
+  release: LoadedRelease;
   onClose: () => void;
 }) {
-  const { release } = useRelease();
   const [navTarget, setNavTarget] = useState<MapTarget | null>(null);
-
-  const preview = useMemo(
-    () => (release ? buildTripPreview(release.manifest, schedule) : null),
-    [schedule, release],
+  // 停靠序列与时刻走实时接口，改点即生效。
+  const { state: tripStopsState } = useAsyncData(
+    (signal) => fetchTripStops(schedule.tripId, signal),
+    [schedule.tripId],
   );
 
-  const boarding = preview?.stops.find((stop) => stop.role === "boarding");
-  const alightingStops = preview?.stops.filter((stop) => stop.role !== "boarding") ?? [];
+  const preview = useMemo(() => {
+    if (tripStopsState.status !== "ready") return null;
+    const value = buildTripPreview(tripStopsState.data, schedule);
+    if (value.stops.length < 2) throw new Error(`班次 ${schedule.tripId} 缺少完整停靠序列`);
+    if (value.stops[0].role !== "boarding") throw new Error(`班次 ${schedule.tripId} 缺少上车站`);
+    return value;
+  }, [schedule, tripStopsState]);
+
+  const boarding = preview?.stops[0] ?? null;
+  const alightingStops = preview === null ? null : preview.stops.slice(1);
+  const navigationTarget = (stopId: string, stopName: string): MapTarget | null => {
+    const releaseStop = release.manifest.transit.stops.find((stop) => stop.id === stopId);
+    if (!releaseStop?.place_id) return null;
+    const place = release.buildings.find((building) => building.poiKey === releaseStop.place_id);
+    if (!place?.navigationUrls) return null;
+    return { label: stopName, navigationUrls: place.navigationUrls };
+  };
+  const boardingNavigationTarget = boarding
+    ? navigationTarget(boarding.stopId, boarding.stopName)
+    : null;
 
   return (
     <div className="px-5 pb-6 pt-1">
@@ -239,7 +258,7 @@ function TripPreviewContent({
             {[
               fromStop && toStop ? `${fromStop.name} → ${toStop.name}` : null,
               schedule.isReservation ? "预约车" : "非预约车",
-              preview && preview.durationMinutes !== null ? `约 ${preview.durationMinutes} 分钟` : null,
+              preview?.durationMinutes !== null && preview?.durationMinutes !== undefined ? `约 ${preview.durationMinutes} 分钟` : null,
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -255,9 +274,13 @@ function TripPreviewContent({
         </button>
       </div>
 
-      {/* 站点时间线：每行「校区名 · 上/下车」+ 发车时间，右侧轻量导航链接 */}
-      <div className="mt-4">
-        {boarding ? (
+      {tripStopsState.status === "loading" ? (
+        <LoadingState label="正在加载停靠站点…" />
+      ) : tripStopsState.status === "error" ? (
+        <EmptyState title="停靠站点加载失败" subtitle={tripStopsState.message} />
+      ) : boarding && alightingStops ? (
+        /* 站点时间线：每行「校区名 · 上/下车」+ 发车时间，右侧轻量导航链接 */
+        <div className="mt-4">
           <div className="flex gap-3">
             <div className="flex flex-col items-center">
               <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
@@ -270,46 +293,45 @@ function TripPreviewContent({
                   {boarding.time ? `${boarding.time} 发车` : "发车时间待定"}
                 </div>
               </div>
-              <StopNavLink onClick={() => setNavTarget({ campus: boarding.stopName })} />
+              {boardingNavigationTarget ? (
+                <StopNavLink onClick={() => setNavTarget(boardingNavigationTarget)} />
+              ) : null}
             </div>
           </div>
-        ) : null}
 
-        <div className="flex gap-3">
+          <div className="flex gap-3">
           <div className="flex flex-col items-center">
             <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
           </div>
           <div className="min-w-0 flex-1">
-            {alightingStops.map((stop, index) => (
-              <div
-                key={stop.stopId}
-                className={`flex items-start justify-between gap-2 ${index > 0 ? "mt-2" : ""}`}
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-body font-medium text-ink">
-                    {stop.stopName}
-                    {stop.role === "alighting" && alightingStops.length > 1 ? ` · 下车点${index + 1}` : " · 下车"}
-                  </div>
-                  {stop.time ? (
-                    <div className="mt-1 text-label text-sub">
-                      {stop.time} {stop.timeLabel ?? ""}
+            {alightingStops.map((stop, index) => {
+              const stopNavigationTarget = navigationTarget(stop.stopId, stop.stopName);
+              return (
+                <div
+                  key={stop.stopId}
+                  className={`flex items-start justify-between gap-2 ${index > 0 ? "mt-2" : ""}`}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-body font-medium text-ink">
+                      {stop.stopName}
+                      {stop.role === "alighting" && alightingStops.length > 1 ? ` · 下车点${index + 1}` : " · 下车"}
                     </div>
+                    {stop.time ? (
+                      <div className="mt-1 text-label text-sub">
+                        {stop.time} {stop.timeLabel ?? ""}
+                      </div>
+                    ) : null}
+                  </div>
+                  {stopNavigationTarget ? (
+                    <StopNavLink onClick={() => setNavTarget(stopNavigationTarget)} />
                   ) : null}
                 </div>
-                <StopNavLink onClick={() => setNavTarget({ campus: stop.stopName })} />
-              </div>
-            ))}
-            {alightingStops.length === 0 ? (
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 text-body font-medium text-ink">
-                  {toStop?.name ?? "终点"} · 下车
-                </div>
-                {toStop ? <StopNavLink onClick={() => setNavTarget({ campus: toStop.name })} /> : null}
-              </div>
-            ) : null}
+              );
+            })}
           </div>
         </div>
-      </div>
+        </div>
+      ) : null}
 
       {schedule.isReservation ? (
         <button
@@ -331,11 +353,13 @@ function TripPreviewSheet({
   schedule,
   fromStop,
   toStop,
+  release,
   onClose,
 }: {
   schedule: ScheduleItem | null;
   fromStop: TransitStop | null;
   toStop: TransitStop | null;
+  release: LoadedRelease;
   onClose: () => void;
 }) {
   // 内容精简后 0.55 会留大片空白：标题 + 两站时间线约 200px，预约车多一个 CTA。
@@ -343,7 +367,7 @@ function TripPreviewSheet({
   return (
     <SheetModal open={schedule !== null} onClose={onClose} initialHeight={height}>
       {schedule ? (
-        <TripPreviewContent schedule={schedule} fromStop={fromStop} toStop={toStop} onClose={onClose} />
+        <TripPreviewContent schedule={schedule} fromStop={fromStop} toStop={toStop} release={release} onClose={onClose} />
       ) : null}
     </SheetModal>
   );
@@ -351,10 +375,27 @@ function TripPreviewSheet({
 
 /** M3 校车时刻表。 */
 export function ShuttlePage() {
+  const releaseState = useRelease();
+  if (releaseState.status === "loading") {
+    return <div className="h-full bg-page"><LoadingState label="正在加载校车数据…" /></div>;
+  }
+  if (releaseState.status !== "ready") {
+    return (
+      <div className="h-full bg-page px-5 pt-16">
+        <EmptyState
+          title={releaseState.status === "empty" ? "班次数据尚未发布" : "班次数据加载失败"}
+          subtitle={releaseState.status === "empty" ? "当前没有已发布的校车数据\n请稍后再试或联系管理员发布" : "请检查网络后重试"}
+        />
+      </div>
+    );
+  }
+  return <ReadyShuttlePage release={releaseState.release} />;
+}
+
+function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
   const navigate = useNavigate();
-  const { status: releaseStatus, release } = useRelease();
   const isDesktop = useBreakpoint() === "desktop";
-  const stops = useMemo(() => release?.manifest.transit.stops ?? [], [release]);
+  const stops = release.manifest.transit.stops;
 
   const [fromStop, setFromStop] = useState<TransitStop | null>(null);
   const [toStop, setToStop] = useState<TransitStop | null>(null);
@@ -364,14 +405,13 @@ export function ShuttlePage() {
   const now = useNow(30_000);
   const nowDate = new Date(now);
 
-  // release 就绪后初始化默认线路（保持旧默认：宝山 → 嘉定）
+  // 当前发布快照的站点顺序定义默认线路。
   const initializedRef = useRef(false);
   useEffect(() => {
     if (initializedRef.current || stops.length === 0) return;
     initializedRef.current = true;
-    const byName = (name: string) => stops.find((stop) => stop.name.includes(name));
-    setFromStop(byName("宝山") ?? stops[0]);
-    setToStop(byName("嘉定") ?? stops[1] ?? stops[0]);
+    setFromStop(stops[0]);
+    setToStop(stops[1] ?? stops[0]);
   }, [stops]);
 
   const todayFlag = isSameDay(selectedDate, nowDate);
@@ -393,10 +433,9 @@ export function ShuttlePage() {
     return () => controller.abort();
   }, [fromStop, toStop, selectedDate]);
 
-  const daySchedules = scheduleState.status === "ready" ? scheduleState.schedules : EMPTY_SCHEDULES;
-
-  const { nextReservation, nextNonReservation, otherBuses } = useMemo(() => {
-    const remaining = todayFlag ? getRemainingBuses(daySchedules, nowDate) : daySchedules;
+  const scheduleDisplay = useMemo(() => {
+    if (scheduleState.status !== "ready") return null;
+    const remaining = todayFlag ? getRemainingBuses(scheduleState.schedules, nowDate) : scheduleState.schedules;
     const nextReservation = remaining.find((schedule) => schedule.isReservation) ?? null;
     const nextNonReservation = remaining.find((schedule) => !schedule.isReservation) ?? null;
     const heroTimes = new Set(
@@ -409,7 +448,7 @@ export function ShuttlePage() {
       otherBuses: mergeSchedulesByTime(rest),
     };
     // now 每 30s 跳动，驱动倒计时与「已过班次」剔除
-  }, [daySchedules, todayFlag, now]);
+  }, [scheduleState, todayFlag, now]);
 
   const handleSwap = () => {
     setFromStop(toStop);
@@ -417,24 +456,11 @@ export function ShuttlePage() {
   };
 
   const handleTimeClick = (departureTime: string) => {
-    const remaining = todayFlag ? getRemainingBuses(daySchedules, nowDate) : daySchedules;
+    if (scheduleState.status !== "ready") return;
+    const remaining = todayFlag ? getRemainingBuses(scheduleState.schedules, nowDate) : scheduleState.schedules;
     const trip = remaining.find((schedule) => schedule.departureTime === departureTime);
     if (trip) setPreviewTrip(trip);
   };
-
-  if (releaseStatus === "loading") {
-    return <div className="h-full bg-page"><LoadingState label="正在加载校车数据…" /></div>;
-  }
-  if (releaseStatus === "empty" || releaseStatus === "error") {
-    return (
-      <div className="h-full bg-page px-5 pt-16">
-        <EmptyState
-          title={releaseStatus === "empty" ? "班次数据尚未发布" : "班次数据加载失败"}
-          subtitle={releaseStatus === "empty" ? "当前没有已发布的校车数据\n请稍后再试或联系管理员发布" : "请检查网络后重试"}
-        />
-      </div>
-    );
-  }
 
   const heroCard = (
     schedule: ScheduleItem | null,
@@ -509,7 +535,7 @@ export function ShuttlePage() {
           <LoadingState label="正在加载班次…" />
         ) : scheduleState.status === "error" ? (
           <EmptyState title="班次数据加载失败" subtitle={scheduleState.message} />
-        ) : daySchedules.length === 0 ? (
+        ) : scheduleState.schedules.length === 0 ? (
           <EmptyState
             title={todayFlag ? "今日无班次" : "当日无班次"}
             subtitle={fromStop?.id === toStop?.id ? "起点和终点相同" : "请尝试更换日期或线路"}
@@ -517,23 +543,23 @@ export function ShuttlePage() {
         ) : (
           <>
             {/* 最近一班（仅今天） */}
-            {todayFlag && (nextReservation || nextNonReservation) ? (
+            {scheduleDisplay && todayFlag && (scheduleDisplay.nextReservation || scheduleDisplay.nextNonReservation) ? (
               <div className="mt-5">
                 <SectionHeader title="最近一班" />
                 <div className="mt-2.5 flex gap-3">
-                  {heroCard(nextReservation, "预约车", "reservation")}
-                  {heroCard(nextNonReservation, "非预约车", "nonReservation")}
+                  {heroCard(scheduleDisplay.nextReservation, "预约车", "reservation")}
+                  {heroCard(scheduleDisplay.nextNonReservation, "非预约车", "nonReservation")}
                 </div>
               </div>
             ) : null}
 
             {/* 时刻网格 */}
-            {otherBuses.length > 0 ? (
+            {scheduleDisplay && scheduleDisplay.otherBuses.length > 0 ? (
               <div className="mt-5">
                 <SectionHeader title={todayFlag ? "今日其他班次" : "当日班次"} />
                 <div className="mt-2.5 rounded-2xl bg-surface px-5 py-2 shadow-card">
                   <div className="grid grid-cols-2">
-                    {otherBuses.map((item, index) => (
+                    {scheduleDisplay.otherBuses.map((item, index) => (
                       <button
                         key={item.departureTime}
                         type="button"
@@ -564,7 +590,7 @@ export function ShuttlePage() {
                     { label: "上车点", stop: fromStop },
                     { label: "下车点", stop: toStop },
                   ].map(({ label, stop }, index) => {
-                    const poiKey = release ? stopToPoiKey(stop, release.buildings) : null;
+                    const poiKey = stop.place_id;
                     return (
                       <button
                         key={label}
@@ -597,6 +623,7 @@ export function ShuttlePage() {
               schedule={previewTrip}
               fromStop={fromStop}
               toStop={toStop}
+              release={release}
               onClose={() => setPreviewTrip(null)}
             />
           </div>
@@ -608,6 +635,7 @@ export function ShuttlePage() {
           schedule={previewTrip}
           fromStop={fromStop}
           toStop={toStop}
+          release={release}
           onClose={() => setPreviewTrip(null)}
         />
       ) : null}

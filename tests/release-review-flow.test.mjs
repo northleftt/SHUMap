@@ -51,7 +51,7 @@ test("default release candidate picks the latest ready or published map version 
   const db = freshDatabase();
   const sql = extract(
     readSource("worker/modules/releases.ts"),
-    /: all\(env\.DB, `(select mv\.\*[\s\S]*?)`\)/,
+    /const DEFAULT_MAP_VERSION_QUERY = `(select mv\.\*[\s\S]*?)`;/,
     "default map version query",
   );
 
@@ -62,7 +62,10 @@ test("default release candidate picks the latest ready or published map version 
   seedMapVersion(db, { id: "mv_a_draft", campusId: "campus_a", label: "A v3", status: "draft", createdAt: "2026-03-01T00:00:00Z" });
   seedMapVersion(db, { id: "mv_b_pub", campusId: "campus_b", label: "B v1", status: "published", createdAt: "2026-01-05T00:00:00Z" });
 
-  const ids = db.prepare(sql).all().map((row) => row.id).sort();
+  const ids = db.prepare(sql).all()
+    .filter((row) => row.campus_id === "campus_a" || row.campus_id === "campus_b")
+    .map((row) => row.id)
+    .sort();
   // Import jobs only ever write 'ready' (worker/modules/jobs.ts), so a published-only
   // filter would return nothing and block every default publish.
   assert.deepEqual(ids, ["mv_a_new", "mv_b_pub"]);
@@ -106,22 +109,21 @@ test("a revision produced by adopting a submission enters the pending review que
   );
 
   seedCampus(db, "campus_a", "A");
-  db.prepare("insert into place_kinds(id,name,sort_order,is_searchable) values('kind_building','建筑',10,1)").run();
   db.prepare("insert into users(id,email,display_name,password_hash,status,token_version,created_at,updated_at) values('user_reviewer','reviewer@example.com','审核员','x','active',1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
-  db.prepare("insert into places(id,kind_id,campus_id,lifecycle_status,current_revision_id,created_at,updated_at) values('place_1','kind_building','campus_a','active','prev_1','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
+  db.prepare("insert into places(id,kind_id,campus_id,lifecycle_status,current_revision_id,created_at,updated_at) values('place_1','building','campus_a','active','prev_1','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
   db.prepare(
-    `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,content_json,content_hash,created_by,created_at)
-     values('prev_1','place_1',1,'approved','图书馆','{}','hash1','user_reviewer','2026-01-01T00:00:00Z')`,
+    `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,content_json,structure_json,content_hash,created_by,created_at)
+     values('prev_1','place_1',1,'approved','图书馆','{}','{}','hash1','user_reviewer','2026-01-01T00:00:00Z')`,
   ).run();
   // A plain draft revision on another place stays out of the queue.
-  db.prepare("insert into places(id,kind_id,campus_id,lifecycle_status,current_revision_id,created_at,updated_at) values('place_2','kind_building','campus_a','active',null,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
+  db.prepare("insert into places(id,kind_id,campus_id,lifecycle_status,current_revision_id,created_at,updated_at) values('place_2','building','campus_a','active',null,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
   db.prepare(
-    `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,content_json,content_hash,created_by,created_at)
-     values('prev_draft','place_2',1,'draft','食堂','{}','hash2','user_reviewer','2026-01-01T00:00:00Z')`,
+    `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,content_json,structure_json,content_hash,created_by,created_at)
+     values('prev_draft','place_2',1,'draft','食堂','{}','{}','hash2','user_reviewer','2026-01-01T00:00:00Z')`,
   ).run();
 
   db.prepare(insertSql).run(
-    "prev_2", "place_1", 2, "图书馆（新）", null, null, "{}", null, "prev_1", "hash2",
+    "prev_2", "place_1", 2, "图书馆（新）", null, null, "{}", "{}", null, "prev_1", "hash2",
     "user_reviewer", "2026-02-01T00:00:00Z", "2026-02-01T00:00:00Z",
   );
 
@@ -142,9 +144,8 @@ test("place review still drives the collection task from submitted to accepted",
   );
 
   seedCampus(db, "campus_a", "A");
-  db.prepare("insert into place_kinds(id,name,sort_order,is_searchable) values('kind_building','建筑',10,1)").run();
   db.prepare("insert into users(id,email,display_name,password_hash,status,token_version,created_at,updated_at) values('user_reviewer','reviewer@example.com','审核员','x','active',1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
-  db.prepare("insert into places(id,kind_id,campus_id,lifecycle_status,current_revision_id,created_at,updated_at) values('place_1','kind_building','campus_a','active',null,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
+  db.prepare("insert into places(id,kind_id,campus_id,lifecycle_status,current_revision_id,created_at,updated_at) values('place_1','building','campus_a','active',null,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')").run();
   db.prepare(
     `insert into place_revisions(id,place_id,revision_no,editorial_status,display_name,content_json,content_hash,created_by,created_at,submitted_at)
      values('prev_2','place_1',1,'in_review','图书馆','{}','hash1','user_reviewer','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,

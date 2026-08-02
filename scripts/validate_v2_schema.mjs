@@ -27,7 +27,7 @@ if (missing.length) {
 
 for (const forbidden of ["status != 'hidden'", "ADMIN_TOKEN_SECRET", "poi_bindings", "poi_tags"]) {
   if (sql.includes(forbidden)) {
-    console.error(`Legacy schema token remains in v2 migration: ${forbidden}`);
+    console.error(`Forbidden schema token remains in v2 migration: ${forbidden}`);
     process.exit(1);
   }
 }

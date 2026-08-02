@@ -1,15 +1,25 @@
-import type { ReleaseManifest, SessionPrincipal } from "../domain/types";
+import type {
+  FacilityContent,
+  MerchantContent,
+  PlaceContent,
+} from "../../shared/revision-contract";
+import { NAVIGATION_CRS } from "../../shared/revision-contract";
 import type { DurableObjectState, Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, jsonString, makeId, parseJson, requiredString, sha256 } from "../lib/values";
+import { isoNow, jsonString, makeId, parseJsonObject, requiredString, sha256 } from "../lib/values";
+import {
+  normalizeFacilityContent,
+  normalizeMerchantContent,
+  normalizePlaceContent,
+} from "../lib/revision-contracts";
 import { normalizeSearchText } from "./places";
 
 interface ReleaseRequest {
   version: string;
-  summary?: string;
-  reason?: string;
-  mapVersionIds?: string[];
+  summary: string | null;
+  reason: string | null;
+  mapVersionIds: string[];
 }
 
 interface ReleaseRow {
@@ -21,6 +31,339 @@ interface ReleaseRow {
   artifact_sha256: string | null;
   created_at: string;
 }
+
+interface PlaceCandidate {
+  id: string;
+  kindId: string;
+  kindName: string;
+  campusId: string | null;
+  parentPlaceId: string | null;
+  lifecycleStatus: string;
+  isBuilding: number;
+  revisionId: string;
+  displayName: string;
+  summary: string | null;
+  description: string | null;
+  contentJson: string;
+  contentHash: string;
+}
+
+interface FacilityCandidate {
+  id: string;
+  facilityTypeId: string;
+  hostPlaceId: string | null;
+  floorId: string | null;
+  indoorSpaceId: string | null;
+  operationalStatus: "available" | "partially_available" | "unavailable" | "unknown";
+  quantity: number | null;
+  revisionId: string;
+  displayName: string;
+  serviceHoursJson: string | null;
+  contentJson: string;
+  contentHash: string;
+  visibilityPolicyJson: string;
+  facilityTypeStatus: string;
+}
+
+interface MerchantCandidate {
+  id: string;
+  organizationId: string | null;
+  hostPlaceId: string;
+  floorId: string | null;
+  indoorSpaceId: string | null;
+  revisionId: string;
+  displayName: string;
+  businessType: string | null;
+  openingHoursJson: string | null;
+  contactJson: string | null;
+  contentJson: string;
+  contentHash: string;
+}
+
+interface MapCandidate {
+  id: string;
+  campus_id: string | null;
+  floor_id: string | null;
+  map_asset_id: string;
+  parent_version_id: string | null;
+  campusCode: string | null;
+  campusName: string | null;
+  version_label: string;
+  coordinate_space_type: string;
+  coordinate_space_json: string;
+  parser_version: string | null;
+  lifecycle_status: string;
+  created_by: string | null;
+  created_at: string;
+  checksum: string;
+  assetKey: string;
+  assetByteSize: number;
+  assetSha256: string;
+  assetStatus: string;
+  assetBucketScope: string;
+}
+
+interface MapAssetValidation {
+  mapVersionId: string;
+  objectKey: string;
+  valid: boolean;
+  error: string | null;
+}
+
+interface MapSelectionValidation {
+  requestedMapVersionIds: string[];
+  selectedMapVersionIds: string[];
+  missingMapVersionIds: string[];
+}
+
+type ReleaseMap = Omit<MapCandidate, "assetByteSize" | "assetSha256" | "assetStatus" | "assetBucketScope">;
+
+interface LocationCandidate {
+  id: string;
+  entityType: "place" | "facility" | "merchant_outlet";
+  entityId: string;
+  role: string;
+  isPrimary: number;
+  campus_id: string | null;
+  building_place_id: string | null;
+  floor_id: string | null;
+  indoor_space_id: string | null;
+  geometry_type: string;
+  geometry_json: string | null;
+  crs: string | null;
+  map_version_id: string | null;
+  map_feature_id: string | null;
+  location_hint: string | null;
+  precision_level: string;
+  accuracy_meters: number | null;
+  source_id: string | null;
+  verification_status: string;
+  verified_by: string | null;
+  verified_at: string | null;
+  valid_from: string | null;
+  valid_to: string | null;
+  created_at: string;
+  updated_at: string;
+  sourceElementId: string | null;
+  featureKind: string | null;
+}
+
+function locationGeometry(location: LocationCandidate): Record<string, unknown> | null {
+  return location.geometry_json === null
+    ? null
+    : parseJsonObject(location.geometry_json, `location ${location.id} geometry_json`);
+}
+
+interface TransitStopCandidate {
+  id: string;
+  place_id: string | null;
+  campus_id: string | null;
+  code: string | null;
+  name: string;
+  status: "active";
+  created_at: string;
+  updated_at: string;
+}
+
+interface FloorCandidate {
+  id: string;
+  buildingPlaceId: string;
+  levelCode: string;
+  levelOrder: number;
+  displayName: string;
+  isPublic: number;
+}
+
+interface FacilityTypeCandidate {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  iconKey: string | null;
+  status: string;
+}
+
+interface ReleasePlace extends Omit<PlaceCandidate, "isBuilding" | "contentJson"> {
+  isBuilding: boolean;
+  content: PlaceContent;
+  aliases: string[];
+}
+
+interface ReleaseFacility extends Omit<FacilityCandidate, "serviceHoursJson" | "contentJson" | "visibilityPolicyJson"> {
+  serviceHours: { text: string } | null;
+  content: FacilityContent;
+  visibilityPolicy: Record<string, unknown>;
+}
+
+interface ReleaseMerchant extends Omit<MerchantCandidate, "openingHoursJson" | "contactJson" | "contentJson"> {
+  openingHours: { text: string } | null;
+  contact: { phone: string } | null;
+  content: MerchantContent;
+}
+
+interface ReleaseMapFilter {
+  id: string;
+  key: string;
+  label: string;
+  sortOrder: number;
+  placeKindIds: string[];
+  facilityTypeIds: string[];
+  includesMerchants: boolean;
+}
+
+interface SearchDocumentCandidate {
+  documentType: "place" | "facility" | "merchant_outlet";
+  entityId: string;
+  title: string;
+  subtitle: string | null;
+  normalizedText: string;
+  pinyin: null;
+  campusId: string | null;
+  buildingPlaceId: string | null;
+  floorId: string | null;
+  facets: string[];
+  mapTarget: { type: "locationAnchor" | "place" | "facility" | "merchant_outlet"; id: string };
+  rankingWeight: number;
+}
+
+export interface ReleaseManifest {
+  schemaVersion: 2;
+  release: { id: string; version: string; createdAt: string };
+  campuses: Array<{ id: string; code: string; name: string; timezone: string }>;
+  places: ReleasePlace[];
+  facilities: ReleaseFacility[];
+  merchants: ReleaseMerchant[];
+  maps: ReleaseMap[];
+  locations: LocationCandidate[];
+  floors: FloorCandidate[];
+  facilityTypes: FacilityTypeCandidate[];
+  mapFilters: ReleaseMapFilter[];
+  transit: { stops: TransitStopCandidate[] };
+  searchDocuments: SearchDocumentCandidate[];
+  generatedAt: string;
+}
+
+function databaseBoolean(value: number, field: string): boolean {
+  if (value === 0) return false;
+  if (value === 1) return true;
+  throw new Error(`${field} must be stored as 0 or 1`);
+}
+
+function nullableJsonObject(value: string | null, field: string): Record<string, unknown> | null {
+  return value === null ? null : parseJsonObject(value, field);
+}
+
+function singleTextObject(
+  value: string | null,
+  field: string,
+  property: "text" | "phone",
+): { text: string } | { phone: string } | null {
+  const parsed = nullableJsonObject(value, field);
+  if (parsed === null) return null;
+  const keys = Object.keys(parsed);
+  if (keys.length !== 1 || keys[0] !== property) throw new Error(`${field} must contain only ${property}`);
+  const text = requiredString(parsed[property], `${field}.${property}`, 2_000);
+  return property === "text" ? { text } : { phone: text };
+}
+
+function releaseFacility(facility: FacilityCandidate): ReleaseFacility {
+  const { serviceHoursJson, contentJson, visibilityPolicyJson, ...fields } = facility;
+  const serviceHours = singleTextObject(
+    serviceHoursJson,
+    `facility ${facility.id} serviceHoursJson`,
+    "text",
+  );
+  return {
+    ...fields,
+    serviceHours: serviceHours as { text: string } | null,
+    content: normalizeFacilityContent(
+      parseJsonObject(contentJson, `facility ${facility.id} contentJson`),
+    ),
+    visibilityPolicy: parseJsonObject(
+      visibilityPolicyJson,
+      `facility ${facility.id} visibilityPolicyJson`,
+    ),
+  };
+}
+
+function releaseMerchant(merchant: MerchantCandidate): ReleaseMerchant {
+  const { openingHoursJson, contactJson, contentJson, ...fields } = merchant;
+  return {
+    ...fields,
+    openingHours: singleTextObject(
+      openingHoursJson,
+      `merchant ${merchant.id} openingHoursJson`,
+      "text",
+    ) as { text: string } | null,
+    contact: singleTextObject(
+      contactJson,
+      `merchant ${merchant.id} contactJson`,
+      "phone",
+    ) as { phone: string } | null,
+    content: normalizeMerchantContent(
+      parseJsonObject(contentJson, `merchant ${merchant.id} contentJson`),
+    ),
+  };
+}
+
+function requestObject(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new HttpError(400, "validation_error", `${field} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requestNullableString(value: unknown, field: string, maximum: number): string | null {
+  if (value === null) return null;
+  return requiredString(value, field, maximum);
+}
+
+function releaseRequest(value: unknown): ReleaseRequest {
+  const body = requestObject(value, "request body");
+  const allowed = new Set(["version", "summary", "reason", "mapVersionIds"]);
+  for (const key of Object.keys(body)) {
+    if (!allowed.has(key)) throw new HttpError(400, "validation_error", `${key} is not supported`);
+  }
+  for (const key of allowed) {
+    if (!Object.hasOwn(body, key)) throw new HttpError(400, "validation_error", `${key} is required`);
+  }
+  if (!Array.isArray(body.mapVersionIds) || body.mapVersionIds.length > 100) {
+    throw new HttpError(400, "validation_error", "mapVersionIds must be an array with at most 100 items");
+  }
+  const mapVersionIds = body.mapVersionIds.map((id, index) => requiredString(id, `mapVersionIds[${index}]`, 100));
+  if (new Set(mapVersionIds).size !== mapVersionIds.length) {
+    throw new HttpError(400, "validation_error", "mapVersionIds must not contain duplicates");
+  }
+  return {
+    version: requiredString(body.version, "version", 100),
+    summary: requestNullableString(body.summary, "summary", 2_000),
+    reason: requestNullableString(body.reason, "reason", 2_000),
+    mapVersionIds,
+  };
+}
+
+function rollbackRequest(value: unknown): { reason: string | null } {
+  const body = requestObject(value, "request body");
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== "reason") {
+    throw new HttpError(400, "validation_error", "request body must contain reason");
+  }
+  return { reason: requestNullableString(body.reason, "reason", 2_000) };
+}
+
+const DEFAULT_MAP_VERSION_QUERY = `select mv.*,ma.checksum,me.object_key as assetKey,me.byte_size as assetByteSize,
+       me.sha256 as assetSha256,me.status as assetStatus,me.bucket_scope as assetBucketScope,
+       c.code as campusCode,c.name as campusName
+  from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id
+  left join campuses c on c.id=mv.campus_id
+ where mv.lifecycle_status in ('ready','published')
+   and mv.id=(select mv2.id from map_versions mv2
+               where mv2.lifecycle_status in ('ready','published')
+                 and coalesce(mv2.campus_id,'')=coalesce(mv.campus_id,'')
+                 and coalesce(mv2.floor_id,'')=coalesce(mv.floor_id,'')
+               order by mv2.created_at desc,mv2.id desc limit 1)`;
+const MAX_RELEASE_ARTIFACT_BYTES = 16 * 1024 * 1024;
+const MAX_MAP_ASSET_BYTES = 50 * 1024 * 1024;
 
 export class ReleaseCoordinator {
   constructor(private readonly state: DurableObjectState, private readonly env: Env) {}
@@ -48,19 +391,21 @@ export class ReleaseCoordinator {
   }
 
   private async publish(request: Request, actorUserId: string): Promise<Response> {
-    const body = await readJson<ReleaseRequest>(request);
-    const version = requiredString(body.version, "version", 100);
+    const body = releaseRequest(await readJson<unknown>(request));
+    const { version } = body;
     const duplicate = await first<{ id: string }>(this.env.DB, "select id from releases where version=?", [version]);
     if (duplicate) throw new HttpError(409, "duplicate_version", "Release version already exists");
     const releaseId = makeId("release");
     const now = isoNow();
     await this.env.DB.prepare(
       `insert into releases(id,version,schema_version,status,summary,created_by,created_at) values(?,?,2,'validating',?,?,?)`,
-    ).bind(releaseId, version, body.summary ?? null, actorUserId, now).run();
+    ).bind(releaseId, version, body.summary, actorUserId, now).run();
 
     try {
-      const candidate = await buildCandidate(this.env, releaseId, version, now, body.mapVersionIds ?? []);
-      const validation = validateCandidate(candidate);
+      const candidate = await buildCandidate(this.env, releaseId, version, now, body.mapVersionIds);
+      const assetValidation = await validateMapAssets(this.env, candidate.maps);
+      const selectionValidation = validateMapSelection(body.mapVersionIds, candidate.maps);
+      const validation = validateCandidate(candidate, assetValidation, selectionValidation);
       await this.env.DB.prepare("update releases set validation_report_json=?,validated_at=?,status=? where id=?")
         .bind(jsonString(validation), isoNow(), validation.valid ? "ready" : "validation_failed", releaseId).run();
       if (!validation.valid) {
@@ -69,6 +414,10 @@ export class ReleaseCoordinator {
 
       await this.env.DB.prepare("update releases set status='publishing' where id=?").bind(releaseId).run();
       const serialized = JSON.stringify(candidate.manifest);
+      const artifactBytes = new TextEncoder().encode(serialized);
+      if (artifactBytes.byteLength > MAX_RELEASE_ARTIFACT_BYTES) {
+        throw new Error(`Release artifact exceeds ${MAX_RELEASE_ARTIFACT_BYTES} bytes`);
+      }
       const artifactHash = await sha256(serialized);
       const artifactKey = `release/artifacts/${releaseId}/manifest.${artifactHash}.json`;
       await this.env.SHUMAP_BUCKET.put(artifactKey, serialized, {
@@ -76,7 +425,10 @@ export class ReleaseCoordinator {
         customMetadata: { releaseId, version, sha256: artifactHash },
       });
       const stored = await this.env.SHUMAP_BUCKET.get(artifactKey);
-      if (!stored || (await sha256(await stored.text())) !== artifactHash) throw new Error("Release artifact verification failed");
+      if (!stored || stored.size !== artifactBytes.byteLength || stored.size > MAX_RELEASE_ARTIFACT_BYTES) {
+        throw new Error("Release artifact size verification failed");
+      }
+      if ((await sha256(await stored.arrayBuffer())) !== artifactHash) throw new Error("Release artifact checksum verification failed");
 
       const previous = await first<{ id: string }>(this.env.DB, "select id from releases where status='active'");
       const statements = [];
@@ -86,16 +438,15 @@ export class ReleaseCoordinator {
       ).bind(artifactKey, artifactHash, isoNow(), previous?.id ?? null, releaseId));
       statements.push(this.env.DB.prepare(
         "insert into release_activations(id,from_release_id,to_release_id,action,actor_user_id,reason,created_at) values(?,?,?,'publish',?,?,?)",
-      ).bind(makeId("activation"), previous?.id ?? null, releaseId, actorUserId, body.reason ?? null, isoNow()));
+      ).bind(makeId("activation"), previous?.id ?? null, releaseId, actorUserId, body.reason, isoNow()));
       // 激活即发布：本次 release 选中的 map version 从 'ready' 提升为 'published'，
       // 否则没有任何代码路径写入 'published'（jobs.ts 导入只写 'ready'）。
-      for (const map of candidate.maps as Array<Record<string, unknown>>) {
+      for (const map of candidate.maps) {
         statements.push(this.env.DB.prepare(
           "update map_versions set lifecycle_status='published' where id=? and lifecycle_status='ready'",
-        ).bind(String(map.id)));
+        ).bind(map.id));
       }
       await this.env.DB.batch(statements);
-      await this.env.RELEASE_KV.put("current_release_v2", releaseId);
       return json({ id: releaseId, version, status: "active", artifactSha256: artifactHash, validation }, { status: 201 });
     } catch (error) {
       await this.env.DB.prepare("update releases set status='failed',validation_report_json=? where id=?")
@@ -105,7 +456,7 @@ export class ReleaseCoordinator {
   }
 
   private async rollback(request: Request, actorUserId: string, targetReleaseId: string): Promise<Response> {
-    const body = await readJson<{ reason?: string }>(request);
+    const body = rollbackRequest(await readJson<unknown>(request));
     const target = await first<ReleaseRow>(
       this.env.DB,
       "select id,version,schema_version,status,artifact_key,artifact_sha256,created_at from releases where id=? and status in ('active','superseded')",
@@ -114,7 +465,10 @@ export class ReleaseCoordinator {
     if (!target?.artifact_key || !target.artifact_sha256) throw new HttpError(404, "not_found", "Rollback target is unavailable");
     if (target.schema_version !== 2) throw new HttpError(409, "incompatible_release", "Rollback target uses an incompatible schema");
     const object = await this.env.SHUMAP_BUCKET.get(target.artifact_key);
-    if (!object || (await sha256(await object.text())) !== target.artifact_sha256) {
+    if (!object || object.size <= 0 || object.size > MAX_RELEASE_ARTIFACT_BYTES) {
+      throw new HttpError(409, "invalid_artifact", "Rollback target artifact has an invalid size");
+    }
+    if ((await sha256(await object.arrayBuffer())) !== target.artifact_sha256) {
       throw new HttpError(409, "invalid_artifact", "Rollback target artifact failed verification");
     }
     const current = await first<{ id: string }>(this.env.DB, "select id from releases where status='active'");
@@ -124,65 +478,114 @@ export class ReleaseCoordinator {
       this.env.DB.prepare("update releases set status='active',activated_at=? where id=?").bind(isoNow(), targetReleaseId),
       this.env.DB.prepare(
         "insert into release_activations(id,from_release_id,to_release_id,action,actor_user_id,reason,created_at) values(?,?,?,'rollback',?,?,?)",
-      ).bind(makeId("activation"), current?.id ?? null, targetReleaseId, actorUserId, body.reason ?? null, isoNow()),
+      ).bind(makeId("activation"), current?.id ?? null, targetReleaseId, actorUserId, body.reason, isoNow()),
     ]);
-    await this.env.RELEASE_KV.put("current_release_v2", targetReleaseId);
     return json({ id: targetReleaseId, status: "active", rolledBackFrom: current?.id ?? null });
   }
 }
 
 async function buildCandidate(env: Env, releaseId: string, version: string, createdAt: string, requestedMapVersionIds: string[]) {
-  const [campuses, places, facilities, merchants, locations, maps, stops, routes, patterns, patternStops, calendars, exceptions, trips, stopTimes] = await Promise.all([
-    all(env.DB, "select id,code,name,timezone from campuses where status='active' order by code"),
-    all<Record<string, unknown>>(env.DB, `select p.id,p.kind_id as kindId,p.campus_id as campusId,p.parent_place_id as parentPlaceId,p.lifecycle_status as lifecycleStatus,
+  const [campuses, places, facilities, merchants, maps, stops] = await Promise.all([
+    all<{ id: string; code: string; name: string; timezone: string }>(
+      env.DB,
+      "select id,code,name,timezone from campuses where status='active' order by code",
+    ),
+    all<PlaceCandidate>(env.DB, `select p.id,p.kind_id as kindId,pk.name as kindName,p.campus_id as campusId,
+      p.parent_place_id as parentPlaceId,p.lifecycle_status as lifecycleStatus,
+      case when b.place_id is null then 0 else 1 end as isBuilding,
       r.id as revisionId,r.display_name as displayName,r.summary,r.description,r.content_json as contentJson,r.content_hash as contentHash
-      from places p join place_revisions r on r.id=p.current_revision_id where p.lifecycle_status<>'retired' and r.editorial_status='approved'`),
-    all<Record<string, unknown>>(env.DB, `select f.id,f.facility_type_id as facilityTypeId,f.host_place_id as hostPlaceId,f.floor_id as floorId,f.indoor_space_id as indoorSpaceId,
+      from places p join place_kinds pk on pk.id=p.kind_id left join buildings b on b.place_id=p.id
+      join place_revisions r on r.id=p.current_revision_id
+      where p.lifecycle_status<>'retired' and p.approval_pending=0 and r.editorial_status='approved'`),
+    all<FacilityCandidate>(env.DB, `select f.id,f.facility_type_id as facilityTypeId,f.host_place_id as hostPlaceId,f.floor_id as floorId,f.indoor_space_id as indoorSpaceId,
       f.operational_status as operationalStatus,f.quantity,r.id as revisionId,r.display_name as displayName,r.service_hours_json as serviceHoursJson,
-      r.content_json as contentJson,r.content_hash as contentHash,t.visibility_policy_json as visibilityPolicyJson
+      r.content_json as contentJson,r.content_hash as contentHash,t.visibility_policy_json as visibilityPolicyJson,t.status as facilityTypeStatus
       from facility_instances f join facility_revisions r on r.id=f.current_revision_id join facility_types t on t.id=f.facility_type_id
-      where f.lifecycle_status='active' and r.editorial_status='approved'`),
-    all<Record<string, unknown>>(env.DB, `select m.id,m.organization_id as organizationId,m.host_place_id as hostPlaceId,m.floor_id as floorId,m.indoor_space_id as indoorSpaceId,
+      where f.lifecycle_status='active' and f.approval_pending=0 and r.editorial_status='approved'`),
+    all<MerchantCandidate>(env.DB, `select m.id,m.organization_id as organizationId,m.host_place_id as hostPlaceId,m.floor_id as floorId,m.indoor_space_id as indoorSpaceId,
       r.id as revisionId,r.display_name as displayName,r.business_type as businessType,r.opening_hours_json as openingHoursJson,r.contact_json as contactJson,
       r.content_json as contentJson,r.content_hash as contentHash
-      from merchant_outlets m join merchant_revisions r on r.id=m.current_revision_id where m.lifecycle_status<>'retired' and r.editorial_status='approved'`),
-    all(env.DB, `select el.entity_type as entityType,el.entity_id as entityId,el.role,el.is_primary as isPrimary,la.*
-      from entity_locations el join location_anchors la on la.id=el.anchor_id where el.valid_to is null and (la.valid_to is null or la.valid_to>?)`, [isoNow()]),
+      from merchant_outlets m join merchant_revisions r on r.id=m.current_revision_id where m.lifecycle_status<>'retired' and m.approval_pending=0 and r.editorial_status='approved'`),
     requestedMapVersionIds.length
-      ? all(env.DB, `select mv.*,ma.checksum,me.object_key as assetKey from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id where mv.id in (${requestedMapVersionIds.map(() => "?").join(",")}) and mv.lifecycle_status in ('ready','published')`, requestedMapVersionIds)
+      ? all<MapCandidate>(env.DB, `select mv.*,ma.checksum,me.object_key as assetKey,me.byte_size as assetByteSize,
+              me.sha256 as assetSha256,me.status as assetStatus,me.bucket_scope as assetBucketScope,
+              c.code as campusCode,c.name as campusName
+          from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id
+          left join campuses c on c.id=mv.campus_id
+         where mv.id in (${requestedMapVersionIds.map(() => "?").join(",")}) and mv.lifecycle_status in ('ready','published')`, requestedMapVersionIds)
       // 默认发布：每个 campus / floor 取最新的 ready 或 published 版本。
       // 导入产出的版本是 'ready'（jobs.ts），只有发布激活才会把它们提升为 'published'。
-      : all(env.DB, `select mv.*,ma.checksum,me.object_key as assetKey from map_versions mv
-           join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id
-          where mv.lifecycle_status in ('ready','published')
-            and mv.id=(select mv2.id from map_versions mv2
-                        where mv2.lifecycle_status in ('ready','published')
-                          and coalesce(mv2.campus_id,'')=coalesce(mv.campus_id,'')
-                          and coalesce(mv2.floor_id,'')=coalesce(mv.floor_id,'')
-                        order by mv2.created_at desc,mv2.id desc limit 1)`),
-    all(env.DB, "select * from transit_stops where status='active'"), all(env.DB, "select * from transit_routes where status='active'"),
-    all(env.DB, "select * from transit_patterns"), all(env.DB, "select * from transit_pattern_stops order by pattern_id,stop_sequence"),
-    all(env.DB, "select * from service_calendars"), all(env.DB, "select * from service_calendar_exceptions"),
-    all(env.DB, "select * from transit_trips where status='active'"), all(env.DB, "select * from transit_stop_times order by trip_id,stop_sequence"),
+      : all<MapCandidate>(env.DB, DEFAULT_MAP_VERSION_QUERY),
+    // 快照只留站点：站点带几何，是地图数据。线路/班次/时刻/日历改点即生效，
+    // 由 GET /api/public/transit/journeys 与 /transit/trips/:tripId/stops 实时下发。
+    all<TransitStopCandidate>(env.DB, `select id,place_id,campus_id,code,name,status,created_at,updated_at
+      from transit_stops where status='active' order by name,id`),
   ]);
+
+  const candidateIds = {
+    place: new Set(places.map((row) => row.id)),
+    facility: new Set(facilities.map((row) => row.id)),
+    merchant_outlet: new Set(merchants.map((row) => row.id)),
+  };
+  const allLocations = await all<LocationCandidate>(
+    env.DB,
+    `select el.entity_type as entityType,el.entity_id as entityId,el.role,el.is_primary as isPrimary,
+            la.*,mf.source_element_id as sourceElementId,mf.feature_kind as featureKind
+       from entity_locations el join location_anchors la on la.id=el.anchor_id
+       left join map_features mf on mf.id=la.map_feature_id
+      where el.valid_to is null and (la.valid_to is null or la.valid_to>?)`,
+    [isoNow()],
+  );
+  const locations = allLocations.filter((location) => {
+    if (location.entityType === "place") return candidateIds.place.has(location.entityId);
+    if (location.entityType === "facility") return candidateIds.facility.has(location.entityId);
+    if (location.entityType === "merchant_outlet") return candidateIds.merchant_outlet.has(location.entityId);
+    return false;
+  });
 
   // 楼层与设施类型进 manifest：客户端楼层视图/设施筛选此前只能绕过 release 直读
   // GET /api/public/places/:id，导致「地图数据只来自 release」的约定有个缺口。
-  // 设施的实时状态（operational_status）仍旧走那个接口，这里只发布静态骨架。
-  const [floors, facilityTypes] = await Promise.all([
-    all(env.DB, `select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
+  // 设施的实时状态（operational_status）由 GET /api/public/facility-status 覆盖，
+  // 这里发布的那一份只是基线。
+  const [allFloors, facilityTypes, mapFilters] = await Promise.all([
+    all<FloorCandidate>(env.DB, `select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
       display_name as displayName,is_public as isPublic from floors where lifecycle_status='active' order by building_place_id,level_order`),
-    all(env.DB, "select id,code,name,category,icon_key as iconKey from facility_types order by category,name"),
+    all<FacilityTypeCandidate>(env.DB, "select id,code,name,category,icon_key as iconKey,status from facility_types order by category,name"),
+    loadReleaseMapFilters(env),
   ]);
+  const floors = allFloors.filter((floor) => candidateIds.place.has(floor.buildingPlaceId));
 
-  const searchDocuments = buildSearchDocuments(releaseId, places, facilities, merchants, locations);
+  const aliasRows = await all<{ placeId: string; name: string }>(
+    env.DB,
+    "select place_id as placeId,name from place_names where name_type in ('alias','former','short','english') and is_searchable=1 order by place_id,name",
+  );
+  const aliasesByPlace = new Map(places.map((place) => [place.id, [] as string[]]));
+  for (const row of aliasRows) {
+    const aliases = aliasesByPlace.get(row.placeId);
+    if (aliases) aliases.push(row.name);
+  }
+  const releasePlaces = places.map((place): ReleasePlace => {
+    const { isBuilding, contentJson, ...fields } = place;
+    return {
+      ...fields,
+      isBuilding: databaseBoolean(isBuilding, `place ${place.id} isBuilding`),
+      content: normalizePlaceContent(parseJsonObject(contentJson, `place ${place.id} contentJson`)),
+      aliases: aliasesByPlace.get(place.id)!,
+    };
+  });
+  const releaseFacilities = facilities.map(releaseFacility);
+  const releaseMerchants = merchants.map(releaseMerchant);
+  const releaseMaps = maps.map(releaseMap);
+  const searchDocuments = buildSearchDocuments(releasePlaces, releaseFacilities, releaseMerchants, locations);
   const manifest: ReleaseManifest = {
     schemaVersion: 2,
     release: { id: releaseId, version, createdAt },
     campuses,
-    places: places.map(normalizeJsonFields), facilities: facilities.map(normalizeJsonFields), merchants: merchants.map(normalizeJsonFields),
-    maps, locations, floors, facilityTypes,
-    transit: { stops, routes, patterns, patternStops, calendars, exceptions, trips, stopTimes },
+    places: releasePlaces,
+    facilities: releaseFacilities,
+    merchants: releaseMerchants,
+    maps: releaseMaps, locations, floors, facilityTypes, mapFilters,
+    transit: { stops },
     searchDocuments,
     generatedAt: isoNow(),
   };
@@ -191,108 +594,328 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
   for (const [entityType, records] of [["place", places], ["facility", facilities], ["merchant_outlet", merchants]] as const) {
     for (const record of records) {
       itemStatements.push(env.DB.prepare("insert into release_items(release_id,entity_type,entity_id,revision_id,item_hash) values(?,?,?,?,?)")
-        .bind(releaseId, entityType, String(record.id), String(record.revisionId), String(record.contentHash)));
+        .bind(releaseId, entityType, record.id, record.revisionId, record.contentHash));
     }
   }
-  for (const map of maps) itemStatements.push(env.DB.prepare("insert into release_map_versions(release_id,map_version_id) values(?,?)").bind(releaseId, String((map as Record<string, unknown>).id)));
+  for (const map of maps) itemStatements.push(env.DB.prepare("insert into release_map_versions(release_id,map_version_id) values(?,?)").bind(releaseId, map.id));
   for (const doc of searchDocuments) itemStatements.push(env.DB.prepare(
     `insert into search_documents(release_id,document_type,entity_id,title,subtitle,normalized_text,pinyin,campus_id,building_place_id,floor_id,facets_json,map_target_json,ranking_weight)
      values(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   ).bind(releaseId, doc.documentType, doc.entityId, doc.title, doc.subtitle, doc.normalizedText, doc.pinyin, doc.campusId, doc.buildingPlaceId, doc.floorId, jsonString(doc.facets), jsonString(doc.mapTarget), doc.rankingWeight));
   if (itemStatements.length) await env.DB.batch(itemStatements);
-  return { manifest, places, facilities, merchants, maps, locations, searchDocuments };
+  return { manifest, places: releasePlaces, facilities: releaseFacilities, merchants: releaseMerchants, maps, locations, facilityTypes, mapFilters, searchDocuments };
 }
 
-function validateCandidate(candidate: Awaited<ReturnType<typeof buildCandidate>>) {
+async function loadReleaseMapFilters(env: Env) {
+  const [categories, members] = await Promise.all([
+    all<{ id: string; key: string; label: string; sortOrder: number }>(
+      env.DB,
+      "select id,key,label,sort_order as sortOrder from map_filter_categories where active=1 order by sort_order,label,id",
+    ),
+    all<{ categoryId: string; placeKindId: string | null; facilityTypeId: string | null; includesMerchants: number }>(
+      env.DB,
+      `select category_id as categoryId,place_kind_id as placeKindId,facility_type_id as facilityTypeId,
+              includes_merchants as includesMerchants
+         from map_filter_members
+        where category_id in (select id from map_filter_categories where active=1)
+        order by category_id,sort_order,created_at,id`,
+    ),
+  ]);
+  const membersByCategory = new Map(categories.map((category) => [category.id, [] as typeof members]));
+  for (const member of members) {
+    const categoryMembers = membersByCategory.get(member.categoryId);
+    if (!categoryMembers) throw new Error(`Map filter member ${member.categoryId} has no active category`);
+    categoryMembers.push(member);
+  }
+  return categories.map((category): ReleaseMapFilter => {
+    const categoryMembers = membersByCategory.get(category.id)!;
+    return {
+      ...category,
+      placeKindIds: categoryMembers.flatMap((member) => member.placeKindId ? [member.placeKindId] : []),
+      facilityTypeIds: categoryMembers.flatMap((member) => member.facilityTypeId ? [member.facilityTypeId] : []),
+      includesMerchants: categoryMembers.some((member) => databaseBoolean(
+        member.includesMerchants,
+        `map filter member in ${category.id} includesMerchants`,
+      )),
+    };
+  });
+}
+
+async function validateMapAssets(env: Env, maps: MapCandidate[]): Promise<MapAssetValidation[]> {
+  const results: MapAssetValidation[] = [];
+  for (const map of maps) {
+    let error: string | null = null;
+    if (!Number.isSafeInteger(map.assetByteSize) || map.assetByteSize <= 0 || map.assetByteSize > MAX_MAP_ASSET_BYTES) {
+      error = `Map ${map.id} has invalid stored byte size ${map.assetByteSize}`;
+    } else if (!/^[a-f0-9]{64}$/.test(map.assetSha256)) {
+      error = `Map ${map.id} has an invalid stored SHA-256 digest`;
+    } else if (map.checksum !== map.assetSha256) {
+      error = `Map ${map.id} checksum does not match its media asset`;
+    } else if (!(["approved", "published"] as string[]).includes(map.assetStatus)) {
+      error = `Map ${map.id} media asset is not approved`;
+    } else if (!(["private", "public"] as string[]).includes(map.assetBucketScope)) {
+      error = `Map ${map.id} media asset is not in a readable bucket scope`;
+    } else {
+      try {
+        const object = await env.SHUMAP_BUCKET.get(map.assetKey);
+        if (!object) {
+          error = `Map ${map.id} object ${map.assetKey} is missing`;
+        } else if (object.size !== map.assetByteSize) {
+          await object.body.cancel();
+          error = `Map ${map.id} object size ${object.size} does not match stored byte size ${map.assetByteSize}`;
+        } else if ((await sha256(await object.arrayBuffer())) !== map.assetSha256) {
+          error = `Map ${map.id} object checksum does not match stored SHA-256`;
+        }
+      } catch {
+        error = `Map ${map.id} object ${map.assetKey} could not be read`;
+      }
+    }
+    results.push({ mapVersionId: map.id, objectKey: map.assetKey, valid: error === null, error });
+  }
+  return results;
+}
+
+function releaseMap(map: MapCandidate): ReleaseMap {
+  return {
+    id: map.id,
+    campus_id: map.campus_id,
+    floor_id: map.floor_id,
+    map_asset_id: map.map_asset_id,
+    parent_version_id: map.parent_version_id,
+    campusCode: map.campusCode,
+    campusName: map.campusName,
+    version_label: map.version_label,
+    coordinate_space_type: map.coordinate_space_type,
+    coordinate_space_json: map.coordinate_space_json,
+    parser_version: map.parser_version,
+    lifecycle_status: map.lifecycle_status,
+    created_by: map.created_by,
+    created_at: map.created_at,
+    checksum: map.checksum,
+    assetKey: map.assetKey,
+  };
+}
+
+function validateMapSelection(requestedMapVersionIds: string[], maps: MapCandidate[]): MapSelectionValidation {
+  const selectedMapVersionIds = maps.map((map) => map.id);
+  const selected = new Set(selectedMapVersionIds);
+  return {
+    requestedMapVersionIds,
+    selectedMapVersionIds,
+    missingMapVersionIds: requestedMapVersionIds.filter((id) => !selected.has(id)),
+  };
+}
+
+function validateCandidate(
+  candidate: Awaited<ReturnType<typeof buildCandidate>>,
+  mapAssets: MapAssetValidation[],
+  mapSelection: MapSelectionValidation,
+) {
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (!candidate.maps.length) errors.push("At least one published or explicitly selected map version is required");
-  const mapIds = new Set(candidate.maps.map((map) => String((map as Record<string, unknown>).id)));
-  const placeIds = new Set(candidate.places.map((place) => String(place.id)));
-  for (const facility of candidate.facilities) {
-    if (facility.hostPlaceId && !placeIds.has(String(facility.hostPlaceId))) errors.push(`Facility ${facility.id} refers to an unpublished host place`);
+  for (const result of mapAssets) {
+    if (result.error) errors.push(result.error);
   }
-  for (const location of candidate.locations as Array<Record<string, unknown>>) {
-    if (location.map_version_id && !mapIds.has(String(location.map_version_id))) {
-      warnings.push(`Location ${location.id} uses a map version outside this release`);
+  for (const mapVersionId of mapSelection.missingMapVersionIds) {
+    errors.push(`Requested map version ${mapVersionId} does not exist or is not ready for release`);
+  }
+  if (!candidate.maps.length) errors.push("At least one published or explicitly selected map version is required");
+  const mapIds = new Set(candidate.maps.map((map) => map.id));
+  const campusMapCount = new Map<string, number>();
+  const floorMapCount = new Map<string, number>();
+  for (const map of candidate.maps) {
+    if (map.campus_id) campusMapCount.set(map.campus_id, (campusMapCount.get(map.campus_id) ?? 0) + 1);
+    if (map.floor_id) floorMapCount.set(map.floor_id, (floorMapCount.get(map.floor_id) ?? 0) + 1);
+  }
+  for (const [campusId, count] of campusMapCount) {
+    if (count !== 1) errors.push(`Campus ${campusId} must have exactly one map version in this release`);
+  }
+  for (const [floorId, count] of floorMapCount) {
+    if (count !== 1) errors.push(`Floor ${floorId} must have exactly one map version in this release`);
+  }
+  const placeIds = new Set(candidate.places.map((place) => place.id));
+  for (const stop of candidate.manifest.transit.stops) {
+    if (stop.place_id && !placeIds.has(stop.place_id)) {
+      errors.push(`Transit stop ${stop.id} refers to an unpublished place`);
+    }
+  }
+  for (const filter of candidate.mapFilters) {
+    if (!filter.placeKindIds.length && !filter.facilityTypeIds.length && !filter.includesMerchants) {
+      errors.push(`Active map filter ${filter.id} has no members`);
+    }
+  }
+  const publishedPlaceKindIds = new Set(candidate.places.map((place) => place.kindId));
+  for (const kindId of publishedPlaceKindIds) {
+    const ownerCount = candidate.mapFilters.filter((filter) => filter.placeKindIds.includes(kindId)).length;
+    if (ownerCount !== 1) errors.push(`Published place kind ${kindId} must belong to exactly one active map filter`);
+  }
+  for (const facilityType of candidate.facilityTypes) {
+    if (facilityType.status !== "active") continue;
+    const facilityTypeId = facilityType.id;
+    const ownerCount = candidate.mapFilters.filter((filter) => filter.facilityTypeIds.includes(facilityTypeId)).length;
+    if (ownerCount !== 1) errors.push(`Active facility type ${facilityTypeId} must belong to exactly one active map filter`);
+  }
+  if (candidate.merchants.length) {
+    const ownerCount = candidate.mapFilters.filter((filter) => filter.includesMerchants).length;
+    if (ownerCount !== 1) errors.push("Merchant outlets must belong to exactly one active map filter");
+  }
+  for (const merchant of candidate.merchants) {
+    if (!placeIds.has(merchant.hostPlaceId)) errors.push(`Merchant ${merchant.id} must reference a published host place`);
+  }
+  for (const facility of candidate.facilities) {
+    if (facility.hostPlaceId && !placeIds.has(facility.hostPlaceId)) errors.push(`Facility ${facility.id} refers to an unpublished host place`);
+    if (facility.facilityTypeStatus === "disabled") warnings.push(`Facility ${facility.id} uses a disabled facility type`);
+  }
+  const locations = candidate.locations;
+  for (const location of locations) {
+    if (location.map_version_id && !mapIds.has(location.map_version_id)) {
+      errors.push(`Location ${location.id} uses a map version outside this release`);
+    }
+    if (location.role === "navigation_target") {
+      const geometry = locationGeometry(location);
+      const coordinates = geometry?.coordinates;
+      if (
+        location.geometry_type !== "Point"
+        || geometry?.type !== "Point"
+        || !Array.isArray(coordinates)
+        || coordinates.length !== 2
+        || coordinates.some((coordinate) => typeof coordinate !== "number" || !Number.isFinite(coordinate))
+      ) {
+        errors.push(`Navigation location ${location.id} must contain a finite GeoJSON Point`);
+      } else if (
+        coordinates[0] < -180 || coordinates[0] > 180
+        || coordinates[1] < -90 || coordinates[1] > 90
+      ) {
+        errors.push(`Navigation location ${location.id} has invalid longitude or latitude`);
+      }
+      if (location.crs !== NAVIGATION_CRS) {
+        errors.push(`Navigation location ${location.id} must use ${NAVIGATION_CRS}`);
+      }
+    }
+  }
+  const displayedCampusIds = new Set(candidate.places.flatMap((place) => place.campusId ? [place.campusId] : []));
+  for (const campusId of displayedCampusIds) {
+    if (!campusMapCount.has(campusId)) errors.push(`Campus ${campusId} has published places but no campus map in this release`);
+  }
+  for (const place of candidate.places) {
+    if (!place.isBuilding) continue;
+    if (!place.campusId) {
+      errors.push(`Building ${place.id} must belong to a campus`);
+      continue;
+    }
+    const footprints = locations.filter((location) =>
+      location.entityType === "place"
+      && location.entityId === place.id
+      && location.role === "footprint");
+    if (footprints.length !== 1) {
+      errors.push(`Building ${place.id} must have exactly one footprint location`);
+      continue;
+    }
+    const [footprint] = footprints;
+    if (!footprint.map_feature_id || !footprint.sourceElementId || footprint.featureKind !== "building_footprint") {
+      errors.push(`Building ${place.id} footprint must reference a building footprint feature with a source element id`);
+    }
+    if (!footprint.map_version_id || !mapIds.has(footprint.map_version_id)) {
+      errors.push(`Building ${place.id} footprint must use a map version in this release`);
     }
   }
   if (!candidate.places.length) warnings.push("Release has no approved places");
-  return { valid: errors.length === 0, errors, warnings, counts: {
+  return { valid: errors.length === 0, errors, warnings, mapAssets, mapSelection, counts: {
     places: candidate.places.length, facilities: candidate.facilities.length, merchants: candidate.merchants.length,
     maps: candidate.maps.length, locations: candidate.locations.length, searchDocuments: candidate.searchDocuments.length,
   } };
 }
 
 function buildSearchDocuments(
-  releaseId: string,
-  places: Array<Record<string, unknown>>,
-  facilities: Array<Record<string, unknown>>,
-  merchants: Array<Record<string, unknown>>,
-  locations: unknown[],
-) {
-  const primaryLocation = new Map<string, Record<string, unknown>>();
-  for (const raw of locations as Array<Record<string, unknown>>) {
-    if (Number(raw.isPrimary) === 1) primaryLocation.set(`${raw.entityType}:${raw.entityId}`, raw);
+  places: ReleasePlace[],
+  facilities: ReleaseFacility[],
+  merchants: ReleaseMerchant[],
+  locations: LocationCandidate[],
+): SearchDocumentCandidate[] {
+  const primaryLocation = new Map<string, LocationCandidate>();
+  for (const location of locations) {
+    if (databaseBoolean(location.isPrimary, `location ${location.id} isPrimary`)) {
+      primaryLocation.set(`${location.entityType}:${location.entityId}`, location);
+    }
   }
-  // Hosted entities (facilities, merchant outlets) usually carry no anchor of
-  // their own; inherit the host place's campus so campus-scoped search finds them.
   const campusByPlace = new Map<string, string>();
   for (const place of places) {
-    const campusId = place.campusId ?? primaryLocation.get(`place:${place.id}`)?.campus_id;
-    if (campusId) campusByPlace.set(String(place.id), String(campusId));
+    if (place.campusId) campusByPlace.set(place.id, place.campusId);
   }
-  const hostCampus = (record: Record<string, unknown>) =>
-    record.hostPlaceId ? campusByPlace.get(String(record.hostPlaceId)) : undefined;
   return [
-    ...places.map((record) => document(releaseId, "place", record, primaryLocation.get(`place:${record.id}`), 10)),
-    ...facilities.map((record) => document(releaseId, "facility", record, primaryLocation.get(`facility:${record.id}`), 8, hostCampus(record))),
-    ...merchants.map((record) => document(releaseId, "merchant_outlet", record, primaryLocation.get(`merchant_outlet:${record.id}`), 7, hostCampus(record))),
+    ...places.map((record) => document(
+      "place",
+      record,
+      primaryLocation.get(`place:${record.id}`),
+      10,
+      record.campusId,
+      record.isBuilding ? record.id : null,
+      null,
+    )),
+    ...facilities.map((record) => document(
+      "facility",
+      record,
+      primaryLocation.get(`facility:${record.id}`),
+      8,
+      record.hostPlaceId ? requiredCampus(campusByPlace, record.hostPlaceId, `facility ${record.id}`) : null,
+      record.hostPlaceId,
+      record.floorId,
+    )),
+    ...merchants.map((record) => document(
+      "merchant_outlet",
+      record,
+      primaryLocation.get(`merchant_outlet:${record.id}`),
+      7,
+      requiredCampus(campusByPlace, record.hostPlaceId, `merchant ${record.id}`),
+      record.hostPlaceId,
+      record.floorId,
+    )),
   ];
 }
 
+function requiredCampus(campuses: Map<string, string>, placeId: string, field: string): string {
+  const campusId = campuses.get(placeId);
+  if (!campusId) throw new Error(`${field} host place ${placeId} has no campus`);
+  return campusId;
+}
+
 function document(
-  _releaseId: string,
-  type: string,
-  record: Record<string, unknown>,
-  location: Record<string, unknown> | undefined,
+  type: "place" | "facility" | "merchant_outlet",
+  record: ReleasePlace | ReleaseFacility | ReleaseMerchant,
+  location: LocationCandidate | undefined,
   weight: number,
-  fallbackCampusId?: string,
-) {
-  const title = String(record.displayName ?? record.id);
-  const searchable = [title, record.summary, record.businessType, merchantSearchText(record.contentJson)]
-    .filter(Boolean)
+  campusId: string | null,
+  buildingPlaceId: string | null,
+  floorId: string | null,
+): SearchDocumentCandidate {
+  const title = record.displayName;
+  const aliases = "aliases" in record ? record.aliases.join(" ") : "";
+  const summary = "summary" in record ? record.summary : null;
+  const businessType = "businessType" in record ? record.businessType : null;
+  const merchantText = "openingHours" in record ? merchantSearchText(record.content) : "";
+  const searchable = [title, aliases, summary, businessType, merchantText]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join(" ");
+  const facets: string[] = [type];
+  if ("kindId" in record) facets.push(record.kindId);
+  if ("facilityTypeId" in record) facets.push(record.facilityTypeId);
+  if ("businessType" in record && record.businessType) facets.push(record.businessType);
   return {
-    documentType: type, entityId: String(record.id), title,
-    subtitle: location?.location_hint ? String(location.location_hint) : null,
+    documentType: type, entityId: record.id, title,
+    subtitle: location?.location_hint ?? null,
     normalizedText: normalizeSearchText(searchable), pinyin: null,
-    campusId: String(record.campusId ?? location?.campus_id ?? fallbackCampusId ?? "") || null,
-    buildingPlaceId: String(record.hostPlaceId ?? location?.building_place_id ?? "") || null,
-    floorId: String(record.floorId ?? location?.floor_id ?? "") || null,
-    facets: [type, record.kindId, record.facilityTypeId, record.businessType].filter(Boolean),
+    campusId,
+    buildingPlaceId,
+    floorId,
+    facets,
     mapTarget: location ? { type: "locationAnchor", id: location.id } : { type, id: record.id },
     rankingWeight: weight,
   };
 }
 
-/** content_json summary / stall code is what people type when searching for an outlet. */
-function merchantSearchText(contentJson: unknown): string {
-  if (typeof contentJson !== "string") return "";
-  const content = parseJson<Record<string, unknown> | null>(contentJson, null);
-  if (!content) return "";
+/** Merchant summary and stall code are included in outlet search text. */
+function merchantSearchText(content: MerchantContent): string {
   return [content.summary, content.stallCode]
     .filter((value): value is string => typeof value === "string")
     .join(" ");
-}
-
-function normalizeJsonFields(record: Record<string, unknown>) {
-  const result: Record<string, unknown> = { ...record };
-  for (const [key, value] of Object.entries(result)) {
-    if (key.endsWith("Json") && typeof value === "string") {
-      result[key.slice(0, -4)] = parseJson(value, null);
-      delete result[key];
-    }
-  }
-  return result;
 }
