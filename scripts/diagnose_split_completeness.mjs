@@ -42,11 +42,27 @@ const dir = path.join(root, "migrations-v2");
 const PARSE_ERROR = /incomplete input|unrecognized token|syntax error|near ".*": syntax/i;
 
 /**
+ * Characters SQLite accepts inside a bare identifier: letters, digits, `_`, `$`
+ * and anything above ASCII. Tokenizing on a narrower set would split `end2`
+ * into `end` + `2` and treat the `end` as the keyword, so the boundary rule has
+ * to match SQLite's, not a convenient subset.
+ */
+const IDENTIFIER_CHAR = /[A-Za-z0-9_$-￿]/;
+
+/** Quote characters that open an opaque run: string literals and identifiers. */
+const QUOTE_CLOSERS = new Map([["'", "'"], ['"', '"'], ["`", "`"], ["[", "]"]]);
+
+/**
  * Split `sql` the way D1's server-side splitter does.
  *
  * Depth rises on BEGIN and falls on END. CASE does not raise it — that
  * asymmetry is the defect being modelled, not an oversight here. A `;` at depth
  * zero ends a statement.
+ *
+ * Only a whole token counts as a keyword. `end2`, `begin2`, `end$2` and a
+ * bracket-quoted `[END]` are identifiers, and treating any of them as BEGIN/END
+ * would both flag valid SQL and, by leaving the depth counter wrong, hide a real
+ * CASE-in-trigger defect further down the file.
  */
 export function serverSplit(sql) {
   const chunks = [];
@@ -81,16 +97,19 @@ export function serverSplit(sql) {
       i = stop - 1;
       continue;
     }
-    if (char === "'" || char === '"' || char === "`") {
+    // A quoted run is opaque: a keyword inside it is data or an identifier, and
+    // a `;` inside it does not end the statement.
+    const closer = QUOTE_CLOSERS.get(char);
+    if (closer !== undefined) {
       flushWord();
-      const end = sql.indexOf(char, i + 1);
+      const end = sql.indexOf(closer, i + 1);
       const stop = end === -1 ? sql.length : end + 1;
       current += sql.slice(i, stop);
       i = stop - 1;
       continue;
     }
 
-    if (/[A-Za-z_]/.test(char)) {
+    if (IDENTIFIER_CHAR.test(char)) {
       word += char;
       current += char;
       continue;
@@ -154,12 +173,48 @@ BEGIN
 END;
 `;
 
+// Identifiers that merely start with a keyword. Tokenizing on too narrow a
+// character class treats the leading `end`/`begin` as the keyword, which both
+// flags valid SQL and — worse — leaves the depth counter wrong, so a real
+// CASE-in-trigger defect further down the file stops being detected.
+const IDENTIFIER_END2 = `
+create table probe(end2 integer);
+create trigger t after insert on probe
+BEGIN
+  select end2 from probe;
+END;
+`;
+
+const IDENTIFIER_END_DOLLAR = `
+create table probe(end$2 integer);
+create trigger t after insert on probe
+BEGIN
+  select end$2 from probe;
+END;
+`;
+
+const IDENTIFIER_BRACKET_END = `
+create table probe([END] integer);
+create trigger t after insert on probe
+BEGIN
+  select [END] from probe;
+END;
+`;
+
+// A keyword-prefixed identifier must not mask a CASE defect behind it.
+const IDENTIFIER_BEGIN2_HIDING_CASE = `
+create table probe(begin2 integer, n integer);
+create trigger t2 before insert on probe
+when new.n < 0
+BEGIN
+  select CASE WHEN new.n < -100 THEN raise(abort,'too negative') END;
+END;
+`;
+
 function selfTest() {
   let bad = 0;
   const check = (label, sql, shouldDetect) => {
-    const db = new DatabaseSync(":memory:");
-    const failures = parseFailures(db, sql);
-    db.close();
+    const failures = chunkFailures(sql);
     const detected = failures.length > 0;
     if (detected !== shouldDetect) bad += 1;
     console.log(`  ${detected === shouldDetect ? "OK  " : "FAIL"} ${label} (chunks rejected: ${failures.length})`);
@@ -167,6 +222,10 @@ function selfTest() {
   console.log("self-test:");
   check("CASE inside a trigger body is detected", KNOWN_BAD, true);
   check("the WHERE-clause guard is accepted", KNOWN_GOOD, false);
+  check("`end2` is an identifier, not END", IDENTIFIER_END2, false);
+  check("`end$2` is an identifier, not END", IDENTIFIER_END_DOLLAR, false);
+  check("`[END]` is a quoted identifier, not END", IDENTIFIER_BRACKET_END, false);
+  check("`begin2` does not mask a CASE defect", IDENTIFIER_BEGIN2_HIDING_CASE, true);
   return bad;
 }
 

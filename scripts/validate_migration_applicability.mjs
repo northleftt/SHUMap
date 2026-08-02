@@ -41,14 +41,19 @@
 //   SELECT CASE WHEN <condition> THEN RAISE(ABORT,'message') END;
 // The two are equivalent: RAISE fires exactly when the WHERE holds.
 //
+// The CASE rule applies to every migration, including ones already recorded in
+// d1_migrations. Editing an applied migration does not re-run it — d1_migrations
+// stores names, not content hashes — but a fresh database still replays the whole
+// chain from 0001, so a file that cannot be applied remotely blocks every new
+// environment (disaster recovery, an independent test database). 0001's three
+// guards were rewritten to the WHERE form for exactly that reason.
+//
 // Deliberately NOT checked: lowercase begin/case/end. Wrangler's local splitter
 // opens a compound statement on /\s(BEGIN|CASE)\s$/i but closes it only on
 // /\sEND[;\s]$/ (case sensitive), so lowercase bodies glue following statements
 // together. Glued statements still execute in full under miniflare — verified —
 // so locally gluing only matters when it pushes a statement past the size limit,
-// which the size rule already catches. 0001 ships lowercase bodies with CASE and
-// is already applied on both databases; flagging it would demand editing an
-// applied migration, so the CASE rule below skips migrations already applied.
+// which the size rule already catches.
 
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
