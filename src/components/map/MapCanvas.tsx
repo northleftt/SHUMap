@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CampusConfig, MapFeatureBinding } from "../../lib/types";
 
 type Size = { width: number; height: number };
@@ -79,6 +79,10 @@ function clampWindow(window: ViewWindow, viewBox: Size, edgePaddingRatio: number
 
 function getScale(window: ViewWindow, container: Size) {
   return container.width / window.width;
+}
+
+function windowsEqual(a: ViewWindow, b: ViewWindow) {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
 }
 
 function getFitScale(viewBox: Size, container: Size) {
@@ -235,12 +239,25 @@ export function MapCanvas({
   const lastResetNonceRef = useRef(viewResetNonce ?? 0);
   const viewBox = useMemo(() => parseViewBox(campus.svgRaw), [campus.svgRaw]);
   const [containerSize, setContainerSize] = useState<Size>(DEFAULT_CONTAINER_SIZE);
-  const [viewWindow, setViewWindow] = useState<ViewWindow>({
+  const [viewWindow, setViewWindowState] = useState<ViewWindow>({
     x: 0,
     y: 0,
     width: viewBox.width,
     height: viewBox.height,
   });
+
+  // 算出与当前完全相同的视野时保持对象引用不变。定位 effect 的依赖里有父组件每次
+  // 渲染都新建的数组/对象，若同值也换新对象，就会 onViewWindowChange → 父组件
+  // re-render → effect 重跑 → setViewWindow 无限循环（把路由切换也一起饿死）。
+  const setViewWindow = useCallback(
+    (next: ViewWindow | ((current: ViewWindow) => ViewWindow)) => {
+      setViewWindowState((current) => {
+        const resolved = typeof next === "function" ? next(current) : next;
+        return windowsEqual(current, resolved) ? current : resolved;
+      });
+    },
+    [],
+  );
 
   const gestureRef = useRef({
     pointers: new Map<number, Point>(),

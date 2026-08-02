@@ -285,20 +285,20 @@ export function useMapPageState() {
     };
   }
 
-  const readyRelease = releaseState.release;
-  const readyCampusIndex = selectedCampus
-    ? readyRelease.campuses.findIndex((item) => item.key === selectedCampus)
-    : -1;
-  const readyCampus = readyRelease.campuses[readyCampusIndex >= 0 ? readyCampusIndex : 0];
-  const readyCampusBuildings = readyRelease.buildings.filter((building) => building.campusKey === readyCampus.key);
+  // 复用上面的 memo，不再重算一份：campusBuildings / filteredResults 会作为
+  // MapCanvas 定位 effect 的依赖，每次渲染都换新数组会让该 effect 反复重跑
+  // （曾导致 setViewWindow 无限循环，把路由切换一起饿死）。
+  if (!campus || !campusBuildings || !filteredResults) {
+    throw new Error("Release is ready but campus data is missing");
+  }
   return {
     ...sharedState,
     releaseStatus: "ready" as const,
-    releaseData: readyRelease,
-    campuses: readyRelease.campuses,
-    campus: readyCampus,
-    selectedCampus: readyCampus.key,
-    campusBuildings: readyCampusBuildings,
-    filteredResults: filterMapBuildings(readyCampusBuildings, activeFilter, searchOrder),
+    releaseData: releaseState.release,
+    campuses: releaseState.release.campuses,
+    campus,
+    selectedCampus: campus.key,
+    campusBuildings,
+    filteredResults,
   };
 }

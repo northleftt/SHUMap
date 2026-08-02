@@ -117,6 +117,16 @@ export function MapPage() {
     [isMobile, sheetTop, containerHeight],
   );
 
+  // 同理必须 memo（在提前 return 之前，保证 hook 顺序稳定）
+  const featureBindings = useMemo(
+    () =>
+      (state.campusBuildings ?? []).map((building) => ({
+        id: building.mapFeatureId,
+        sourceElementId: building.sourceElementId,
+      })),
+    [state.campusBuildings],
+  );
+
   if (state.releaseStatus === "loading") {
     return (
       <div className="h-full bg-map-ground">
@@ -141,10 +151,7 @@ export function MapPage() {
       <div className="relative min-w-0 flex-1">
         <MapCanvas
           campus={state.campus}
-          featureBindings={state.campusBuildings.map((building) => ({
-            id: building.mapFeatureId,
-            sourceElementId: building.sourceElementId,
-          }))}
+          featureBindings={featureBindings}
           matchedFeatureIds={state.matchedFeatureIds}
           selectedFeatureId={state.selectedPoi?.mapFeatureId ?? null}
           selectionFocusBounds={selectionFocusBounds}
