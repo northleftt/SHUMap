@@ -336,8 +336,11 @@ test("the photo endpoints are registered with the right gating", () => {
   assert.ok(gate > 0 && adminRead - gate < 200, "admin media content must be gated by read:admin");
 
   const media = fs.readFileSync(path.join(root, "worker/modules/media.ts"), "utf8");
-  // Uploads must land in quarantine, never straight into the public scope.
-  assert.match(media, /values\(\?,'quarantine',\?,null,\?,\?,\?,'quarantined',\?\)/);
+  // Uploads must land in quarantine, never straight into the public scope. The
+  // trailing pair of placeholders is uploaded_by + created_at: an upload records
+  // which account supplied the bytes, so review can answer "who sent this".
+  assert.match(media, /values\(\?,'quarantine',\?,null,\?,\?,\?,'quarantined',\?,\?\)/);
+  assert.match(media, /principal\.userId/);
   assert.match(media, /quarantine\/submissions\//);
   // Magic-byte sniffing guards against an image/* content-type on non-image bytes.
   assert.match(media, /sniffImageType/);

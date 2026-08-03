@@ -1,9 +1,22 @@
-import { Plus, Trash2 } from "lucide-react";
+import { MapPin, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import * as admin from "../../lib/api/admin";
 import { objectValue, oneOf, requiredBoolean } from "../../lib/dataContract";
 import type { SpacesResponse } from "../adminTypes";
 import { ErrorBanner, Field, GhostButton, InfoNote, Panel, SelectField, errorMessage } from "./primitives";
+import {
+  CANVAS_CRS,
+  CampusMapCanvas,
+  campusKeyOfRow,
+  campusMapBinding,
+  campusMapVersions,
+  canvasOfGeoJson,
+  canvasToolOfGeometryType,
+  geoJsonOfCanvas,
+  pickSingleShape,
+  type CanvasGeometry,
+  type CanvasTool,
+} from "./CampusMapCanvas";
 import type {
   GeometryType,
   LocationPrecision,
@@ -190,12 +203,55 @@ export function locationDraftFromApi(raw: Record<string, unknown>, index: number
   };
 }
 
-const ROLES = [
-  ["primary_display", "主要展示位置"], ["footprint", "建筑轮廓"], ["centroid", "中心点"],
-  ["main_entrance", "主入口"], ["accessible_entrance", "无障碍入口"], ["navigation_target", "导航终点"],
-  ["service_position", "服务位置"], ["boarding_point", "上车点"], ["alighting_point", "下车点"],
-  ["event_location", "事件位置"], ["impact_area", "影响范围"], ["route_shape", "路线"], ["other", "其他"],
-].map(([value, label]) => ({ value, label }));
+const ALL_ROLES = [
+  "primary_display", "footprint", "centroid", "main_entrance", "accessible_entrance",
+  "navigation_target", "service_position", "boarding_point", "alighting_point", "event_location",
+  "impact_area", "route_shape", "other",
+] as const;
+
+const ROLE_LABELS: Record<LocationRole, string> = {
+  primary_display: "主要展示位置",
+  footprint: "建筑轮廓",
+  centroid: "中心点",
+  main_entrance: "主入口",
+  accessible_entrance: "无障碍入口",
+  navigation_target: "导航终点",
+  service_position: "服务位置",
+  boarding_point: "上车点",
+  alighting_point: "下车点",
+  event_location: "事件位置",
+  impact_area: "影响范围",
+  route_shape: "路线",
+  other: "其他",
+};
+
+/**
+ * 哪些用途能在校园图上画，以及各自允许的图形。
+ *
+ * navigation_target 缺席：0015 的触发器要求它是 GCJ02 Point，而仓库里没有
+ * svg_viewbox → GCJ-02 的换算，画出来的坐标必被拒；它只能继续手填经纬度。
+ * footprint 缺席：触发器要求 geometry 为空并绑定已导入的 map_feature，
+ * 自由绘制的几何写不进去，只能走「地图图形」下拉。
+ */
+const CANVAS_TOOLS_BY_ROLE: Partial<Record<LocationRole, readonly CanvasTool[]>> = {
+  primary_display: ["point"],
+  centroid: ["point"],
+  main_entrance: ["point"],
+  accessible_entrance: ["point"],
+  service_position: ["point"],
+  boarding_point: ["point"],
+  alighting_point: ["point"],
+  event_location: ["point"],
+  impact_area: ["area"],
+  route_shape: ["path"],
+  other: ["point", "area", "path"],
+};
+
+/** 该行是否已经存着画布画出来的几何。 */
+function hasCanvasGeometry(row: LocationDraft): boolean {
+  const origin = row.origin;
+  return Boolean(origin && origin.crs === CANVAS_CRS && origin.geometry !== null && origin.geometry !== undefined);
+}
 
 function geometryTypeFromFeature(feature: admin.MapFeatureRow): GeometryType {
   return oneOf(feature.geometryType, `map feature ${feature.id}.geometryType`, ["Point", "LineString", "Polygon", "MultiPolygon"] as const);
@@ -224,6 +280,8 @@ export function LocationEditor({
   buildingCampusId,
   isBuilding,
   disabled,
+  roles,
+  title = "地图位置",
 }: {
   value: LocationDraft[];
   onChange(rows: LocationDraft[]): void;
@@ -233,7 +291,12 @@ export function LocationEditor({
   buildingCampusId?: string | null;
   isBuilding?: boolean;
   disabled?: boolean;
+  /** 限定「用途」下拉的可选项。省略时给出全部角色。 */
+  roles?: readonly LocationRole[];
+  title?: string;
 }) {
+  const allowedRoles = roles ?? ALL_ROLES;
+  const roleOptions = allowedRoles.map((role) => ({ value: role, label: ROLE_LABELS[role] }));
   const patch = (index: number, update: Partial<LocationDraft>) => onChange(value.map((row, i) => i === index ? { ...row, ...update } : row));
   const [featuresByVersion, setFeaturesByVersion] = useState<Record<string, admin.MapFeatureRow[]>>({});
   const [loadingVersions, setLoadingVersions] = useState<Set<string>>(new Set());
@@ -299,11 +362,13 @@ export function LocationEditor({
       const patchCampus = (campusId: string) => patch(index, { campusId, mapVersionId: "", mapFeatureId: "" });
       return <div className="space-y-3 rounded-xl border border-line p-3" key={row.id}>
         <div className="grid grid-cols-2 gap-2">
-          <SelectField disabled={disabled} label="用途" onChange={(role) => patch(index, { role: oneOf(role, "location.role", [
-            "primary_display", "footprint", "centroid", "main_entrance", "accessible_entrance",
-            "navigation_target", "service_position", "boarding_point", "alighting_point", "event_location",
-            "impact_area", "route_shape", "other",
-          ] as const) })} options={ROLES} value={row.role} />
+          <SelectField
+            disabled={disabled || roleOptions.length < 2}
+            label="用途"
+            onChange={(role) => patch(index, { role: oneOf(role, "location.role", ALL_ROLES) })}
+            options={roleOptions}
+            value={row.role}
+          />
           <SelectField
             disabled={disabled || isBuilding === true}
             label="校区"

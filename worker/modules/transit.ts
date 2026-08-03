@@ -1,7 +1,8 @@
+import type { RevisionLocationInput } from "../../shared/revision-contract";
 import type { SessionPrincipal } from "../domain/types";
 import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, assertExists, first } from "../lib/db";
-import { HttpError, json, readJson } from "../lib/http";
+import { HttpError, json, noContent, readJson } from "../lib/http";
 import {
   arrayValue,
   booleanValue,
@@ -15,14 +16,48 @@ import {
 } from "../lib/values";
 import { normalizeLocationInputs } from "../lib/revision-contracts";
 import { audit } from "./audit";
-import { planLocation } from "./locations";
+import { listEntityLocationsByType, planLocation } from "./locations";
 
 const PICKUP_TYPES = ["regular", "reservation_only", "none"] as const;
 const DROPOFF_TYPES = ["regular", "none"] as const;
 const BOOKING_POLICIES = ["required", "optional", "not_required"] as const;
+const STOP_STATUSES = ["active", "temporarily_closed", "retired"] as const;
+const ROUTE_STATUSES = ["active", "suspended", "retired"] as const;
+/** A stop's own anchors only describe where you board or alight. */
+const STOP_LOCATION_ROLES = ["boarding_point", "alighting_point"] as const;
 const MAX_PATTERN_STOPS = 40;
 const MAX_CALENDAR_EXCEPTIONS = 366;
+const MAX_STOP_LOCATIONS = 20;
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+
+/**
+ * `transit_stops.code` and `transit_routes.code` are UNIQUE. Checked up front so
+ * a duplicate answers 409 with the offending code instead of surfacing the raw
+ * D1 constraint failure as a 500.
+ */
+async function assertCodeAvailable(
+  env: Env,
+  table: "transit_stops" | "transit_routes",
+  code: string | null,
+  excludeId: string | null,
+): Promise<void> {
+  if (code === null) return;
+  const row = await first<{ id: string }>(env.DB, `select id from ${table} where code=?`, [code]);
+  if (row && row.id !== excludeId) {
+    throw new HttpError(409, "conflict", `Code ${code} is already used by another record`);
+  }
+}
+
+/** Validate the `locations` field of a stop create / update payload. */
+function stopLocations(value: unknown) {
+  const locations = normalizeLocationInputs(value, "locations", MAX_STOP_LOCATIONS);
+  for (const [index, location] of locations.entries()) {
+    if (!STOP_LOCATION_ROLES.includes(location.role as (typeof STOP_LOCATION_ROLES)[number])) {
+      throw new HttpError(400, "validation_error", `locations[${index}].role is not supported for transit stops`);
+    }
+  }
+  return locations;
+}
 
 function dateValue(value: unknown, field: string): string {
   const date = requiredString(value, field, 10);
@@ -52,18 +87,31 @@ function timeValue(value: unknown, field: string): string | null {
 }
 
 export async function listTransit(env: Env): Promise<Response> {
-  const [stops, routes, patterns, patternStops, calendars, exceptions, trips, stopTimes] = await Promise.all([
-    all(env.DB, "select id,place_id as placeId,campus_id as campusId,code,name,status from transit_stops where status='active' order by name"),
-    all(env.DB, "select id,code,name,operator_id as operatorId,status from transit_routes order by name"),
+  const [stops, routes, patterns, patternStops, calendars, exceptions, trips, stopTimes, stopLocations] = await Promise.all([
+    // Retired stops stay in the payload: a pattern may still reference one, and
+    // the editor needs to show (and be able to restore) it rather than fail to
+    // resolve the name.
+    all(env.DB, "select id,place_id as placeId,campus_id as campusId,code,name,status from transit_stops order by status='retired',name"),
+    all(env.DB, "select id,code,name,operator_id as operatorId,status from transit_routes order by status='retired',name"),
     all(env.DB, "select id,route_id as routeId,direction_id as directionId,name,route_anchor_id as routeAnchorId from transit_patterns order by route_id,direction_id"),
     all(env.DB, "select pattern_id as patternId,stop_id as stopId,stop_sequence as stopSequence,pickup_type as pickupType,dropoff_type as dropoffType from transit_pattern_stops order by pattern_id,stop_sequence"),
-    all(env.DB, "select id,name,timezone,valid_from as validFrom,valid_to as validTo,monday,tuesday,wednesday,thursday,friday,saturday,sunday from service_calendars order by valid_from desc,id"),
+    all(env.DB, "select id,name,timezone,valid_from as validFrom,valid_to as validTo,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id as sourceId from service_calendars order by valid_from desc,id"),
     all(env.DB, "select calendar_id as calendarId,service_date as serviceDate,exception_type as exceptionType,label from service_calendar_exceptions order by service_date"),
     all(env.DB, "select id,pattern_id as patternId,service_calendar_id as serviceCalendarId,public_label as publicLabel,booking_policy as bookingPolicy,booking_url as bookingUrl,status from transit_trips where status='active' order by id"),
     all(env.DB, "select trip_id as tripId,stop_id as stopId,stop_sequence as stopSequence,arrival_time as arrivalTime,departure_time as departureTime from transit_stop_times order by trip_id,stop_sequence"),
+    listEntityLocationsByType(env, "transit_stop"),
   ]);
+  // Names of the places a stop can borrow its photos / contact rows from, so the
+  // editor can label the binding without a second round trip.
+  const places = await all(
+    env.DB,
+    `select p.id,r.display_name as displayName,p.kind_id as kindId,p.campus_id as campusId
+       from places p left join place_revisions r on r.id=p.current_revision_id
+      where p.lifecycle_status<>'retired' order by coalesce(r.display_name,p.id)`,
+  );
   return json({
     stops,
+    stopLocations,
     routes,
     patterns,
     patternStops,
@@ -71,6 +119,7 @@ export async function listTransit(env: Env): Promise<Response> {
     exceptions,
     trips,
     stopTimes,
+    places,
   });
 }
 
@@ -79,21 +128,18 @@ export async function createStop(request: Request, env: Env, principal: SessionP
   const name = requiredString(body.name, "name", 200);
   const placeId = optionalString(body.placeId, "placeId", 100);
   const campusId = optionalString(body.campusId, "campusId", 100);
-  const locations = normalizeLocationInputs(body.locations, "locations", 20);
-  for (const [index, location] of locations.entries()) {
-    if (location.role !== "boarding_point" && location.role !== "alighting_point") {
-      throw new HttpError(400, "validation_error", `locations[${index}].role is not supported for transit stops`);
-    }
-  }
+  const code = optionalString(body.code, "code", 100);
+  const locations = stopLocations(body.locations);
   await Promise.all([
     assertExists(env.DB, "places", placeId, "Place"),
     assertExists(env.DB, "campuses", campusId, "Campus"),
+    assertCodeAvailable(env, "transit_stops", code, null),
   ]);
   const id = makeId("stop");
   const now = isoNow();
   const statements: D1PreparedStatement[] = [
     env.DB.prepare("insert into transit_stops(id,place_id,campus_id,code,name,status,created_at,updated_at) values(?,?,?,?,?,'active',?,?)")
-      .bind(id, placeId, campusId, optionalString(body.code, "code", 100), name, now, now),
+      .bind(id, placeId, campusId, code, name, now, now),
   ];
   for (const location of locations) {
     const plan = await planLocation(env, "transit_stop", id, location, principal, now);
@@ -104,16 +150,208 @@ export async function createStop(request: Request, env: Env, principal: SessionP
   return json({ id }, { status: 201 });
 }
 
+/**
+ * Edit one stop. `locations` is replace-all when present (omit the field to keep
+ * the current anchors); everything is validated before the first statement runs,
+ * so a rejected payload cannot leave the stop without its boarding point.
+ */
+export async function updateStop(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  stopId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<{ id: string; place_id: string | null; campus_id: string | null; code: string | null; name: string; status: string }>(
+    env.DB,
+    "select id,place_id,campus_id,code,name,status from transit_stops where id=?",
+    [stopId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Stop does not exist");
+
+  const body = partialObject(await readJson<unknown>(request), "transitStopUpdate", [
+    "name", "code", "placeId", "campusId", "status", "locations",
+  ]);
+  const name = Object.hasOwn(body, "name") ? requiredString(body.name, "name", 200) : before.name;
+  const code = Object.hasOwn(body, "code") ? optionalString(body.code, "code", 100) : before.code;
+  const placeId = Object.hasOwn(body, "placeId") ? optionalString(body.placeId, "placeId", 100) : before.place_id;
+  const campusId = Object.hasOwn(body, "campusId") ? optionalString(body.campusId, "campusId", 100) : before.campus_id;
+  const status = Object.hasOwn(body, "status") ? oneOf(body.status, "status", STOP_STATUSES) : before.status;
+  await Promise.all([
+    assertExists(env.DB, "places", placeId, "Place"),
+    assertExists(env.DB, "campuses", campusId, "Campus"),
+    assertCodeAvailable(env, "transit_stops", code, stopId),
+  ]);
+
+  // Retiring a stop that a pattern still calls at would silently drop those
+  // journeys from the public results, so require the pattern to be edited first.
+  if (status === "retired" && before.status !== "retired") {
+    const inUse = await first<{ total: number }>(
+      env.DB,
+      "select count(*) as total from transit_pattern_stops where stop_id=?",
+      [stopId],
+    );
+    if ((inUse?.total ?? 0) > 0) {
+      throw new HttpError(409, "conflict", "Remove this stop from every route direction before retiring it");
+    }
+  }
+
+  const now = isoNow();
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("update transit_stops set place_id=?,campus_id=?,code=?,name=?,status=?,updated_at=? where id=?")
+      .bind(placeId, campusId, code, name, status, now, stopId),
+  ];
+  let replacedLocations: RevisionLocationInput[] | null = null;
+  if (Object.hasOwn(body, "locations")) {
+    replacedLocations = stopLocations(body.locations);
+    const previous = await all<{ anchorId: string }>(
+      env.DB,
+      "select anchor_id as anchorId from entity_locations where entity_type='transit_stop' and entity_id=?",
+      [stopId],
+    );
+    const planned = [];
+    for (const location of replacedLocations) {
+      planned.push(await planLocation(env, "transit_stop", stopId, location, principal, now));
+    }
+    statements.push(
+      env.DB.prepare("delete from entity_locations where entity_type='transit_stop' and entity_id=?").bind(stopId),
+    );
+    if (previous.length > 0) {
+      const anchorIds = previous.map((row) => row.anchorId);
+      statements.push(
+        env.DB.prepare(`delete from location_anchors where id in (${anchorIds.map(() => "?").join(",")})`).bind(...anchorIds),
+      );
+    }
+    for (const plan of planned) statements.push(...plan.statements);
+  }
+  await env.DB.batch(statements);
+  await audit(env, principal, "transit.stop.update", "transit_stop", stopId, requestId, before, {
+    name, code, placeId, campusId, status,
+    ...(replacedLocations === null ? {} : { locations: replacedLocations.map((location) => ({ role: location.role, isPrimary: location.isPrimary })) }),
+  });
+  return json({ id: stopId });
+}
+
+/**
+ * Remove a stop outright. Only allowed while nothing references it — a stop that
+ * a pattern or a recorded time still points at must be retired instead, which is
+ * what {@link updateStop} is for.
+ */
+export async function deleteStop(
+  env: Env,
+  principal: SessionPrincipal,
+  stopId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    "select id,place_id,campus_id,code,name,status from transit_stops where id=?",
+    [stopId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Stop does not exist");
+  const usage = await first<{ patterns: number; times: number }>(
+    env.DB,
+    `select (select count(*) from transit_pattern_stops where stop_id=?) as patterns,
+            (select count(*) from transit_stop_times where stop_id=?) as times`,
+    [stopId, stopId],
+  );
+  const referenced = (usage?.patterns ?? 0) + (usage?.times ?? 0);
+  if (referenced > 0) {
+    throw new HttpError(409, "transit_stop_in_use", `This stop is still used by ${referenced} route or schedule records; retire it instead`);
+  }
+  const anchors = await all<{ anchorId: string }>(
+    env.DB,
+    "select anchor_id as anchorId from entity_locations where entity_type='transit_stop' and entity_id=?",
+    [stopId],
+  );
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("delete from entity_locations where entity_type='transit_stop' and entity_id=?").bind(stopId),
+  ];
+  if (anchors.length > 0) {
+    const anchorIds = anchors.map((row) => row.anchorId);
+    statements.push(
+      env.DB.prepare(`delete from location_anchors where id in (${anchorIds.map(() => "?").join(",")})`).bind(...anchorIds),
+    );
+  }
+  statements.push(env.DB.prepare("delete from transit_stops where id=?").bind(stopId));
+  await env.DB.batch(statements);
+  await audit(env, principal, "transit.stop.delete", "transit_stop", stopId, requestId, before, null);
+  return noContent();
+}
+
 export async function createRoute(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
   const body = exactObject(await readJson<unknown>(request), "transitRoute", ["name", "code", "operatorId"]);
   const id = makeId("route");
   const now = isoNow();
   const operatorId = optionalString(body.operatorId, "operatorId", 100);
-  await assertExists(env.DB, "organizations", operatorId, "Operator");
+  const code = optionalString(body.code, "code", 100);
+  await Promise.all([
+    assertExists(env.DB, "organizations", operatorId, "Operator"),
+    assertCodeAvailable(env, "transit_routes", code, null),
+  ]);
   await env.DB.prepare("insert into transit_routes(id,code,name,operator_id,status,created_at,updated_at) values(?,?,?,?,'active',?,?)")
-    .bind(id, optionalString(body.code, "code", 100), requiredString(body.name, "name", 200), operatorId, now, now).run();
+    .bind(id, code, requiredString(body.name, "name", 200), operatorId, now, now).run();
   await audit(env, principal, "transit.route.create", "transit_route", id, requestId, null, body);
   return json({ id }, { status: 201 });
+}
+
+export async function updateRoute(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  routeId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<{ id: string; code: string | null; name: string; operator_id: string | null; status: string }>(
+    env.DB,
+    "select id,code,name,operator_id,status from transit_routes where id=?",
+    [routeId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Route does not exist");
+  const body = partialObject(await readJson<unknown>(request), "transitRouteUpdate", ["name", "code", "operatorId", "status"]);
+  const name = Object.hasOwn(body, "name") ? requiredString(body.name, "name", 200) : before.name;
+  const code = Object.hasOwn(body, "code") ? optionalString(body.code, "code", 100) : before.code;
+  const operatorId = Object.hasOwn(body, "operatorId") ? optionalString(body.operatorId, "operatorId", 100) : before.operator_id;
+  const status = Object.hasOwn(body, "status") ? oneOf(body.status, "status", ROUTE_STATUSES) : before.status;
+  await Promise.all([
+    assertExists(env.DB, "organizations", operatorId, "Operator"),
+    assertCodeAvailable(env, "transit_routes", code, routeId),
+  ]);
+  const now = isoNow();
+  await env.DB.prepare("update transit_routes set code=?,name=?,operator_id=?,status=?,updated_at=? where id=?")
+    .bind(code, name, operatorId, status, now, routeId).run();
+  await audit(env, principal, "transit.route.update", "transit_route", routeId, requestId, before, { name, code, operatorId, status });
+  return json({ id: routeId });
+}
+
+/**
+ * Remove a route. `transit_patterns` cascades from here and `transit_trips`
+ * cascades from those, so a route that still has directions is refused rather
+ * than allowed to take a season of timetables down with it.
+ */
+export async function deleteRoute(
+  env: Env,
+  principal: SessionPrincipal,
+  routeId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    "select id,code,name,operator_id,status from transit_routes where id=?",
+    [routeId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Route does not exist");
+  const usage = await first<{ patterns: number }>(
+    env.DB,
+    "select count(*) as patterns from transit_patterns where route_id=?",
+    [routeId],
+  );
+  if ((usage?.patterns ?? 0) > 0) {
+    throw new HttpError(409, "transit_route_in_use", `This route still has ${usage?.patterns} direction(s); delete them first or suspend the route instead`);
+  }
+  await env.DB.prepare("delete from transit_routes where id=?").bind(routeId).run();
+  await audit(env, principal, "transit.route.delete", "transit_route", routeId, requestId, before, null);
+  return noContent();
 }
 
 export async function createPattern(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
@@ -149,6 +387,111 @@ export async function createPattern(request: Request, env: Env, principal: Sessi
   return json({ id }, { status: 201 });
 }
 
+/**
+ * Rename a direction or flip which way round it runs. The stop sequence is edited
+ * separately by {@link replacePatternStops}, which has to remap existing trip
+ * times and therefore cannot be folded in here.
+ */
+export async function updatePattern(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  patternId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<{ id: string; route_id: string; direction_id: number; name: string }>(
+    env.DB,
+    "select id,route_id,direction_id,name from transit_patterns where id=?",
+    [patternId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Pattern does not exist");
+  const body = partialObject(await readJson<unknown>(request), "transitPatternUpdate", ["name", "directionId"]);
+  const name = Object.hasOwn(body, "name") ? requiredString(body.name, "name", 200) : before.name;
+  let directionId = before.direction_id;
+  if (Object.hasOwn(body, "directionId")) {
+    if (body.directionId !== 0 && body.directionId !== 1) {
+      throw new HttpError(400, "validation_error", "directionId must be 0 or 1");
+    }
+    directionId = body.directionId;
+  }
+  // `unique(route_id, direction_id, name)` — report the clash instead of letting
+  // the constraint surface as a 500.
+  const clash = await first<{ id: string }>(
+    env.DB,
+    "select id from transit_patterns where route_id=? and direction_id=? and name=? and id<>?",
+    [before.route_id, directionId, name, patternId],
+  );
+  if (clash) throw new HttpError(409, "conflict", "This route already has a direction with that name and travel direction");
+  await env.DB.prepare("update transit_patterns set name=?,direction_id=? where id=?").bind(name, directionId, patternId).run();
+  await audit(env, principal, "transit.pattern.update", "transit_pattern", patternId, requestId, before, { name, directionId });
+  return json({ id: patternId });
+}
+
+/**
+ * Delete a direction along with its stop sequence. Trips cascade from
+ * `transit_patterns`, so an existing timetable blocks the delete: retiring those
+ * trips first is an explicit decision, not a side effect of removing a direction.
+ */
+export async function deletePattern(
+  env: Env,
+  principal: SessionPrincipal,
+  patternId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    "select id,route_id,direction_id,name from transit_patterns where id=?",
+    [patternId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Pattern does not exist");
+  const usage = await first<{ trips: number }>(
+    env.DB,
+    "select count(*) as trips from transit_trips where pattern_id=? and status='active'",
+    [patternId],
+  );
+  if ((usage?.trips ?? 0) > 0) {
+    throw new HttpError(409, "transit_pattern_in_use", `This direction still has ${usage?.trips} active trip(s); delete them first`);
+  }
+  await env.DB.batch([
+    env.DB.prepare("delete from transit_pattern_stops where pattern_id=?").bind(patternId),
+    env.DB.prepare("delete from transit_patterns where id=?").bind(patternId),
+  ]);
+  await audit(env, principal, "transit.pattern.delete", "transit_pattern", patternId, requestId, before, null);
+  return noContent();
+}
+
+/**
+ * Validate a calendar's exception list against its date range and return the
+ * insert statements. Shared by create and update so both reject the same inputs.
+ */
+function planCalendarExceptions(
+  env: Env,
+  calendarId: string,
+  value: unknown,
+  validFrom: string,
+  validTo: string,
+): { statements: D1PreparedStatement[]; exceptions: Array<{ date: string; type: string; label: string | null }> } {
+  const rows = arrayValue(value, "exceptions", MAX_CALENDAR_EXCEPTIONS);
+  const statements: D1PreparedStatement[] = [];
+  const exceptions: Array<{ date: string; type: string; label: string | null }> = [];
+  const seen = new Set<string>();
+  for (const [index, raw] of rows.entries()) {
+    const exception = exactObject(raw, `exceptions[${index}]`, ["date", "type", "label"]);
+    const type = oneOf(exception.type, `exceptions[${index}].type`, ["added", "removed"] as const);
+    const date = dateValue(exception.date, `exceptions[${index}].date`);
+    if (date < validFrom || date > validTo) {
+      throw new HttpError(400, "validation_error", `exceptions[${index}].date must be within the calendar date range`);
+    }
+    if (seen.has(date)) throw new HttpError(400, "validation_error", "Each exception date can appear only once");
+    seen.add(date);
+    const label = optionalString(exception.label, `exceptions[${index}].label`, 200);
+    exceptions.push({ date, type, label });
+    statements.push(env.DB.prepare("insert into service_calendar_exceptions(calendar_id,service_date,exception_type,label) values(?,?,?,?)")
+      .bind(calendarId, date, type, label));
+  }
+  return { statements, exceptions };
+}
+
 export async function createCalendar(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
   const body = exactObject(await readJson<unknown>(request), "serviceCalendar", [
     "name",
@@ -169,27 +512,117 @@ export async function createCalendar(request: Request, env: Env, principal: Sess
   if (validFrom > validTo) {
     throw new HttpError(400, "validation_error", "Calendar date range is invalid");
   }
-  const exceptions = arrayValue(body.exceptions, "exceptions", MAX_CALENDAR_EXCEPTIONS);
-  const statements: D1PreparedStatement[] = [env.DB.prepare(
-    `insert into service_calendars(id,name,timezone,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id)
-     values(?,?,'Asia/Shanghai',?,?,?,?,?,?,?,?,?,?)`,
-  ).bind(id, name, validFrom, validTo, ...flags, sourceId)];
-  const exceptionDates = new Set<string>();
-  for (const [index, raw] of exceptions.entries()) {
-    const exception = exactObject(raw, `exceptions[${index}]`, ["date", "type", "label"]);
-    const type = oneOf(exception.type, `exceptions[${index}].type`, ["added", "removed"] as const);
-    const date = dateValue(exception.date, `exceptions[${index}].date`);
-    if (date < validFrom || date > validTo) {
-      throw new HttpError(400, "validation_error", `exceptions[${index}].date must be within the calendar date range`);
-    }
-    if (exceptionDates.has(date)) throw new HttpError(400, "validation_error", "Each exception date can appear only once");
-    exceptionDates.add(date);
-    statements.push(env.DB.prepare("insert into service_calendar_exceptions(calendar_id,service_date,exception_type,label) values(?,?,?,?)")
-      .bind(id, date, type, optionalString(exception.label, `exceptions[${index}].label`, 200)));
-  }
-  await env.DB.batch(statements);
+  const planned = planCalendarExceptions(env, id, body.exceptions, validFrom, validTo);
+  await env.DB.batch([
+    env.DB.prepare(
+      `insert into service_calendars(id,name,timezone,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id)
+       values(?,?,'Asia/Shanghai',?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(id, name, validFrom, validTo, ...flags, sourceId),
+    ...planned.statements,
+  ]);
   await audit(env, principal, "transit.calendar.create", "service_calendar", id, requestId, null, body);
   return json({ id }, { status: 201 });
+}
+
+/**
+ * Edit a calendar. `exceptions` is replace-all when present; omit it to keep the
+ * stored list. Narrowing the date range is refused while an exception sits
+ * outside the new range, so an edit can never silently discard a recorded
+ * holiday.
+ */
+export async function updateCalendar(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  calendarId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    `select id,name,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id
+       from service_calendars where id=?`,
+    [calendarId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Calendar does not exist");
+
+  const body = partialObject(await readJson<unknown>(request), "serviceCalendarUpdate", [
+    "name", "validFrom", "validTo", "weekdays", "exceptions", "sourceId",
+  ]);
+  const name = Object.hasOwn(body, "name") ? requiredString(body.name, "name", 200) : String(before.name);
+  const validFrom = Object.hasOwn(body, "validFrom") ? dateValue(body.validFrom, "validFrom") : String(before.valid_from);
+  const validTo = Object.hasOwn(body, "validTo") ? dateValue(body.validTo, "validTo") : String(before.valid_to);
+  if (validFrom > validTo) throw new HttpError(400, "validation_error", "Calendar date range is invalid");
+  const sourceId = Object.hasOwn(body, "sourceId")
+    ? optionalString(body.sourceId, "sourceId", 100)
+    : (before.source_id === null ? null : String(before.source_id));
+  await assertExists(env.DB, "data_sources", sourceId, "Data source");
+  const flags = Object.hasOwn(body, "weekdays")
+    ? WEEKDAYS.map((day) => booleanValue(exactObject(body.weekdays, "weekdays", WEEKDAYS)[day], `weekdays.${day}`) ? 1 : 0)
+    : WEEKDAYS.map((day) => (before[day] === 1 ? 1 : 0));
+
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare(
+      `update service_calendars set name=?,valid_from=?,valid_to=?,
+        monday=?,tuesday=?,wednesday=?,thursday=?,friday=?,saturday=?,sunday=?,source_id=? where id=?`,
+    ).bind(name, validFrom, validTo, ...flags, sourceId, calendarId),
+  ];
+  let replacedExceptions: Array<{ date: string; type: string; label: string | null }> | null = null;
+  if (Object.hasOwn(body, "exceptions")) {
+    const planned = planCalendarExceptions(env, calendarId, body.exceptions, validFrom, validTo);
+    replacedExceptions = planned.exceptions;
+    statements.push(env.DB.prepare("delete from service_calendar_exceptions where calendar_id=?").bind(calendarId));
+    statements.push(...planned.statements);
+  } else {
+    const orphaned = await first<{ total: number }>(
+      env.DB,
+      "select count(*) as total from service_calendar_exceptions where calendar_id=? and (service_date<? or service_date>?)",
+      [calendarId, validFrom, validTo],
+    );
+    if ((orphaned?.total ?? 0) > 0) {
+      throw new HttpError(409, "conflict", `${orphaned?.total} recorded exception date(s) fall outside the new date range; edit them together with the range`);
+    }
+  }
+  await env.DB.batch(statements);
+  await audit(env, principal, "transit.calendar.update", "service_calendar", calendarId, requestId, before, {
+    name, validFrom, validTo, sourceId,
+    weekdays: Object.fromEntries(WEEKDAYS.map((day, index) => [day, flags[index] === 1])),
+    ...(replacedExceptions === null ? {} : { exceptions: replacedExceptions }),
+  });
+  return json({ id: calendarId });
+}
+
+/**
+ * Delete a calendar. `transit_trips.service_calendar_id` is `on delete restrict`,
+ * so this is refused while any trip — active or retired — still runs on it; the
+ * check is explicit here to answer 409 instead of a raw constraint failure.
+ */
+export async function deleteCalendar(
+  env: Env,
+  principal: SessionPrincipal,
+  calendarId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    `select id,name,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id
+       from service_calendars where id=?`,
+    [calendarId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Calendar does not exist");
+  const usage = await first<{ trips: number }>(
+    env.DB,
+    "select count(*) as trips from transit_trips where service_calendar_id=?",
+    [calendarId],
+  );
+  if ((usage?.trips ?? 0) > 0) {
+    throw new HttpError(409, "service_calendar_in_use", `This calendar still has ${usage?.trips} trip(s) on it; move or delete them first`);
+  }
+  await env.DB.batch([
+    env.DB.prepare("delete from service_calendar_exceptions where calendar_id=?").bind(calendarId),
+    env.DB.prepare("delete from service_calendars where id=?").bind(calendarId),
+  ]);
+  await audit(env, principal, "transit.calendar.delete", "service_calendar", calendarId, requestId, before, null);
+  return noContent();
 }
 
 export async function createTrip(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {

@@ -57,6 +57,13 @@ interface SubmissionRow {
   reviewedAt: string | null;
 }
 
+/** 列表行额外带出提交账号，审核端据此显示「谁传的」而不是一个自由文本昵称。 */
+interface SubmissionListRow extends SubmissionRow {
+  submitterUserId: string | null;
+  submitterEmail: string | null;
+  submitterAccountName: string | null;
+}
+
 interface ProducedRevision {
   type: "place";
   id: string;
@@ -123,7 +130,18 @@ async function validateFeedbackTarget(
   if (!stop) throw new HttpError(404, "target_not_found", "Submission target does not exist");
 }
 
-export async function createSubmission(request: Request, env: Env): Promise<Response> {
+/**
+ * POST /api/public/submissions — 用户反馈提交。
+ *
+ * 需要登录会话。提交人身份取自会话（`submitter_user_id` 指向管理端同一张 users
+ * 表），不再信任请求体里的自由文本：`submitterName` 只作为「希望被称呼的名字」
+ * 留在展示层，账号归属由服务端写死，用户改不动。
+ */
+export async function createSubmission(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+): Promise<Response> {
   await enforcePublicRateLimit(request, env, "submission-create", 20);
   const body = exactObject(
     await readJsonLimited<unknown>(request, 64 * 1024),
@@ -137,13 +155,14 @@ export async function createSubmission(request: Request, env: Env): Promise<Resp
   assertFeedbackTarget(payload, targetType);
   await validateFeedbackTarget(env, targetType, targetId, baseRevisionId);
   const photoMediaIds = await assertAttachablePhotos(env, body.photoMediaIds);
-  const submitterName = nullableText(body.submitterName, "submitterName", 100);
+  // 昵称是展示用的自称，缺省回落到账号名；账号归属由 submitter_user_id 单独承载。
+  const submitterName = nullableText(body.submitterName, "submitterName", 100) ?? principal.displayName;
   const submitterContact = nullableText(body.submitterContact, "submitterContact", 200);
   const id = makeId("submission");
   await env.DB.batch([
     env.DB.prepare(
-      `insert into content_submissions(id,target_type,target_id,base_revision_id,payload_json,submitter_name,submitter_contact,status,created_at)
-       values(?,?,?,?,?,?,?,'pending',?)`,
+      `insert into content_submissions(id,target_type,target_id,base_revision_id,payload_json,submitter_name,submitter_contact,submitter_user_id,status,created_at)
+       values(?,?,?,?,?,?,?,?,'pending',?)`,
     ).bind(
       id,
       targetType,
@@ -152,6 +171,7 @@ export async function createSubmission(request: Request, env: Env): Promise<Resp
       jsonString(payload),
       submitterName,
       submitterContact,
+      principal.userId,
       isoNow(),
     ),
     ...linkSubmissionPhotoStatements(env, id, photoMediaIds),
@@ -160,11 +180,14 @@ export async function createSubmission(request: Request, env: Env): Promise<Resp
 }
 
 export async function listSubmissions(env: Env): Promise<Response> {
-  const items = await all<SubmissionRow>(
+  const items = await all<SubmissionListRow>(
     env.DB,
-    `select id,target_type as targetType,target_id as targetId,base_revision_id as baseRevisionId,payload_json as payloadJson,
-            submitter_name as submitterName,submitter_contact as submitterContact,status,created_at as createdAt,reviewed_at as reviewedAt
-       from content_submissions order by created_at desc limit 200`,
+    `select s.id,s.target_type as targetType,s.target_id as targetId,s.base_revision_id as baseRevisionId,s.payload_json as payloadJson,
+            s.submitter_name as submitterName,s.submitter_contact as submitterContact,s.status,s.created_at as createdAt,
+            s.reviewed_at as reviewedAt,s.submitter_user_id as submitterUserId,
+            u.email as submitterEmail,u.display_name as submitterAccountName
+       from content_submissions s left join users u on u.id=s.submitter_user_id
+      order by s.created_at desc limit 200`,
   );
   const links = await all<{ submissionId: string; mediaAssetId: string; bucketScope: string; status: string }>(
     env.DB,

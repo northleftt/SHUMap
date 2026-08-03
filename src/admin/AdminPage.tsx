@@ -1,4 +1,5 @@
 import {
+  Building2,
   Bus,
   FileText,
   Inbox,
@@ -32,6 +33,7 @@ import { ReleasesPage } from "./pages/ReleasesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { FacilityTypesPage } from "./pages/FacilityTypesPage";
 import { MapFiltersPage } from "./pages/MapFiltersPage";
+import { OrganizationsPage } from "./pages/OrganizationsPage";
 
 // ===========================================================================
 // v2 管理后台（A1-A14）。深蓝侧边栏 + 顶栏 + 嵌套路由；
@@ -45,6 +47,7 @@ const NAV_GROUPS = [
       { to: "/admin/content", end: false, label: "内容管理", icon: FileText },
       { to: "/admin/facility-types", end: false, label: "设施类型", icon: Tags },
       { to: "/admin/map-filters", end: false, label: "地图标签", icon: Tags },
+      { to: "/admin/organizations", end: false, label: "品牌与机构", icon: Building2, permission: "write:content" },
       { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
       { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
       { to: "/admin/releases", end: false, label: "发布中心", icon: Rocket, permission: "publish:release" },
@@ -75,6 +78,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/content")) return "内容管理";
   if (pathname.startsWith("/admin/facility-types")) return "设施类型管理";
   if (pathname.startsWith("/admin/map-filters")) return "地图标签管理";
+  if (pathname.startsWith("/admin/organizations")) return "品牌与机构管理";
   if (pathname.startsWith("/admin/review")) return "审核中心";
   if (pathname.startsWith("/admin/operations/new")) return "新建运营事件 · 地图编辑器";
   if (pathname.endsWith("/edit") && pathname.startsWith("/admin/operations/")) return "运营事件 · 编辑几何";
@@ -259,6 +263,7 @@ export function AdminPage() {
         <Route path="content/merchants/:id" element={hasPermission("write:content") ? <MerchantEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="facility-types" element={<FacilityTypesPage />} />
         <Route path="map-filters" element={hasPermission("write:content") ? <MapFiltersPage /> : <Navigate to="/admin" replace />} />
+        <Route path="organizations" element={hasPermission("write:content") ? <OrganizationsPage /> : <Navigate to="/admin" replace />} />
         <Route path="review" element={hasPermission("review:content") ? <ReviewPage /> : <Navigate to="/admin" replace />} />
         <Route path="operations" element={<OperationsPage />} />
         <Route path="operations/new" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />

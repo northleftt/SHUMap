@@ -182,8 +182,10 @@ export async function submitCollectionTask(request: Request, env: Env, principal
   const photoMediaIds = await assertAttachablePhotos(env, collectionPhotoMediaIds(payload), MAX_COLLECTION_PHOTOS);
   await env.DB.batch([
     env.DB.prepare(
-      `insert into content_submissions(id,target_type,target_id,base_revision_id,payload_json,submitter_name,status,created_at)
-       select ?,'place',ct.building_place_id,p.current_revision_id,?,ct.assignee_name,'pending',?
+      // 提交人身份直接取自任务行的领取账号：两者在同一条语句里，不会出现
+      // 「任务归 A、提交记成 B」。assignee_name 仍写入，作为当时的展示名快照。
+      `insert into content_submissions(id,target_type,target_id,base_revision_id,payload_json,submitter_name,submitter_user_id,status,created_at)
+       select ?,'place',ct.building_place_id,p.current_revision_id,?,ct.assignee_name,ct.assignee_user_id,'pending',?
          from collection_tasks ct join places p on p.id=ct.building_place_id
         where ct.building_place_id=? and ct.assignee_user_id=? and ct.status='collecting'
           and ct.lock_expires_at>? and p.current_revision_id is not null`,

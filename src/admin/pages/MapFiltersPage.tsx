@@ -39,7 +39,7 @@ export function MapFiltersPage() {
   const [editKindName, setEditKindName] = useState("");
   const [editKindOrder, setEditKindOrder] = useState("100");
 
-  if (state.status === "loading") return <LoadingState label="加载地图分类…" />;
+  if (state.status === "loading") return <LoadingState label="加载地图标签…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
   const data = state.data!;
   const categoryOptions = data.items.map((item) => ({ value: item.id, label: item.label }));
@@ -48,7 +48,7 @@ export function MapFiltersPage() {
   const kindCategoryLabel = (categoryId: string | null): string => {
     if (categoryId === null) return "未归属";
     const category = categoryById.get(categoryId);
-    if (!category) throw new Error(`地点类型引用了不存在的地图分类：${categoryId}`);
+    if (!category) throw new Error(`地点类型引用了不存在的地图标签：${categoryId}`);
     return category.label;
   };
   const unassignedTargets = memberTarget === "placeKind"
@@ -72,7 +72,7 @@ export function MapFiltersPage() {
 
   async function createCategory() {
     if (!categoryKey.trim() || !categoryLabel.trim()) {
-      setError("请填写分类键和名称");
+      setError("请填写标签键和名称");
       return;
     }
     await mutate(
@@ -81,7 +81,7 @@ export function MapFiltersPage() {
         label: categoryLabel.trim(),
         sortOrder: Number(categoryOrder),
       }),
-      "新增分类失败",
+      "新增标签失败",
     );
     setAddingCategory(false);
     setCategoryKey("");
@@ -105,7 +105,7 @@ export function MapFiltersPage() {
 
   async function createKind() {
     if (!kindId.trim() || !kindName.trim() || !kindCategoryId) {
-      setError("请填写地点类型 ID、名称并选择归属分类");
+      setError("请填写地点类型 ID、名称并选择归属标签");
       return;
     }
     await mutate(
@@ -129,8 +129,8 @@ export function MapFiltersPage() {
       <ErrorBanner message={error} />
 
       <Panel
-        title="地图分类（chip）"
-        action={<GhostButton onClick={() => setAddingCategory((value) => !value)}><Plus size={14} />新增分类</GhostButton>}
+        title="地图标签"
+        action={<GhostButton onClick={() => setAddingCategory((value) => !value)}><Plus size={14} />新增标签</GhostButton>}
       >
         <div className="space-y-4">
           {addingCategory ? (
@@ -153,7 +153,7 @@ export function MapFiltersPage() {
                       <GhostButton disabled={busy} onClick={() => void mutate(async () => {
                         await admin.updateMapFilter(category.id, { label: editCategoryLabel.trim(), sortOrder: Number(editCategoryOrder) });
                         setEditingCategoryId("");
-                      }, "保存分类失败")}><Check size={14} />保存</GhostButton>
+                      }, "保存标签失败")}><Check size={14} />保存</GhostButton>
                       <GhostButton onClick={() => setEditingCategoryId("")}><X size={14} /></GhostButton>
                     </div>
                   </div>
@@ -166,7 +166,7 @@ export function MapFiltersPage() {
                     <Pill tone={category.active ? "ok" : "neutral"}>{category.active ? "启用" : "停用"}</Pill>
                     <GhostButton onClick={() => { setEditingCategoryId(category.id); setEditCategoryLabel(category.label); setEditCategoryOrder(String(category.sortOrder)); }}><Pencil size={14} />编辑</GhostButton>
                     <GhostButton disabled={busy} onClick={() => void mutate(() => admin.updateMapFilter(category.id, { active: !category.active }), "更新状态失败")}>{category.active ? "停用" : "启用"}</GhostButton>
-                    <GhostButton danger disabled={busy || category.members.length > 0} onClick={() => void mutate(() => admin.deleteMapFilter(category.id), "删除分类失败")}><Trash2 size={14} />删除</GhostButton>
+                    <GhostButton danger disabled={busy || category.members.length > 0} onClick={() => void mutate(() => admin.deleteMapFilter(category.id), "删除标签失败")}><Trash2 size={14} />删除</GhostButton>
                   </div>
                 )}
 
@@ -197,7 +197,7 @@ export function MapFiltersPage() {
                       options={[{ value: "placeKind", label: "地点类型" }, { value: "facilityType", label: "设施类型" }, { value: "merchants", label: "包含商户" }]}
                       value={memberTarget}
                     />
-                    {memberTarget === "merchants" ? <div className="pb-2 text-body text-sub">将包含商户的楼宇纳入此分类</div> : (
+                    {memberTarget === "merchants" ? <div className="pb-2 text-body text-sub">将包含商户的楼宇纳入此标签</div> : (
                       <SelectField label="成员" onChange={setMemberValue} options={unassignedTargets.map((row) => ({ value: row.id, label: row.name }))} placeholder="选择成员" value={memberValue} />
                     )}
                     <div className="flex gap-2"><PrimaryButton disabled={busy || (memberTarget === "merchants" && !data.unassigned.includesMerchants)} onClick={() => void addMember(category.id)}>添加</PrimaryButton><GhostButton onClick={() => setMemberCategoryId("")}>取消</GhostButton></div>
@@ -221,7 +221,7 @@ export function MapFiltersPage() {
               <Field label="ID" onChange={setKindId} placeholder="library" value={kindId} />
               <Field label="名称" onChange={setKindName} placeholder="图书馆" value={kindName} />
               <Field label="排序" onChange={setKindOrder} type="number" value={kindOrder} />
-              <SelectField label="归属分类" onChange={setKindCategoryId} options={activeCategoryOptions} placeholder="选择分类" value={kindCategoryId} />
+              <SelectField label="归属标签" onChange={setKindCategoryId} options={activeCategoryOptions} placeholder="选择标签" value={kindCategoryId} />
               <div className="flex gap-2"><PrimaryButton disabled={busy || !kindCategoryId} onClick={() => void createKind()}>保存</PrimaryButton><GhostButton onClick={() => setAddingKind(false)}>取消</GhostButton></div>
             </div>
           ) : null}

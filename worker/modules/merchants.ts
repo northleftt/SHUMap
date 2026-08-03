@@ -2,7 +2,7 @@ import type { SessionPrincipal } from "../domain/types";
 import type { Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, jsonString, makeId, sha256 } from "../lib/values";
+import { exactObject, isoNow, jsonString, makeId, oneOf, sha256 } from "../lib/values";
 import { normalizeMerchantRevision, validateMerchantRevision } from "../lib/revision-contracts";
 import { audit } from "./audit";
 import { listEntityLocations } from "./locations";
@@ -104,4 +104,34 @@ export async function createMerchantRevision(request: Request, env: Env, princip
   ]);
   await audit(env, principal, "merchant.revision.create", "merchant_revision", revisionId, requestId, null, revision);
   return json({ id: revisionId, outletId, revisionNo: pending?.revision_no ?? next.next_no, editorialStatus: "draft" }, { status: pending ? 200 : 201 });
+}
+
+const LIFECYCLE_STATUSES = ["planned", "active", "temporarily_closed", "retired"] as const;
+
+/**
+ * PATCH /api/admin/merchants/:id/lifecycle —— 开业 / 暂停营业 / 关店。
+ *
+ * 生命周期不进修订流：它描述的是门店此刻在不在营业，改动即时生效。门店的名称、
+ * 品类等内容仍然只能通过修订改。retired 之外的取值会触发 map filter 归属校验
+ * （见 0012_map_filter_integrity.sql 的 require_merchant_active_map_filter_update）。
+ */
+export async function updateMerchantLifecycle(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  outletId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<{ id: string; lifecycle_status: string }>(
+    env.DB,
+    "select id,lifecycle_status from merchant_outlets where id=?",
+    [outletId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Merchant outlet does not exist");
+  const body = exactObject(await readJson<unknown>(request), "merchantLifecycle", ["lifecycleStatus"]);
+  const lifecycleStatus = oneOf(body.lifecycleStatus, "lifecycleStatus", LIFECYCLE_STATUSES);
+  await env.DB.prepare("update merchant_outlets set lifecycle_status=?,updated_at=? where id=?")
+    .bind(lifecycleStatus, isoNow(), outletId).run();
+  await audit(env, principal, "merchant.lifecycle.update", "merchant_outlet", outletId, requestId, before, { lifecycleStatus });
+  return json({ id: outletId, lifecycleStatus });
 }

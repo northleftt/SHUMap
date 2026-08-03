@@ -36,8 +36,8 @@ const ERROR_TEXT: Record<string, string> = {
   code_immutable: "已有类型的英文编码不能修改。要换编码请新建一个类型，再把旧的停用。",
   unsupported_icon_key: "选择的图标不在支持范围内，请重新选择。",
   facility_type_in_use: "这个类型仍被点位或采集记录引用，不能删除。可以先停用它。",
-  inactive_map_filter: "启用中的设施类型必须归入启用中的地图分类。",
-  map_filter_in_use: "这个地图分类仍承载使用中的内容，当前操作无法完成。",
+  inactive_map_filter: "启用中的设施类型必须归入启用中的地图标签。",
+  map_filter_in_use: "这个地图标签仍承载使用中的内容，当前操作无法完成。",
   validation_error: "填写的内容不完整或不正确，请检查后重试。",
   forbidden: "当前账号没有维护设施类型的权限。",
   unauthorized: "登录状态已失效，请重新登录。",
@@ -228,12 +228,12 @@ function TypeForm({
           value={interval}
         />
         <SelectField
-          label="地图分类"
+          label="地图标签"
           onChange={setMapFilterCategoryId}
           options={mapFilterCategories
             .filter((item) => editing !== null || item.active)
             .map((item) => ({ value: item.id, label: item.active ? item.label : `${item.label}（已停用）` }))}
-          placeholder="选择地图分类"
+          placeholder="选择地图标签"
           value={mapFilterCategoryId}
         />
       </div>
@@ -387,7 +387,7 @@ function TypeCard({
             {active ? null : <Pill tone="neutral">已停用</Pill>}
           </p>
           <p className="mt-0.5 text-label text-sub">
-            {categoryLabel(type.category)} · 地图分类：{type.mapFilterLabel} · 图标：{facilityIconKeyLabel(type.iconKey ?? "generic")}
+            {categoryLabel(type.category)} · 地图标签：{type.mapFilterLabel} · 图标：{facilityIconKeyLabel(type.iconKey ?? "generic")}
             {type.verificationIntervalDays ? ` · 建议每 ${type.verificationIntervalDays} 天复核` : ""}
           </p>
         </div>

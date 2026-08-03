@@ -107,13 +107,46 @@ export function createSpace(body: IndoorSpaceCreateInput): Promise<{ id: string 
   return apiFetch<{ id: string }>("/api/admin/spaces", { method: "POST", body });
 }
 
-export interface OrganizationCreateInput {
+// ---------------------------------------------------------------------------
+// 品牌 / 机构（organizations）
+//
+// 引用它的五处内容（商户、数据来源、运营事件、楼宇、校车线路）都是 set null 外键，
+// 所以列表带上 usage 计数：零引用才允许 DELETE，否则只能把 status 改成 retired。
+// ---------------------------------------------------------------------------
+
+export interface OrganizationRow {
+  id: string;
   name: string;
   kind: string;
+  status: "active" | "retired";
+  createdAt: string;
+  updatedAt: string;
+  /** 引用计数，决定能否真删 */
+  usage: { merchants: number; sources: number; events: number; buildings: number; transit: number };
 }
 
-export function createOrganization(body: OrganizationCreateInput): Promise<{ id: string }> {
+export interface OrganizationsResponse {
+  items: OrganizationRow[];
+  kinds: string[];
+}
+
+export function listOrganizations(signal?: AbortSignal): Promise<OrganizationsResponse> {
+  return apiFetch<OrganizationsResponse>("/api/admin/organizations", { signal });
+}
+
+export function createOrganization(body: { name: string; kind: string }): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/api/admin/organizations", { method: "POST", body });
+}
+
+export function updateOrganization(
+  id: string,
+  body: { name?: string; kind?: string; status?: "active" | "retired" },
+): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/api/admin/organizations/${encodeURIComponent(id)}`, { method: "PATCH", body });
+}
+
+export function deleteOrganization(id: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/organizations/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export type DataSourceType = "official" | "survey" | "import" | "community" | "derived";
@@ -198,6 +231,23 @@ export function createMerchantRevision(id: string, body: MerchantRevisionWrite):
     method: "POST",
     body,
   });
+}
+
+export type MerchantLifecycle = "planned" | "active" | "temporarily_closed" | "retired";
+
+/**
+ * PATCH /api/admin/merchants/:id/lifecycle —— 开业 / 暂停营业 / 关店。
+ *
+ * 门店的名称与品类走修订流，是否在营业即时生效。
+ */
+export function updateMerchantLifecycle(
+  id: string,
+  lifecycleStatus: MerchantLifecycle,
+): Promise<{ id: string; lifecycleStatus: MerchantLifecycle }> {
+  return apiFetch<{ id: string; lifecycleStatus: MerchantLifecycle }>(
+    `/api/admin/merchants/${encodeURIComponent(id)}/lifecycle`,
+    { method: "PATCH", body: { lifecycleStatus } },
+  );
 }
 
 
@@ -583,6 +633,8 @@ export function listAdminTransit<T = unknown>(signal?: AbortSignal): Promise<T> 
   return apiFetch<T>("/api/admin/transit", { signal });
 }
 
+export type TransitStopStatus = "active" | "temporarily_closed" | "retired";
+
 export interface TransitStopCreateInput {
   name: string;
   code: string | null;
@@ -595,10 +647,65 @@ export function createTransitStop(body: TransitStopCreateInput): Promise<{ id: s
   return apiFetch<{ id: string }>("/api/admin/transit/stops", { method: "POST", body });
 }
 
+/**
+ * PATCH /api/admin/transit/stops/:id — omitted fields keep their stored value.
+ * Sending `locations` replaces the stop's whole anchor set; omit it to leave the
+ * anchors untouched.
+ */
+export interface TransitStopUpdateInput {
+  name?: string;
+  code?: string | null;
+  placeId?: string | null;
+  campusId?: string | null;
+  status?: TransitStopStatus;
+  locations?: Array<import("../../../shared/revision-contract").RevisionLocationInput>;
+}
+
+export function updateTransitStop(stopId: string, body: TransitStopUpdateInput): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/api/admin/transit/stops/${encodeURIComponent(stopId)}`, { method: "PATCH", body });
+}
+
+/** DELETE /api/admin/transit/stops/:id — 409 `transit_stop_in_use` while referenced. */
+export function deleteTransitStop(stopId: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/transit/stops/${encodeURIComponent(stopId)}`, { method: "DELETE" });
+}
+
+export type TransitRouteStatus = "active" | "suspended" | "retired";
+
 export interface TransitRouteCreateInput {
   name: string;
   code: string | null;
   operatorId: string | null;
+}
+
+export interface TransitRouteUpdateInput {
+  name?: string;
+  code?: string | null;
+  operatorId?: string | null;
+  status?: TransitRouteStatus;
+}
+
+export function updateTransitRoute(routeId: string, body: TransitRouteUpdateInput): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/api/admin/transit/routes/${encodeURIComponent(routeId)}`, { method: "PATCH", body });
+}
+
+/** DELETE /api/admin/transit/routes/:id — 409 `transit_route_in_use` while it has directions. */
+export function deleteTransitRoute(routeId: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/transit/routes/${encodeURIComponent(routeId)}`, { method: "DELETE" });
+}
+
+export interface TransitPatternUpdateInput {
+  name?: string;
+  directionId?: 0 | 1;
+}
+
+export function updateTransitPattern(patternId: string, body: TransitPatternUpdateInput): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/api/admin/transit/patterns/${encodeURIComponent(patternId)}`, { method: "PATCH", body });
+}
+
+/** DELETE /api/admin/transit/patterns/:id — 409 `transit_pattern_in_use` while it has trips. */
+export function deleteTransitPattern(patternId: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/transit/patterns/${encodeURIComponent(patternId)}`, { method: "DELETE" });
 }
 
 export type TransitPickupType = "regular" | "reservation_only" | "none";
@@ -666,6 +773,30 @@ export function createTransitPattern(body: TransitPatternCreateInput): Promise<{
 
 export function createTransitCalendar(body: TransitCalendarCreateInput): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/api/admin/transit/calendars", { method: "POST", body });
+}
+
+/**
+ * PATCH /api/admin/transit/calendars/:id — omitted fields keep their stored
+ * value. Sending `exceptions` replaces the whole list; omitting it while
+ * narrowing the date range is refused with 409 when a stored exception would
+ * fall outside the new range.
+ */
+export interface TransitCalendarUpdateInput {
+  name?: string;
+  validFrom?: string;
+  validTo?: string;
+  weekdays?: Record<"monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday", boolean>;
+  exceptions?: TransitCalendarExceptionInput[];
+  sourceId?: string | null;
+}
+
+export function updateTransitCalendar(calendarId: string, body: TransitCalendarUpdateInput): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/api/admin/transit/calendars/${encodeURIComponent(calendarId)}`, { method: "PATCH", body });
+}
+
+/** DELETE /api/admin/transit/calendars/:id — 409 `service_calendar_in_use` while trips run on it. */
+export function deleteTransitCalendar(calendarId: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/transit/calendars/${encodeURIComponent(calendarId)}`, { method: "DELETE" });
 }
 
 export function createTransitTrip(body: TransitTripCreateInput): Promise<{ id: string }> {

@@ -9,13 +9,14 @@ import { createFacilityType, deleteFacilityType, listFacilityTypes, listPublicFa
 import { processQueue } from "./modules/jobs";
 import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapVersions, uploadMapContent } from "./modules/maps";
 import { createAdminMediaUpload, createPublicMediaUpload, getAdminMediaContent, getPublicMedia } from "./modules/media";
-import { createMerchant, createMerchantRevision, getMerchant, listMerchants } from "./modules/merchants";
+import { createMerchant, createMerchantRevision, getMerchant, listMerchants, updateMerchantLifecycle } from "./modules/merchants";
 import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
 import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
-import { createDataSource, createFloor, createOrganization, createSpace, listCampusesAndSpaces, listReferenceData, updateFloor } from "./modules/spaces";
+import { createOrganization, deleteOrganization, listOrganizations, updateOrganization } from "./modules/organizations";
+import { createDataSource, createFloor, createSpace, listCampusesAndSpaces, listReferenceData, updateFloor } from "./modules/spaces";
 import { createUser, listUsers, updateUser } from "./modules/users";
 import {
   createMapFilter,
@@ -30,7 +31,27 @@ import {
   updateMapFilterMember,
   updatePlaceKind,
 } from "./modules/map-filters";
-import { createCalendar, createPattern, createRoute, createStop, createTrip, deleteTrip, listTransit, publicJourneys, publicTripStops, replacePatternStops, updateTrip } from "./modules/transit";
+import {
+  createCalendar,
+  createPattern,
+  createRoute,
+  createStop,
+  createTrip,
+  deleteCalendar,
+  deletePattern,
+  deleteRoute,
+  deleteStop,
+  deleteTrip,
+  listTransit,
+  publicJourneys,
+  publicTripStops,
+  replacePatternStops,
+  updateCalendar,
+  updatePattern,
+  updateRoute,
+  updateStop,
+  updateTrip,
+} from "./modules/transit";
 
 export { ReleaseCoordinator } from "./modules/releases";
 
@@ -85,7 +106,12 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "GET" && path === "/api/public/transit/journeys") return publicJourneys(request, env);
   const publicTrip = match(path, "/api/public/transit/trips/:tripId/stops");
   if (method === "GET" && publicTrip) return publicTripStops(env, publicTrip.tripId);
-  if (method === "POST" && path === "/api/public/submissions") return createSubmission(request, env);
+  // 用户供稿需要登录：提交人 / 上传者写的是管理端同一张 users 表里的账号。
+  // 门槛只到「有效会话」（不要求 collect:data），任何注册账号都能反馈与供图。
+  if (method === "POST" && path === "/api/public/submissions") {
+    const principal = await requireSession(request, env);
+    return createSubmission(request, env, principal);
+  }
   if (method === "GET" && path === "/api/public/facility-types") return listPublicFacilityTypes(env);
   if (method === "GET" && path === "/api/public/facility-status") return publicFacilityStatus(env);
   if (method === "GET" && path === "/api/public/collection-tasks") {
@@ -107,7 +133,10 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
     const principal = await requireSession(request, env, "collect:data");
     return saveCollectionTask(request, env, principal, collectionTask.id);
   }
-  if (method === "POST" && path === "/api/public/media") return createPublicMediaUpload(request, env);
+  if (method === "POST" && path === "/api/public/media") {
+    const principal = await requireSession(request, env);
+    return createPublicMediaUpload(request, env, principal);
+  }
   const media = match(path, "/api/public/media/:id");
   if (method === "GET" && media) return getPublicMedia(env, media.id);
   const mapAsset = match(path, "/api/public/maps/:mapVersionId/asset");
@@ -146,9 +175,23 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return listReferenceData(env);
   }
+  // 品牌 / 机构维护。读用 read:admin，增改删用 write:content。
+  if (method === "GET" && path === "/api/admin/organizations") {
+    await requireSession(request, env, "read:admin");
+    return listOrganizations(env);
+  }
   if (method === "POST" && path === "/api/admin/organizations") {
     principal = await requireSession(request, env, "write:content");
     return createOrganization(request, env, principal, requestId);
+  }
+  const organization = match(path, "/api/admin/organizations/:id");
+  if (method === "PATCH" && organization) {
+    principal = await requireSession(request, env, "write:content");
+    return updateOrganization(request, env, principal, organization.id, requestId);
+  }
+  if (method === "DELETE" && organization) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteOrganization(env, principal, organization.id, requestId);
   }
   if (method === "POST" && path === "/api/admin/data-sources") {
     principal = await requireSession(request, env, "write:content");
@@ -229,6 +272,11 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && merchantRevision) {
     principal = await requireSession(request, env, "write:content");
     return createMerchantRevision(request, env, principal, merchantRevision.id, requestId);
+  }
+  const merchantLifecycle = match(path, "/api/admin/merchants/:id/lifecycle");
+  if (method === "PATCH" && merchantLifecycle) {
+    principal = await requireSession(request, env, "write:content");
+    return updateMerchantLifecycle(request, env, principal, merchantLifecycle.id, requestId);
   }
 
   const revisionSubmit = match(path, "/api/admin/revisions/:type/:id/submit");
@@ -392,6 +440,42 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "PUT" && patternStops) {
     principal = await requireSession(request, env, "write:transit");
     return replacePatternStops(request, env, principal, patternStops.id, requestId);
+  }
+  const transitStop = match(path, "/api/admin/transit/stops/:id");
+  if (method === "PATCH" && transitStop) {
+    principal = await requireSession(request, env, "write:transit");
+    return updateStop(request, env, principal, transitStop.id, requestId);
+  }
+  if (method === "DELETE" && transitStop) {
+    principal = await requireSession(request, env, "write:transit");
+    return deleteStop(env, principal, transitStop.id, requestId);
+  }
+  const transitRoute = match(path, "/api/admin/transit/routes/:id");
+  if (method === "PATCH" && transitRoute) {
+    principal = await requireSession(request, env, "write:transit");
+    return updateRoute(request, env, principal, transitRoute.id, requestId);
+  }
+  if (method === "DELETE" && transitRoute) {
+    principal = await requireSession(request, env, "write:transit");
+    return deleteRoute(env, principal, transitRoute.id, requestId);
+  }
+  const transitPattern = match(path, "/api/admin/transit/patterns/:id");
+  if (method === "PATCH" && transitPattern) {
+    principal = await requireSession(request, env, "write:transit");
+    return updatePattern(request, env, principal, transitPattern.id, requestId);
+  }
+  if (method === "DELETE" && transitPattern) {
+    principal = await requireSession(request, env, "write:transit");
+    return deletePattern(env, principal, transitPattern.id, requestId);
+  }
+  const transitCalendar = match(path, "/api/admin/transit/calendars/:id");
+  if (method === "PATCH" && transitCalendar) {
+    principal = await requireSession(request, env, "write:transit");
+    return updateCalendar(request, env, principal, transitCalendar.id, requestId);
+  }
+  if (method === "DELETE" && transitCalendar) {
+    principal = await requireSession(request, env, "write:transit");
+    return deleteCalendar(env, principal, transitCalendar.id, requestId);
   }
   const transitTrip = match(path, "/api/admin/transit/trips/:id");
   if (method === "PUT" && transitTrip) {

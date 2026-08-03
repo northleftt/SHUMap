@@ -236,13 +236,34 @@ export interface CampaignRow {
 // Transit
 // ---------------------------------------------------------------------------
 
+export type TransitStopStatus = "active" | "temporarily_closed" | "retired";
+
 export interface TransitStopRow {
   id: string;
   placeId: string | null;
   campusId: string | null;
   code: string | null;
   name: string;
-  status: string;
+  status: TransitStopStatus;
+}
+
+/**
+ * A stop's own boarding / alighting anchors, keyed by `entityId`. Same row shape
+ * the place & facility editors get, so `locationDraftFromApi` reads it unchanged.
+ */
+export interface TransitStopLocationRow extends Record<string, unknown> {
+  entityId: string;
+  bindingId: string;
+  role: string;
+  isPrimary: boolean;
+}
+
+/** 站点可借用的地点（照片 / 联系方式 / 导航点都挂在地点上）。 */
+export interface TransitPlaceOptionRow {
+  id: string;
+  displayName: string | null;
+  kindId: string;
+  campusId: string | null;
 }
 
 export interface TransitRouteRow {
@@ -307,15 +328,24 @@ export interface TransitStopTimeRow {
   departureTime: string | null;
 }
 
+export interface ServiceCalendarExceptionRow {
+  calendarId: string;
+  serviceDate: string;
+  exceptionType: "added" | "removed";
+  label: string | null;
+}
+
 export interface TransitResponse {
   stops: TransitStopRow[];
+  stopLocations: TransitStopLocationRow[];
   routes: TransitRouteRow[];
   patterns: TransitPatternRow[];
   patternStops: TransitPatternStopRow[];
   calendars: ServiceCalendarRow[];
-  exceptions: Array<Record<string, unknown>>;
+  exceptions: ServiceCalendarExceptionRow[];
   trips: TransitTripRow[];
   stopTimes: TransitStopTimeRow[];
+  places: TransitPlaceOptionRow[];
 }
 
 // ---------------------------------------------------------------------------

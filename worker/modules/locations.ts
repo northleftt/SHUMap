@@ -68,6 +68,43 @@ export async function listEntityLocations(
 }
 
 /**
+ * Same shape as {@link listEntityLocations} but for every entity of one type at
+ * once, so a management list page can render each row's locations without one
+ * request per entity. Kept as its own query rather than a parameter on
+ * `listEntityLocations` so the single-entity payloads stay byte-identical.
+ */
+export async function listEntityLocationsByType(
+  env: Env,
+  entityType: EntityLocationType,
+): Promise<Array<RevisionLocationInput & { entityId: string; bindingId: string; sourceElementId: string | null }>> {
+  const rows = await all<StoredEntityLocation & { entityId: string }>(
+    env.DB,
+    `select el.id as bindingId,el.entity_id as entityId,el.role,el.is_primary as isPrimary,
+            la.campus_id as campusId,la.building_place_id as buildingPlaceId,
+            la.floor_id as floorId,la.indoor_space_id as indoorSpaceId,
+            la.geometry_type as geometryType,la.geometry_json as geometryJson,la.crs,
+            la.map_version_id as mapVersionId,la.map_feature_id as mapFeatureId,
+            mf.source_element_id as sourceElementId,la.location_hint as locationHint,
+            la.precision_level as precisionLevel,la.accuracy_meters as accuracyMeters,
+            la.source_id as sourceId,la.valid_from as validFrom,la.valid_to as validTo
+       from entity_locations el
+       join location_anchors la on la.id=el.anchor_id
+       left join map_features mf on mf.id=la.map_feature_id
+      where el.entity_type=? and el.valid_to is null
+      order by el.entity_id,el.is_primary desc,el.created_at,el.id`,
+    [entityType],
+  );
+  return rows.map(({ geometryJson, isPrimary, ...row }) => {
+    if (isPrimary !== 0 && isPrimary !== 1) throw new Error(`location ${row.bindingId} is_primary must be 0 or 1`);
+    return {
+      ...row,
+      geometry: geometryJson === null ? null : parseJsonObject(geometryJson, `location ${row.bindingId} geometry_json`),
+      isPrimary: isPrimary === 1,
+    };
+  });
+}
+
+/**
  * Validates a location input and returns the anchor + binding inserts without
  * running them, so callers can compose several locations into a single
  * transactional `DB.batch` (used by the operational event replace-all edit).

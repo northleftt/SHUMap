@@ -126,16 +126,6 @@ export async function createSpace(request: Request, env: Env, principal: Session
   return json({ id }, { status: 201 });
 }
 
-export async function createOrganization(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = exactObject(await readJson<unknown>(request), "organization", ["name", "kind"]);
-  const id = makeId("org");
-  const now = isoNow();
-  await env.DB.prepare("insert into organizations(id,name,kind,status,created_at,updated_at) values(?,?,?,'active',?,?)")
-    .bind(id, requiredString(body.name, "name", 200), requiredString(body.kind, "kind", 50), now, now).run();
-  await audit(env, principal, "organization.create", "organization", id, requestId, null, body);
-  return json({ id }, { status: 201 });
-}
-
 export async function createDataSource(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
   const body = exactObject(await readJson<unknown>(request), "dataSource", [
     "sourceType",
