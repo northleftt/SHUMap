@@ -89,9 +89,9 @@ export async function handleLogout(request: Request, env: Env): Promise<Response
   return json({ ok: true }, { headers: { "set-cookie": expiredSessionCookie() } });
 }
 
-export async function requireSession(request: Request, env: Env, permission?: Permission): Promise<SessionPrincipal> {
+async function resolveSession(request: Request, env: Env): Promise<SessionPrincipal | null> {
   const raw = getSessionToken(request);
-  if (!raw) throw new HttpError(401, "unauthorized", "Authentication required");
+  if (!raw) return null;
   const tokenHash = await sha256(`${raw}:${env.SESSION_PEPPER}`);
   const rows = await all<SessionRow>(
     env.DB,
@@ -103,11 +103,8 @@ export async function requireSession(request: Request, env: Env, permission?: Pe
       where s.token_hash=? and s.revoked_at is null and s.expires_at>? and u.status='active'`,
     [tokenHash, isoNow()],
   );
-  if (!rows.length) throw new HttpError(401, "unauthorized", "Session is invalid or expired");
+  if (!rows.length) return null;
   const permissions = Array.from(new Set(rows.flatMap((row) => JSON.parse(row.permissions_json) as Permission[])));
-  if (permission && !permissions.includes("*") && !permissions.includes(permission)) {
-    throw new HttpError(403, "forbidden", `Missing permission: ${permission}`);
-  }
   const row = rows[0];
   return {
     sessionId: row.session_id,
@@ -116,6 +113,26 @@ export async function requireSession(request: Request, env: Env, permission?: Pe
     displayName: row.display_name,
     permissions,
   };
+}
+
+export async function requireSession(request: Request, env: Env, permission?: Permission): Promise<SessionPrincipal> {
+  const principal = await resolveSession(request, env);
+  if (!principal) throw new HttpError(401, "unauthorized", "Authentication required");
+  if (permission && !principal.permissions.includes("*") && !principal.permissions.includes(permission)) {
+    throw new HttpError(403, "forbidden", `Missing permission: ${permission}`);
+  }
+  return principal;
+}
+
+/**
+ * 有会话就返回账号，没有（或已失效）就返回 null，绝不抛 401。
+ *
+ * 给「可匿名、也可署名」的供稿端点用：反馈允许游客提交，但如果提交者恰好登录了，
+ * 就把账号一并记下来，审核时能溯源。失效 cookie 视同匿名而不是报错——用户带着
+ * 一个过期会话来提反馈，不应该被拦住。
+ */
+export async function optionalSession(request: Request, env: Env): Promise<SessionPrincipal | null> {
+  return resolveSession(request, env);
 }
 
 export async function handleSession(request: Request, env: Env): Promise<Response> {

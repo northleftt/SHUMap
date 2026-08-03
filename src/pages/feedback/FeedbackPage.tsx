@@ -12,7 +12,7 @@ import type { TransitStop } from "../../lib/api/types";
 import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import type { LoadedRelease } from "../../lib/release/mapData";
-import { useIdentity } from "../../lib/storage/identity";
+import { useOptionalAccountAuth } from "../../lib/auth/AccountAuthContext";
 import { useSubmissionsLog } from "../../lib/storage/submissionsLog";
 
 const FEEDBACK_TYPES: Array<{ key: FeedbackType; label: string; targetType: SubmissionTargetType }> = [
@@ -46,8 +46,11 @@ export function FeedbackPage() {
 
 function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   const navigate = useNavigate();
-  const [identity] = useIdentity();
+  const auth = useOptionalAccountAuth();
   const { addSubmission } = useSubmissionsLog();
+  // 反馈不要求登录。登录了就自动署名并可溯源，没登录则匿名，昵称随便填（可留空）。
+  const signedIn = auth?.status === "signed_in" && auth.user !== null;
+  const [nickname, setNickname] = useState("");
 
   const [type, setType] = useState<FeedbackType>("correction");
   const [targetId, setTargetId] = useState<string | null>(null);
@@ -103,7 +106,8 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
         },
         // 上传失败的照片不在 mediaIds 里，文字提交照常进行
         photoMediaIds: uploads.mediaIds,
-        submitterName: identity.name,
+        // 登录时留空即由服务端回落到账号名；未登录时这就是唯一的自称，可以为 null。
+        submitterName: nickname.trim() || null,
         submitterContact: contact.trim() || null,
       });
       addSubmission({
@@ -243,6 +247,21 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
             </p>
           ) : null}
         </div>
+
+        {/* 署名：登录与否都能提，区别只在能不能溯源 */}
+        <h2 className="mt-5 text-emphasis">署名（选填）</h2>
+        <input
+          className="mt-2.5 w-full rounded-2xl bg-surface px-4 py-3.5 text-body text-ink shadow-card outline-none placeholder:text-sub"
+          placeholder={signedIn ? `留空则用账号名「${auth?.user?.displayName ?? ""}」` : "如 张同学，留空则匿名"}
+          value={nickname}
+          maxLength={100}
+          onChange={(event) => setNickname(event.target.value)}
+        />
+        <p className="mt-2 text-aux text-sub">
+          {signedIn
+            ? "已登录，这条反馈会关联你的账号，处理进度可追溯。"
+            : "未登录也可以提交。登录后提交的反馈会关联账号，方便后续跟进。"}
+        </p>
 
         {/* 联系方式 */}
         <h2 className="mt-5 text-emphasis">联系方式（选填，便于核实）</h2>

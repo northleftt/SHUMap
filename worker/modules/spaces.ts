@@ -16,6 +16,7 @@ import {
   requiredString,
 } from "../lib/values";
 import { audit } from "./audit";
+import { canonicalLevelCode, levelDisplayName, levelOrderOf } from "./floors";
 
 const SPACE_TYPES = ["room", "zone", "corridor", "entrance", "stair", "elevator", "service_area", "other"] as const;
 const SOURCE_TYPES = ["official", "survey", "import", "community", "derived"] as const;
@@ -33,6 +34,18 @@ export async function listCampusesAndSpaces(env: Env): Promise<Response> {
   return json({ campuses, buildings, floors, spaces });
 }
 
+/**
+ * POST /api/admin/floors — 新建楼层。
+ *
+ * levelCode 一律规范化成 F<n> / B<n>（见 floors.ts 的 canonicalLevelCode）。
+ * 这一步是 0016 迁移的教训：此处原先用 requiredString 收自由文本，于是手工建的
+ * 楼层出现过 level_code='一层'，而 reviews.ts 从采集流建楼层时只产出 F1/B1，
+ * 两条写入路径格式不一致，前者在用户端楼层页显示成半成品。
+ *
+ * levelOrder 不再信任请求体：它必须与编号一致（F3 → 3，B1 → -1），否则楼层顺序
+ * 会和编号打架。同层重复由 unique(building_place_id, level_code) 兜底，这里先查
+ * 一次以便回可读的 409 而不是外键错误。
+ */
 export async function createFloor(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
   const body = exactObject(await readJson<unknown>(request), "floor", [
     "buildingPlaceId",
@@ -43,8 +56,19 @@ export async function createFloor(request: Request, env: Env, principal: Session
   ]);
   const buildingPlaceId = requiredString(body.buildingPlaceId, "buildingPlaceId", 100);
   await assertExists(env.DB, "buildings", buildingPlaceId, "Building");
-  const levelOrder = numberValue(body.levelOrder, "levelOrder");
+  const levelCode = canonicalLevelCode(body.levelCode);
+  const levelOrder = levelOrderOf(levelCode);
   const isPublic = booleanValue(body.isPublic, "isPublic");
+  const existing = await first<{ id: string }>(
+    env.DB,
+    "select id from floors where building_place_id=? and level_code=?",
+    [buildingPlaceId, levelCode],
+  );
+  if (existing) {
+    throw new HttpError(409, "floor_exists", `这栋楼已经有 ${levelCode} 层了`);
+  }
+  // 显示名留空时按编号推导，保证与采集流建出来的楼层同一口径。
+  const displayName = optionalString(body.displayName, "displayName", 100)?.trim() || levelDisplayName(levelCode);
   const id = makeId("floor");
   const now = isoNow();
   await env.DB.prepare(
@@ -53,15 +77,15 @@ export async function createFloor(request: Request, env: Env, principal: Session
   ).bind(
     id,
     buildingPlaceId,
-    requiredString(body.levelCode, "levelCode", 30),
+    levelCode,
     levelOrder,
-    requiredString(body.displayName, "displayName", 100),
+    displayName,
     isPublic ? 1 : 0,
     now,
     now,
   ).run();
-  await audit(env, principal, "floor.create", "floor", id, requestId, null, body);
-  return json({ id }, { status: 201 });
+  await audit(env, principal, "floor.create", "floor", id, requestId, null, { ...body, levelCode, levelOrder, displayName });
+  return json({ id, levelCode, levelOrder, displayName }, { status: 201 });
 }
 
 /**

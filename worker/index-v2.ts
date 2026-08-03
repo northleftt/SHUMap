@@ -1,7 +1,7 @@
 import type { Env, ExecutionContext, MessageBatch } from "./types/cloudflare";
 import type { QueueJobMessage, SessionPrincipal } from "./domain/types";
 import { asErrorResponse, HttpError, json } from "./lib/http";
-import { handleBootstrap, handleLogin, handleLogout, handleSession, requireSession } from "./modules/auth";
+import { handleBootstrap, handleLogin, handleLogout, handleSession, optionalSession, requireSession } from "./modules/auth";
 import { recordAnalyticsEvent } from "./modules/analytics";
 import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCollectionTask } from "./modules/collections";
 import { createFacilityHandler, createFacilityRevisionHandler, getFacility, listFacilities, publicFacilityStatus } from "./modules/facilities";
@@ -16,6 +16,7 @@ import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRel
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
 import { createOrganization, deleteOrganization, listOrganizations, updateOrganization } from "./modules/organizations";
+import { deleteFloor, getFloorDetail, listFloorsForBuilding, updateFloorPlanStatus } from "./modules/floors";
 import { createDataSource, createFloor, createSpace, listCampusesAndSpaces, listReferenceData, updateFloor } from "./modules/spaces";
 import { createUser, listUsers, updateUser } from "./modules/users";
 import {
@@ -106,10 +107,10 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "GET" && path === "/api/public/transit/journeys") return publicJourneys(request, env);
   const publicTrip = match(path, "/api/public/transit/trips/:tripId/stops");
   if (method === "GET" && publicTrip) return publicTripStops(env, publicTrip.tripId);
-  // 用户供稿需要登录：提交人 / 上传者写的是管理端同一张 users 表里的账号。
-  // 门槛只到「有效会话」（不要求 collect:data），任何注册账号都能反馈与供图。
+  // 反馈可匿名也可署名：登录了就把账号记进 submitter_user_id，没登录照样能提。
+  // 志愿者采集则必须登录（见下方 collection-tasks 一组，要求 collect:data）。
   if (method === "POST" && path === "/api/public/submissions") {
-    const principal = await requireSession(request, env);
+    const principal = await optionalSession(request, env);
     return createSubmission(request, env, principal);
   }
   if (method === "GET" && path === "/api/public/facility-types") return listPublicFacilityTypes(env);
@@ -133,8 +134,9 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
     const principal = await requireSession(request, env, "collect:data");
     return saveCollectionTask(request, env, principal, collectionTask.id);
   }
+  // 照片同样可匿名：匿名反馈要能附图。登录时记 uploaded_by，便于审核溯源。
   if (method === "POST" && path === "/api/public/media") {
-    const principal = await requireSession(request, env);
+    const principal = await optionalSession(request, env);
     return createPublicMediaUpload(request, env, principal);
   }
   const media = match(path, "/api/public/media/:id");
@@ -158,14 +160,33 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return listCampusesAndSpaces(env);
   }
+  // 楼层与楼层图管理。读用 read:admin，写用 write:maps（与校区图一致）。
+  // 列表 / 详情把该层的设施、商户、锚点反查出来，因此楼层页与内容管理天然同步。
+  if (method === "GET" && path === "/api/admin/floors") {
+    await requireSession(request, env, "read:admin");
+    return listFloorsForBuilding(request, env);
+  }
   if (method === "POST" && path === "/api/admin/floors") {
     principal = await requireSession(request, env, "write:maps");
     return createFloor(request, env, principal, requestId);
   }
   const floor = match(path, "/api/admin/floors/:id");
+  if (method === "GET" && floor) {
+    await requireSession(request, env, "read:admin");
+    return getFloorDetail(env, floor.id);
+  }
   if (method === "PATCH" && floor) {
     principal = await requireSession(request, env, "write:maps");
     return updateFloor(request, env, principal, floor.id, requestId);
+  }
+  if (method === "DELETE" && floor) {
+    principal = await requireSession(request, env, "write:maps");
+    return deleteFloor(env, principal, floor.id, requestId);
+  }
+  const floorPlanStatus = match(path, "/api/admin/floor-plans/:id/status");
+  if (method === "PATCH" && floorPlanStatus) {
+    principal = await requireSession(request, env, "write:maps");
+    return updateFloorPlanStatus(request, env, principal, floorPlanStatus.id, requestId);
   }
   if (method === "POST" && path === "/api/admin/spaces") {
     principal = await requireSession(request, env, "write:maps");

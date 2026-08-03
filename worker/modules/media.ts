@@ -16,17 +16,18 @@ export const MAX_SUBMISSION_PHOTOS = 3;
 /**
  * POST /api/public/media — 用户侧照片上传（一段式，raw body）。
  *
- * 需要登录会话：`uploaded_by` 记的是管理端同一张 users 表里的账号，所以审核时
- * 能回答「这张照片是谁传的」。权限门槛只到「有效会话」，任何角色都能供稿。
+ * 可匿名也可署名，与它服务的两条链路一致：匿名反馈要能附照片，所以这里不强制
+ * 登录；而登录时 `uploaded_by` 记下管理端同一张 users 表里的账号，审核时能回答
+ * 「这张照片是谁传的」。志愿者采集的照片必然带账号——那条链路本身要求登录。
  *
- * 防滥用：账号 + IP 限流 + 声明类型白名单 + 魔术字节校验 + 2MiB 硬上限。落盘一律
+ * 防滥用：IP 限流 + 声明类型白名单 + 魔术字节校验 + 2MiB 硬上限。落盘一律
  * `quarantine/submissions/`，行记 bucket_scope='quarantine' / status='quarantined'，
  * 因此在被审核采纳之前公共读端（要求 public + published + public/media/ 前缀）永远读不到。
  */
 export async function createPublicMediaUpload(
   request: Request,
   env: Env,
-  principal: SessionPrincipal,
+  principal: SessionPrincipal | null,
 ): Promise<Response> {
   await enforcePublicRateLimit(request, env, "media-upload", 30);
   const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
@@ -48,12 +49,12 @@ export async function createPublicMediaUpload(
   const digest = await sha256(bytes);
   await env.SHUMAP_BUCKET.put(objectKey, bytes, {
     httpMetadata: { contentType, cacheControl: "private, no-store" },
-    customMetadata: { scope: "quarantine" },
+    customMetadata: principal ? { scope: "quarantine", uploadedBy: principal.userId } : { scope: "quarantine" },
   });
   await env.DB.prepare(
     `insert into media_assets(id,bucket_scope,object_key,original_name,content_type,byte_size,sha256,status,uploaded_by,created_at)
      values(?,'quarantine',?,null,?,?,?,'quarantined',?,?)`,
-  ).bind(mediaId, objectKey, contentType, bytes.byteLength, digest, principal.userId, isoNow()).run();
+  ).bind(mediaId, objectKey, contentType, bytes.byteLength, digest, principal?.userId ?? null, isoNow()).run();
 
   return json({ mediaId, byteSize: bytes.byteLength, contentType, status: "quarantined" }, { status: 201 });
 }

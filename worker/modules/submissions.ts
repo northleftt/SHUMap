@@ -131,16 +131,22 @@ async function validateFeedbackTarget(
 }
 
 /**
- * POST /api/public/submissions — 用户反馈提交。
+ * POST /api/public/submissions — 用户反馈提交，可匿名也可署名。
  *
- * 需要登录会话。提交人身份取自会话（`submitter_user_id` 指向管理端同一张 users
- * 表），不再信任请求体里的自由文本：`submitterName` 只作为「希望被称呼的名字」
- * 留在展示层，账号归属由服务端写死，用户改不动。
+ * 反馈的门槛故意保持在零：路过的人发现信息有误就该能直接说，不必先注册。所以
+ * `principal` 允许为 null。
+ *
+ * 但「匿名」不等于「无从判断来源」：如果提交者恰好登录了，服务端把账号写进
+ * `submitter_user_id`（指向管理端同一张 users 表），审核时就能溯源。这一列由服务端
+ * 从会话取，请求体改不动；`submitterName` 仅是展示用的自称，登录时缺省回落到账号名。
+ *
+ * 与之相对，志愿者采集（/api/public/collection-tasks/*）必须登录——那是有组织的
+ * 数据录入，要能追责，见 collections.ts。
  */
 export async function createSubmission(
   request: Request,
   env: Env,
-  principal: SessionPrincipal,
+  principal: SessionPrincipal | null,
 ): Promise<Response> {
   await enforcePublicRateLimit(request, env, "submission-create", 20);
   const body = exactObject(
@@ -155,8 +161,8 @@ export async function createSubmission(
   assertFeedbackTarget(payload, targetType);
   await validateFeedbackTarget(env, targetType, targetId, baseRevisionId);
   const photoMediaIds = await assertAttachablePhotos(env, body.photoMediaIds);
-  // 昵称是展示用的自称，缺省回落到账号名；账号归属由 submitter_user_id 单独承载。
-  const submitterName = nullableText(body.submitterName, "submitterName", 100) ?? principal.displayName;
+  // 昵称是展示用的自称，登录时缺省回落到账号名；账号归属由 submitter_user_id 单独承载。
+  const submitterName = nullableText(body.submitterName, "submitterName", 100) ?? principal?.displayName ?? null;
   const submitterContact = nullableText(body.submitterContact, "submitterContact", 200);
   const id = makeId("submission");
   await env.DB.batch([
@@ -171,12 +177,15 @@ export async function createSubmission(
       jsonString(payload),
       submitterName,
       submitterContact,
-      principal.userId,
+      principal?.userId ?? null,
       isoNow(),
     ),
     ...linkSubmissionPhotoStatements(env, id, photoMediaIds),
   ]);
-  return json({ id, status: "pending", photoCount: photoMediaIds.length }, { status: 201 });
+  return json(
+    { id, status: "pending", photoCount: photoMediaIds.length, attributed: principal !== null },
+    { status: 201 },
+  );
 }
 
 export async function listSubmissions(env: Env): Promise<Response> {

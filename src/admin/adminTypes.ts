@@ -371,6 +371,14 @@ export interface SubmissionRow {
   createdAt: string;
   reviewedAt: string | null;
   photos: SubmissionPhotoRow[];
+  /**
+   * 提交账号。反馈允许匿名，所以为 null 有两种含义：游客提交，或该行早于
+   * 0018（那时端点还没有会话）。志愿者采集提交必然带账号。
+   */
+  submitterUserId: string | null;
+  submitterEmail: string | null;
+  /** 账号真名，与用户自填的 submitterName 区分开。 */
+  submitterAccountName: string | null;
 }
 
 // ---------------------------------------------------------------------------

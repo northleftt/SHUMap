@@ -81,8 +81,11 @@ export function createFloor(body: {
   levelOrder: number;
   displayName: string;
   isPublic: boolean;
-}): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/api/admin/floors", { method: "POST", body });
+}): Promise<{ id: string; levelCode: string; levelOrder: number; displayName: string }> {
+  return apiFetch<{ id: string; levelCode: string; levelOrder: number; displayName: string }>("/api/admin/floors", {
+    method: "POST",
+    body,
+  });
 }
 
 /** PATCH /api/admin/floors/:id — 楼层显示名 / 排序 / 是否对外可见。 */
@@ -850,6 +853,13 @@ export interface AdminSubmission {
   createdAt: string;
   reviewedAt: string | null;
   photos: AdminSubmissionPhoto[];
+  /**
+   * 提交账号。反馈允许匿名，所以这三个字段可以全为 null——那表示这条提交无从
+   * 溯源到账号；志愿者采集必然带账号。submitterName 是自称，不能当身份用。
+   */
+  submitterUserId: string | null;
+  submitterEmail: string | null;
+  submitterAccountName: string | null;
 }
 
 /** GET /api/admin/media/:id/content — 任意 scope（含隔离区）的原图地址。 */
@@ -1069,4 +1079,134 @@ export function deleteFacilityType(id: string): Promise<{ id: string; deleted: b
   return apiFetch<{ id: string; deleted: boolean }>(`/api/admin/facility-types/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+}
+
+// ---------------------------------------------------------------------------
+// 楼层与楼层平面图管理
+//
+// 与设施 / 商户的同步靠共享的 floor_id 外键：这些列表是**反查**出来的，所以在设施
+// 编辑器里改了楼层归属，楼层页刷新即变，不存在两处数据不一致。
+// ---------------------------------------------------------------------------
+
+export interface FloorPlanRow {
+  id: string;
+  versionLabel: string;
+  lifecycleStatus: MapLifecycleStatus;
+  coordinateSpaceType: string;
+  createdAt: string;
+  featureCount: number;
+}
+
+/** 一层楼被引用的次数，非零则不能删除。 */
+export interface FloorUsage {
+  facilities: number;
+  merchants: number;
+  spaces: number;
+  mapVersions: number;
+  anchors: number;
+}
+
+export interface FloorOverviewRow {
+  id: string;
+  buildingPlaceId: string;
+  levelCode: string;
+  levelOrder: number;
+  displayName: string;
+  isPublic: boolean;
+  lifecycleStatus: string;
+  plans: FloorPlanRow[];
+  usage: FloorUsage;
+}
+
+export interface FloorsOverviewResponse {
+  building: { placeId: string; displayName: string | null; campusId: string | null };
+  items: FloorOverviewRow[];
+}
+
+/** GET /api/admin/floors?buildingPlaceId=… — 一栋楼的全部楼层 + 每层图纸与引用计数。 */
+export function listBuildingFloors(buildingPlaceId: string, signal?: AbortSignal): Promise<FloorsOverviewResponse> {
+  return apiFetch<FloorsOverviewResponse>("/api/admin/floors", { query: { buildingPlaceId }, signal });
+}
+
+export interface FloorFacilityRow {
+  id: string;
+  facilityTypeId: string;
+  facilityTypeName: string;
+  lifecycleStatus: string;
+  operationalStatus: string;
+  indoorSpaceId: string | null;
+  displayName: string;
+  editorialStatus: string | null;
+  /** 已在平面图上标出服务位置的锚点数；0 表示这个设施还没落点。 */
+  positionedCount: number;
+}
+
+export interface FloorMerchantRow {
+  id: string;
+  lifecycleStatus: string;
+  indoorSpaceId: string | null;
+  displayName: string | null;
+  businessType: string | null;
+  editorialStatus: string | null;
+}
+
+export interface FloorSpaceRow {
+  id: string;
+  spaceType: string;
+  stableCode: string | null;
+  displayName: string;
+  lifecycleStatus: string;
+}
+
+export interface FloorAnchorRow {
+  id: string;
+  role: string;
+  geometryType: string;
+  precisionLevel: string;
+  mapVersionId: string | null;
+  locationHint: string | null;
+  entityType: string | null;
+  entityId: string | null;
+}
+
+export interface FloorDetailResponse {
+  floor: {
+    id: string;
+    buildingPlaceId: string;
+    buildingName: string | null;
+    levelCode: string;
+    levelOrder: number;
+    displayName: string;
+    isPublic: boolean;
+    lifecycleStatus: string;
+  };
+  plans: FloorPlanRow[];
+  facilities: FloorFacilityRow[];
+  merchants: FloorMerchantRow[];
+  spaces: FloorSpaceRow[];
+  anchors: FloorAnchorRow[];
+  usage: FloorUsage;
+}
+
+/** GET /api/admin/floors/:id — 单层详情：图纸 + 该层设施 / 商户 / 空间 / 锚点。 */
+export function getFloorDetail(floorId: string, signal?: AbortSignal): Promise<FloorDetailResponse> {
+  return apiFetch<FloorDetailResponse>(`/api/admin/floors/${encodeURIComponent(floorId)}`, { signal });
+}
+
+/** DELETE /api/admin/floors/:id — 仅在该层没有任何引用时可用，否则 409 floor_in_use。 */
+export function deleteFloor(floorId: string): Promise<{ id: string; deleted: boolean }> {
+  return apiFetch<{ id: string; deleted: boolean }>(`/api/admin/floors/${encodeURIComponent(floorId)}`, {
+    method: "DELETE",
+  });
+}
+
+/** PATCH /api/admin/floor-plans/:id/status — 楼层图就绪 / 归档（published 由发版流程管）。 */
+export function updateFloorPlanStatus(
+  mapVersionId: string,
+  lifecycleStatus: "ready" | "archived",
+): Promise<{ id: string; lifecycleStatus: string }> {
+  return apiFetch<{ id: string; lifecycleStatus: string }>(
+    `/api/admin/floor-plans/${encodeURIComponent(mapVersionId)}/status`,
+    { method: "PATCH", body: { lifecycleStatus } },
+  );
 }

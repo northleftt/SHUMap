@@ -59,6 +59,23 @@ const FEEDBACK_TYPE_LABELS: Record<string, string> = {
   other: "其他",
 };
 
+/**
+ * 列表行的「谁提交的」。
+ *
+ * 反馈允许匿名，所以这里有三种真实情况，必须区分开：
+ *   · 有账号 → 显示账号名（自称与账号名不一致时并列显示，便于核对）
+ *   · 无账号但填了自称 → 只是一个自由文本，标注「未登录」提醒审核者不可溯源
+ *   · 两者都无 → 匿名
+ */
+function submitterLabel(submission: SubmissionRow): string {
+  if (submission.submitterUserId !== null) {
+    const account = submission.submitterAccountName ?? submission.submitterUserId;
+    const claimed = submission.submitterName;
+    return claimed && claimed !== account ? `${account}（自称 ${claimed}）` : account;
+  }
+  return submission.submitterName ? `${submission.submitterName} · 未登录` : "匿名";
+}
+
 /** 提取 payload 中可逐字段采纳的文本字段。 */
 function payloadFields(payload: SubmissionPayload): Array<{ key: SubmissionFieldKey; label: string; value: string }> {
   if (payload.submissionKind === "feedback") {
@@ -256,7 +273,7 @@ export function SubmissionsPage() {
                     <Pill className="mt-0.5">{TARGET_TYPE_LABELS[submission.targetType] ?? submission.targetType}</Pill>
                     <div className="min-w-0">
                       <p className="truncate text-body font-medium text-ink">{submission.targetId ?? "新地点建议"}</p>
-                      <p className="text-label text-sub">{submission.submitterName || "匿名"} · {fmtRelative(submission.createdAt)}</p>
+                      <p className="text-label text-sub">{submitterLabel(submission)} · {fmtRelative(submission.createdAt)}</p>
                     </div>
                   </div>
                   <Pill tone={meta.tone}>{meta.label}</Pill>
@@ -282,7 +299,12 @@ export function SubmissionsPage() {
                   {selectedMeta ? <Pill tone={selectedMeta.tone}>{selectedMeta.label}</Pill> : null}
                 </div>
                 <p className="mt-1.5 text-aux text-sub">
-                  提交人 {selected.submitterName || "匿名"}{selected.submitterContact ? `（${selected.submitterContact}）` : ""} · {fmtDateTime(selected.createdAt)}
+                  提交人 {submitterLabel(selected)}{selected.submitterContact ? `（${selected.submitterContact}）` : ""} · {fmtDateTime(selected.createdAt)}
+                </p>
+                <p className="mt-0.5 text-label text-sub">
+                  {selected.submitterUserId
+                    ? `账号 ${selected.submitterEmail ?? selected.submitterUserId}，可溯源`
+                    : "未登录提交，无法溯源到账号"}
                 </p>
               </div>
 
