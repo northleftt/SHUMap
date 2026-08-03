@@ -32,8 +32,7 @@ import { MapsPage } from "./pages/MapsPage";
 import { SubmissionsPage } from "./pages/SubmissionsPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
 import { UsersPage } from "./pages/UsersPage";
-import { FacilityTypesPage } from "./pages/FacilityTypesPage";
-import { MapFiltersPage } from "./pages/MapFiltersPage";
+import { LabelsPage } from "./pages/LabelsPage";
 import { FloorsPage } from "./pages/FloorsPage";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
 
@@ -47,8 +46,7 @@ const NAV_GROUPS = [
     label: "内容与地图",
     items: [
       { to: "/admin/content", end: false, label: "内容管理", icon: FileText },
-      { to: "/admin/facility-types", end: false, label: "设施类型", icon: Tags },
-      { to: "/admin/map-filters", end: false, label: "地图标签", icon: Tags },
+      { to: "/admin/labels", end: false, label: "标签管理", icon: Tags },
       { to: "/admin/organizations", end: false, label: "品牌与机构", icon: Building2, permission: "write:content" },
       { to: "/admin/floors", end: false, label: "楼层与楼层图", icon: Layers, permission: "write:maps" },
       { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
@@ -79,8 +77,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/content/facilities/")) return "内容管理 · 设施编辑";
   if (pathname.startsWith("/admin/content/merchants/")) return "内容管理 · 商户编辑";
   if (pathname.startsWith("/admin/content")) return "内容管理";
-  if (pathname.startsWith("/admin/facility-types")) return "设施类型管理";
-  if (pathname.startsWith("/admin/map-filters")) return "地图标签管理";
+  if (pathname.startsWith("/admin/labels")) return "标签管理";
   if (pathname.startsWith("/admin/organizations")) return "品牌与机构管理";
   if (pathname.startsWith("/admin/review")) return "审核中心";
   if (pathname.startsWith("/admin/operations/new")) return "新建运营事件 · 地图编辑器";
@@ -265,8 +262,10 @@ export function AdminPage() {
         <Route path="content/places/:id" element={hasPermission("write:content") ? <PlaceEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="content/facilities/:id" element={hasPermission("write:content") ? <FacilityEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="content/merchants/:id" element={hasPermission("write:content") ? <MerchantEditorPage /> : <Navigate to="/admin/content" replace />} />
-        <Route path="facility-types" element={<FacilityTypesPage />} />
-        <Route path="map-filters" element={hasPermission("write:content") ? <MapFiltersPage /> : <Navigate to="/admin" replace />} />
+        <Route path="labels" element={hasPermission("write:content") ? <LabelsPage /> : <Navigate to="/admin" replace />} />
+        {/* 标签与设施类型原先是两个页面，合并后旧路径重定向，收藏的链接不失效。 */}
+        <Route path="facility-types" element={<Navigate to="/admin/labels" replace />} />
+        <Route path="map-filters" element={<Navigate to="/admin/labels" replace />} />
         <Route path="organizations" element={hasPermission("write:content") ? <OrganizationsPage /> : <Navigate to="/admin" replace />} />
         <Route path="review" element={hasPermission("review:content") ? <ReviewPage /> : <Navigate to="/admin" replace />} />
         <Route path="operations" element={<OperationsPage />} />
