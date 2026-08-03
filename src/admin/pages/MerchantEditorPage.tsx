@@ -29,7 +29,7 @@ import {
   useAsyncData,
 } from "../components/primitives";
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
-import { locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { LocationEditor, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
 import type { MerchantContent } from "../../../shared/revision-contract";
 
 function parseMenu(value: unknown): MerchantMenuItem[] {
@@ -63,7 +63,18 @@ interface MerchantEditorRevision {
   sourceId: string;
   editorialStatus: "draft" | "in_review" | "approved" | "rejected" | "superseded";
   locations: LocationDraft[];
+  /** 门店营业状态。不进修订流，改完即时生效（见下方 LifecyclePanel）。 */
+  lifecycleStatus: admin.MerchantLifecycle;
 }
+
+const MERCHANT_LIFECYCLES = ["planned", "active", "temporarily_closed", "retired"] as const;
+
+const LIFECYCLE_LABELS: Record<admin.MerchantLifecycle, string> = {
+  planned: "筹备中",
+  active: "营业中",
+  temporarily_closed: "暂停营业",
+  retired: "已撤店",
+};
 
 function parseMerchantEditorRevision(response: MerchantDetailResponse): MerchantEditorRevision {
   const merchant = objectValue(response.merchant, "merchant");
@@ -93,6 +104,7 @@ function parseMerchantEditorRevision(response: MerchantDetailResponse): Merchant
       ["draft", "in_review", "approved", "rejected", "superseded"] as const,
     ),
     locations,
+    lifecycleStatus: oneOf(merchant.lifecycle_status, "merchant_outlets.lifecycle_status", MERCHANT_LIFECYCLES),
   };
 }
 
@@ -100,17 +112,27 @@ function parseMerchantEditorRevision(response: MerchantDetailResponse): Merchant
 // A12 商户编辑器（门店 outlet 表单；品牌信息由 organizations 维护）
 // ---------------------------------------------------------------------------
 
+/**
+ * 门店能标的位置用途。
+ *
+ * 开在楼里的店靠上面的「所在地点 / 楼层 / 室内空间」定位，这里补的是另一半：
+ * 摆在楼外的摊位、快闪车、集市档口，它们没有楼宇可挂，只能在校区图上点一个点。
+ * 面积与路径类用途（impact_area / route_shape）属于运营事件，不给门店。
+ */
+const MERCHANT_LOCATION_ROLES = ["primary_display", "main_entrance", "service_position", "other"] as const;
+
 export function MerchantEditorPage() {
   const { id = "" } = useParams();
   const isNew = id === "new";
   const navigate = useNavigate();
 
   const { state } = useAsyncData(async (signal) => {
-    const [ref, spaces, places, detail] = await Promise.all([
+    const [ref, spaces, places, detail, maps] = await Promise.all([
       admin.listReferenceData<ReferenceDataResponse>(signal),
       admin.listSpaces<SpacesResponse>(signal),
       admin.listAdminPlaces<PlaceListItem>(signal),
       isNew ? Promise.resolve(null) : admin.getMerchant<MerchantDetailResponse>(id, signal),
+      admin.listMapVersions(signal),
     ]);
     return {
       ref,
@@ -118,6 +140,7 @@ export function MerchantEditorPage() {
       places: places.items,
       detail,
       editor: detail ? parseMerchantEditorRevision(detail) : null,
+      maps: maps.items,
     };
   }, [id, isNew]);
 
@@ -137,6 +160,10 @@ export function MerchantEditorPage() {
   const [baseContent, setBaseContent] = useState<MerchantContent>({});
   const [media, setMedia] = useState<MediaRow[]>([]);
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>([]);
+  const [lifecycleStatus, setLifecycleStatus] = useState<admin.MerchantLifecycle>("active");
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [lifecycleNotice, setLifecycleNotice] = useState("");
+  const [lifecycleError, setLifecycleError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -160,6 +187,7 @@ export function MerchantEditorPage() {
     setMenu(editor.menu);
     setSourceId(editor.sourceId);
     setLocationDrafts(editor.locations);
+    setLifecycleStatus(editor.lifecycleStatus);
   }, [state, id, isNew]);
 
   if (state.status === "loading") return <LoadingState label="加载商户…" />;
@@ -169,9 +197,30 @@ export function MerchantEditorPage() {
   const reviewLocked = editor?.editorialStatus === "in_review";
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
   const indoorSpaces = data.spaces.spaces.filter((space) => !floorId || space.floorId === floorId);
+  // 校区跟着所在地点走：选了楼就锁在那栋楼的校区，没选楼时让用户自己在画布上切。
+  const hostCampusId = data.places.find((place) => place.id === hostPlaceId)?.campusId ?? null;
 
   function updateMenuItem(index: number, patch: Partial<MerchantMenuItem>) {
     setMenu((items) => items.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+  }
+
+  /**
+   * 营业状态即时生效，不进修订流：店今天关了就得今天在地图上关掉，等审核就晚了。
+   * 与之相对，名称、菜单、位置这些要经审核，因为它们会进发布产物。
+   */
+  async function applyLifecycle(next: admin.MerchantLifecycle) {
+    setLifecycleBusy(true);
+    setLifecycleError("");
+    setLifecycleNotice("");
+    try {
+      await admin.updateMerchantLifecycle(id, next);
+      setLifecycleStatus(next);
+      setLifecycleNotice(`已改为「${LIFECYCLE_LABELS[next]}」`);
+    } catch (err) {
+      setLifecycleError(errorMessage(err, "修改营业状态失败"));
+    } finally {
+      setLifecycleBusy(false);
+    }
   }
 
   async function save(thenSubmit: boolean) {
@@ -366,6 +415,43 @@ export function MerchantEditorPage() {
             ) : null}
           </div>
         </Panel>
+
+        {/* 门店位置：开在楼里就选楼层/房间，摆在楼外（市集摊位、快闪车）就在校区图上点。 */}
+        <LocationEditor
+          buildingCampusId={hostCampusId}
+          disabled={reviewLocked}
+          entityPlaceId={hostPlaceId || null}
+          mapVersions={data.maps}
+          onChange={setLocationDrafts}
+          roles={MERCHANT_LOCATION_ROLES}
+          spaces={data.spaces}
+          title="门店位置"
+          value={locationDrafts}
+        />
+
+        {/* 营业状态不进修订流：店关了要能当场标记，不必等审核。改完即时生效。 */}
+        {isNew ? null : (
+          <Panel title="营业状态">
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {MERCHANT_LIFECYCLES.map((status) => (
+                  <GhostButton
+                    disabled={lifecycleBusy || status === lifecycleStatus}
+                    key={status}
+                    onClick={() => void applyLifecycle(status)}
+                  >
+                    {status === lifecycleStatus ? `当前：${LIFECYCLE_LABELS[status]}` : LIFECYCLE_LABELS[status]}
+                  </GhostButton>
+                ))}
+              </div>
+              <ErrorBanner message={lifecycleError} />
+              {lifecycleNotice ? <InfoNote tone="info">{lifecycleNotice}</InfoNote> : null}
+              <p className="text-label text-sub">
+                「已撤店」的门店不再进入发布产物，前台地图与搜索都看不到；重新选「营业中」即可恢复。
+              </p>
+            </div>
+          </Panel>
+        )}
       </div>
     </div>
   );

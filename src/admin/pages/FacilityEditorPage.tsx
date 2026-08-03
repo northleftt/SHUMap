@@ -30,7 +30,7 @@ import {
   useAsyncData,
 } from "../components/primitives";
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
-import { locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { LocationEditor, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
 import { sanitizeSvg } from "../../lib/svg/sanitize";
 import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
 import type { FacilityContent } from "../../../shared/revision-contract";
@@ -40,6 +40,17 @@ import type { FacilityContent } from "../../../shared/revision-contract";
 //
 // 文案、设施挂接关系与楼层图服务落点统一进入修订审核。
 // ---------------------------------------------------------------------------
+
+/**
+ * 楼外设施可用的位置用途。
+ *
+ * 不含 service_position：那一条由下面的「服务位置」面板独占（楼层平面图点选），
+ * 两处都能编同一行会互相覆盖。楼外的设施（露天充电桩、快递柜、自助售货机）
+ * 在校区图上点，用 primary_display / centroid 这些角色。
+ */
+const FACILITY_LOCATION_ROLES = [
+  "primary_display", "centroid", "main_entrance", "accessible_entrance", "other",
+] as const;
 
 interface PlanPoint {
   x: number;
@@ -171,6 +182,10 @@ export function FacilityEditorPage() {
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
   const indoorSpaces = data.spaces.spaces.filter((space) => !floorId || space.floorId === floorId);
   const existingAnchor = locationDrafts.find((location) => location.role === "service_position");
+  // 楼外设施没有宿主楼宇，校区只能来自设施自己选的校区图；挂在楼里时跟随楼宇。
+  const hostCampusId = hostPlaceId
+    ? data.places.find((place) => place.id === hostPlaceId)?.campusId ?? null
+    : null;
 
   async function save(thenSubmit: boolean) {
     if (!name.trim()) { setError("请填写名称"); return; }
@@ -327,6 +342,25 @@ export function FacilityEditorPage() {
               return rows.map((location, rowIndex) => rowIndex === index ? normalized : location);
             });
           }}
+        />
+
+        {/* 楼外设施：挂不到楼层的点位（室外充电桩、路边直饮水）在校区图上点。
+            service_position 归上面的楼层图面板，这里按角色过滤掉，两处不会打架。 */}
+        <LocationEditor
+          buildingCampusId={hostCampusId}
+          disabled={reviewLocked}
+          entityPlaceId={hostPlaceId || null}
+          mapVersions={data.maps}
+          onChange={(rows) => {
+            setLocationDrafts((current) => [
+              ...current.filter((location) => location.role === "service_position"),
+              ...rows,
+            ]);
+          }}
+          roles={FACILITY_LOCATION_ROLES}
+          spaces={data.spaces}
+          title="楼外位置"
+          value={locationDrafts.filter((location) => location.role !== "service_position")}
         />
       </div>
     </div>
