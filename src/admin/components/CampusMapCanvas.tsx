@@ -1,9 +1,11 @@
-import { Check, Hexagon, MapPin, Route, Trash2, Undo2 } from "lucide-react";
+import { Check, Hexagon, MapPin, Maximize2, Route, Trash2, Undo2, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
 import * as admin from "../../lib/api/admin";
 import type { GeometryType, JsonObject } from "../../../shared/revision-contract";
 import type { CampusConfig, CampusKey } from "../../lib/types";
+import { sanitizeSvg } from "../../lib/svg/sanitize";
 import type { Campus } from "../adminTypes";
 import { Chip, EmptyState, ErrorBanner, errorMessage } from "./primitives";
 
@@ -36,6 +38,42 @@ export type CanvasCampus = CampusConfig;
 const AREA_COLOR = "#f59e0b";
 const POINT_COLOR = "#1e80c1";
 const PATH_COLOR = "#1e80c1";
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+const ZOOM_FACTOR = 1.25;
+
+interface MapViewport {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+interface MapViewportSize {
+  width: number;
+  height: number;
+}
+
+const FITTED_VIEWPORT: MapViewport = { zoom: MIN_ZOOM, panX: 0, panY: 0 };
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** 缩放后的画面仍须覆盖容器，避免平移时露出底色。 */
+function clampViewport(viewport: MapViewport, size: MapViewportSize): MapViewport {
+  const zoom = clamp(viewport.zoom, MIN_ZOOM, MAX_ZOOM);
+  const maxPanX = Math.max(0, (size.width * (zoom - 1)) / 2);
+  const maxPanY = Math.max(0, (size.height * (zoom - 1)) / 2);
+  return {
+    zoom,
+    panX: clamp(viewport.panX, -maxPanX, maxPanX),
+    panY: clamp(viewport.panY, -maxPanY, maxPanY),
+  };
+}
+
+function sameViewport(a: MapViewport, b: MapViewport): boolean {
+  return a.zoom === b.zoom && a.panX === b.panX && a.panY === b.panY;
+}
 
 /** chip 与清单的固定顺序，与 tools 传入顺序无关。 */
 const TOOL_ORDER: readonly CanvasTool[] = ["point", "area", "path"];
@@ -270,16 +308,25 @@ export interface CampusMapCanvasState {
   viewBox: { x: number; y: number; w: number; h: number } | null;
   unit: number;
   mapRef: React.RefObject<HTMLDivElement | null>;
+  viewport: MapViewport;
   toggleMode(tool: CanvasTool): void;
   commitDraft(): void;
   undoVertex(): void;
   resetDraft(): void;
   clearShape(tool: CanvasTool): void;
   selectCampus(key: CampusKey): void;
+  zoomIn(): void;
+  zoomOut(): void;
+  resetViewport(): void;
   handleMapClick(event: React.MouseEvent<HTMLDivElement>): void;
   handleMapDoubleClick(): void;
   handleMapMove(event: React.MouseEvent<HTMLDivElement>): void;
   handleMapLeave(): void;
+  handleMapWheel(event: React.WheelEvent<HTMLDivElement>): void;
+  handleMapPointerDown(event: React.PointerEvent<HTMLDivElement>): void;
+  handleMapPointerMove(event: React.PointerEvent<HTMLDivElement>): void;
+  handleMapPointerUp(event: React.PointerEvent<HTMLDivElement>): void;
+  setViewportSize(size: MapViewportSize): void;
 }
 
 export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCanvasState {
@@ -304,6 +351,10 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
   const [mode, setMode] = useState<CanvasTool | null>(null);
   const [draft, setDraft] = useState<CanvasVert[]>([]);
   const [cursor, setCursor] = useState<CanvasVert | null>(null);
+  const [viewport, setViewport] = useState<MapViewport>(FITTED_VIEWPORT);
+  const viewportSizeRef = useRef<MapViewportSize | null>(null);
+  const panRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number; moved: boolean } | null>(null);
+  const ignoreNextClickRef = useRef(false);
 
   const activeRows = useMemo(() => campuses.filter((row) => row.status === "active"), [campuses]);
   const campusMaps = useMemo(() => campusMapVersions(mapVersions), [mapVersions]);
@@ -342,6 +393,49 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
 
   const geometry = value && campusKey && value.campusKey === campusKey ? value : null;
 
+  const readViewportSize = useCallback((): MapViewportSize | null => {
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    const size = { width: rect.width, height: rect.height };
+    viewportSizeRef.current = size;
+    return size;
+  }, []);
+
+  const updateViewport = useCallback((next: MapViewport | ((current: MapViewport) => MapViewport)) => {
+    const size = readViewportSize() ?? viewportSizeRef.current;
+    setViewport((current) => {
+      const candidate = typeof next === "function" ? next(current) : next;
+      const clamped = size ? clampViewport(candidate, size) : candidate;
+      return sameViewport(current, clamped) ? current : clamped;
+    });
+  }, [readViewportSize]);
+
+  const setViewportSize = useCallback((size: MapViewportSize) => {
+    viewportSizeRef.current = size;
+    setViewport((current) => {
+      const clamped = clampViewport(current, size);
+      return sameViewport(current, clamped) ? current : clamped;
+    });
+  }, []);
+
+  const zoomAt = useCallback((targetZoom: number, clientX?: number, clientY?: number) => {
+    const size = readViewportSize();
+    if (!size) return;
+    const rect = mapRef.current!.getBoundingClientRect();
+    updateViewport((current) => {
+      const zoom = clamp(targetZoom, MIN_ZOOM, MAX_ZOOM);
+      if (zoom === current.zoom) return current;
+      const pointerX = clientX === undefined ? size.width / 2 : clientX - rect.left;
+      const pointerY = clientY === undefined ? size.height / 2 : clientY - rect.top;
+      const scale = zoom / current.zoom;
+      return {
+        zoom,
+        panX: (1 - scale) * (pointerX - size.width / 2) + current.panX * scale,
+        panY: (1 - scale) * (pointerY - size.height / 2) + current.panY * scale,
+      };
+    });
+  }, [readViewportSize, updateViewport]);
+
   function toViewBox(event: React.MouseEvent<HTMLDivElement>): CanvasVert | null {
     if (!vb) return null;
     const rect = mapRef.current?.getBoundingClientRect();
@@ -350,8 +444,12 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
     const scale = Math.min(rect.width / vb.w, rect.height / vb.h);
     const offsetX = (rect.width - vb.w * scale) / 2;
     const offsetY = (rect.height - vb.h * scale) / 2;
-    const x = vb.x + (event.clientX - rect.left - offsetX) / scale;
-    const y = vb.y + (event.clientY - rect.top - offsetY) / scale;
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+    const renderedX = rect.width / 2 + (pointerX - rect.width / 2 - viewport.panX) / viewport.zoom;
+    const renderedY = rect.height / 2 + (pointerY - rect.height / 2 - viewport.panY) / viewport.zoom;
+    const x = vb.x + (renderedX - offsetX) / scale;
+    const y = vb.y + (renderedY - offsetY) / scale;
     return [round1(x), round1(y)];
   }
 
@@ -360,6 +458,12 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
     setDraft([]);
     setCursor(null);
   }, []);
+
+  useEffect(() => {
+    setViewport((current) => sameViewport(current, FITTED_VIEWPORT) ? current : FITTED_VIEWPORT);
+    panRef.current = null;
+    ignoreNextClickRef.current = false;
+  }, [campusKey]);
 
   /** 只写当前校区；三种图形各自独立，全空即回 null。 */
   const commit = useCallback((patch: Partial<Omit<CanvasGeometry, "campusKey">>) => {
@@ -386,6 +490,10 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
   }, [draftReady, mode, draft, commit, clearDrawing]);
 
   function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (ignoreNextClickRef.current) {
+      ignoreNextClickRef.current = false;
+      return;
+    }
     if (snapR === null || dedupeEps === null) return;
     const at = toViewBox(event);
     if (!at) return;
@@ -413,6 +521,44 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
   function handleMapMove(event: React.MouseEvent<HTMLDivElement>) {
     if (!mode) return;
     setCursor(toViewBox(event));
+  }
+
+  function handleMapWheel(event: React.WheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const direction = event.deltaY < 0 ? 1 : -1;
+    zoomAt(viewport.zoom * (direction > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR), event.clientX, event.clientY);
+  }
+
+  function handleMapPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0 || viewport.zoom <= MIN_ZOOM) return;
+    panRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: viewport.panX,
+      panY: viewport.panY,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleMapPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    const dx = event.clientX - pan.startX;
+    const dy = event.clientY - pan.startY;
+    if (Math.hypot(dx, dy) > 3) pan.moved = true;
+    if (!pan.moved) return;
+    event.preventDefault();
+    updateViewport((current) => ({ ...current, panX: pan.panX + dx, panY: pan.panY + dy }));
+  }
+
+  function handleMapPointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    const pan = panRef.current;
+    if (!pan || pan.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    ignoreNextClickRef.current = pan.moved;
+    panRef.current = null;
   }
 
   // 键盘：Enter 完成 / Backspace 撤销顶点 / Esc 取消
@@ -474,6 +620,7 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
     viewBox: vb,
     unit: vb ? vb.w / 40 : 0,
     mapRef,
+    viewport,
     toggleMode,
     commitDraft,
     undoVertex: () => setDraft((cur) => cur.slice(0, -1)),
@@ -485,11 +632,20 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
       // 换校区就换了坐标系，旧坐标在新底图上没有意义。
       onChange(null);
       clearDrawing();
+      setViewport((current) => sameViewport(current, FITTED_VIEWPORT) ? current : FITTED_VIEWPORT);
     },
+    zoomIn: () => zoomAt(viewport.zoom * ZOOM_FACTOR),
+    zoomOut: () => zoomAt(viewport.zoom / ZOOM_FACTOR),
+    resetViewport: () => setViewport((current) => sameViewport(current, FITTED_VIEWPORT) ? current : FITTED_VIEWPORT),
     handleMapClick,
     handleMapDoubleClick,
     handleMapMove,
     handleMapLeave: () => setCursor(null),
+    handleMapWheel,
+    handleMapPointerDown,
+    handleMapPointerMove,
+    handleMapPointerUp,
+    setViewportSize,
   };
 }
 
@@ -593,6 +749,257 @@ export function CampusMapCanvasTools({ canvas }: { canvas: CampusMapCanvasState 
   );
 }
 
+/** 可交互的底图表面；标准视图与弹出的选点窗口复用同一套坐标换算。 */
+function CampusMapCanvasSurface({
+  canvas,
+  height,
+  onFullscreen,
+}: {
+  canvas: CampusMapCanvasState;
+  height: string;
+  onFullscreen?: () => void;
+}) {
+  const { campus, cursor, draft, drafting, geometry, mode, unit, viewBox: vb } = canvas;
+  const safeSvg = useMemo(() => sanitizeSvg(campus?.svgRaw ?? ""), [campus?.svgRaw]);
+
+  useEffect(() => {
+    const element = canvas.mapRef.current;
+    if (!element) return;
+    const syncSize = () => {
+      const rect = element.getBoundingClientRect();
+      canvas.setViewportSize({ width: rect.width, height: rect.height });
+    };
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [canvas.mapRef, canvas.setViewportSize]);
+
+  if (!campus || !vb || !safeSvg) return null;
+  const zoomed = canvas.viewport.zoom > MIN_ZOOM + 0.001;
+  const transform = `translate(${canvas.viewport.panX}px, ${canvas.viewport.panY}px) scale(${canvas.viewport.zoom})`;
+  const stopMapEvent = (event: React.SyntheticEvent) => event.stopPropagation();
+
+  return (
+    <div
+      ref={canvas.mapRef}
+      className={`relative ${height} touch-none overflow-hidden rounded-lg bg-map-ground ${mode ? "cursor-crosshair" : zoomed ? "cursor-grab" : ""}`}
+      onClick={canvas.handleMapClick}
+      onDoubleClick={canvas.handleMapDoubleClick}
+      onMouseLeave={canvas.handleMapLeave}
+      onMouseMove={canvas.handleMapMove}
+      onPointerCancel={canvas.handleMapPointerUp}
+      onPointerDown={canvas.handleMapPointerDown}
+      onPointerMove={canvas.handleMapPointerMove}
+      onPointerUp={canvas.handleMapPointerUp}
+      onWheel={canvas.handleMapWheel}
+    >
+      <div className="absolute inset-0 origin-center" style={{ transform }}>
+        <div
+          className="h-full w-full [&>svg]:h-full [&>svg]:w-full"
+          dangerouslySetInnerHTML={{ __html: safeSvg }}
+        />
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full"
+          preserveAspectRatio="xMidYMid meet"
+          viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
+        >
+          {/* 已完成：区域 */}
+          {geometry?.area ? (
+            <g>
+              <polygon
+                points={geometry.area.map(([x, y]) => `${x},${y}`).join(" ")}
+                fill={AREA_COLOR}
+                fillOpacity={0.15}
+                stroke={AREA_COLOR}
+                strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
+                strokeWidth={unit * 0.09}
+              />
+              {geometry.area.map(([x, y], i) => (
+                <circle key={i} cx={x} cy={y} r={unit * 0.16} fill="#fff" stroke={AREA_COLOR} strokeWidth={unit * 0.07} />
+              ))}
+            </g>
+          ) : null}
+
+          {/* 已完成：路径 */}
+          {geometry?.path ? (
+            <g>
+              <polyline
+                fill="none"
+                points={geometry.path.map(([x, y]) => `${x},${y}`).join(" ")}
+                stroke={PATH_COLOR}
+                strokeDasharray={`${unit * 0.35} ${unit * 0.25}`}
+                strokeLinecap="round"
+                strokeWidth={unit * 0.12}
+              />
+              <circle cx={geometry.path[0][0]} cy={geometry.path[0][1]} r={unit * 0.2} fill="#fff" stroke={PATH_COLOR} strokeWidth={unit * 0.08} />
+              <circle
+                cx={geometry.path[geometry.path.length - 1][0]}
+                cy={geometry.path[geometry.path.length - 1][1]}
+                r={unit * 0.2}
+                fill={PATH_COLOR}
+              />
+            </g>
+          ) : null}
+
+          {/* 已完成：位置点 */}
+          {geometry?.point ? (
+            <g>
+              <circle cx={geometry.point[0]} cy={geometry.point[1]} r={vb.w / 90} fill={POINT_COLOR} opacity={0.25} />
+              <circle cx={geometry.point[0]} cy={geometry.point[1]} r={vb.w / 200} fill={POINT_COLOR} stroke="#fff" strokeWidth={vb.w / 500} />
+            </g>
+          ) : null}
+
+          {/* 绘制中预览 */}
+          {drafting && draft.length > 0 ? (
+            <g>
+              {mode === "area" && draft.length >= 3 ? (
+                <polygon
+                  points={draft.map(([x, y]) => `${x},${y}`).join(" ")}
+                  fill={AREA_COLOR}
+                  fillOpacity={0.08}
+                  stroke="none"
+                />
+              ) : null}
+              <polyline
+                fill="none"
+                points={[...draft, ...(cursor ? [cursor] : [])].map(([x, y]) => `${x},${y}`).join(" ")}
+                stroke={mode === "area" ? AREA_COLOR : PATH_COLOR}
+                strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
+                strokeLinecap="round"
+                strokeWidth={unit * 0.1}
+              />
+              {mode === "area" && canvas.draftReady && cursor && dist(cursor, draft[0]) <= vb.w / 50 ? (
+                <line
+                  x1={draft[draft.length - 1][0]}
+                  y1={draft[draft.length - 1][1]}
+                  x2={draft[0][0]}
+                  y2={draft[0][1]}
+                  stroke={AREA_COLOR}
+                  strokeWidth={unit * 0.1}
+                />
+              ) : null}
+              {draft.map(([x, y], i) => (
+                <circle
+                  key={i}
+                  cx={x}
+                  cy={y}
+                  r={i === 0 && mode === "area" ? unit * 0.24 : unit * 0.16}
+                  fill="#fff"
+                  stroke={mode === "area" ? AREA_COLOR : PATH_COLOR}
+                  strokeWidth={unit * 0.07}
+                />
+              ))}
+              {cursor ? (
+                <circle cx={cursor[0]} cy={cursor[1]} r={unit * 0.12} fill={mode === "area" ? AREA_COLOR : PATH_COLOR} opacity={0.6} />
+              ) : null}
+            </g>
+          ) : null}
+
+          {/* 点模式光标预览 */}
+          {mode === "point" && cursor ? (
+            <g>
+              <circle cx={cursor[0]} cy={cursor[1]} r={vb.w / 90} fill={POINT_COLOR} opacity={0.2} />
+              <circle cx={cursor[0]} cy={cursor[1]} r={vb.w / 200} fill={POINT_COLOR} opacity={0.6} />
+            </g>
+          ) : null}
+        </svg>
+      </div>
+
+      <div className="absolute right-3 top-3 z-10 flex overflow-hidden rounded-lg border border-line bg-surface shadow-card" onPointerDown={stopMapEvent}>
+        <button
+          aria-label="放大地图"
+          className="grid h-9 w-9 place-items-center text-ink hover:bg-page disabled:text-sub"
+          disabled={canvas.viewport.zoom >= MAX_ZOOM - 0.001}
+          onClick={(event) => { event.stopPropagation(); canvas.zoomIn(); }}
+          title="放大"
+          type="button"
+        >
+          <ZoomIn size={17} />
+        </button>
+        <button
+          aria-label="缩小地图"
+          className="grid h-9 w-9 place-items-center border-l border-line text-ink hover:bg-page disabled:text-sub"
+          disabled={!zoomed}
+          onClick={(event) => { event.stopPropagation(); canvas.zoomOut(); }}
+          title="缩小"
+          type="button"
+        >
+          <ZoomOut size={17} />
+        </button>
+        <button
+          aria-label="复位地图视图"
+          className="min-w-11 border-l border-line px-2 text-label font-medium text-sub hover:bg-page hover:text-ink disabled:text-sub"
+          disabled={!zoomed}
+          onClick={(event) => { event.stopPropagation(); canvas.resetViewport(); }}
+          title="复位地图视图"
+          type="button"
+        >
+          {Math.round(canvas.viewport.zoom * 100)}%
+        </button>
+      </div>
+
+      {onFullscreen ? (
+        <button
+          aria-label="在全屏选点窗口中打开"
+          className="absolute bottom-3 right-3 z-10 grid h-9 w-9 place-items-center rounded-lg border border-line bg-surface text-ink shadow-card hover:bg-page"
+          onClick={(event) => { event.stopPropagation(); onFullscreen(); }}
+          onPointerDown={stopMapEvent}
+          title="全屏选点"
+          type="button"
+        >
+          <Maximize2 size={17} />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function CampusMapPickerDialog({ canvas, onClose }: { canvas: CampusMapCanvasState; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-ink/45 p-4 sm:p-8"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      role="presentation"
+    >
+      <section
+        aria-modal="true"
+        aria-labelledby="campus-map-picker-title"
+        className="flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-surface shadow-floating sm:h-[min(860px,calc(100vh-4rem))]"
+        role="dialog"
+      >
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-5 py-3.5">
+          <div>
+            <h2 className="text-emphasis" id="campus-map-picker-title">地图选点</h2>
+            <p className="mt-0.5 text-label text-sub">缩放后可拖动地图，标注会立即同步到表单。</p>
+          </div>
+          <button
+            aria-label="关闭地图选点窗口"
+            className="grid h-9 w-9 place-items-center rounded-lg text-sub hover:bg-page hover:text-ink"
+            onClick={onClose}
+            title="关闭"
+            type="button"
+          >
+            <X size={19} />
+          </button>
+        </header>
+        <div className="shrink-0 border-b border-line px-5 py-3">
+          {canvas.selectableCampuses ? (
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <CampusMapCanvasChips canvas={canvas} />
+            </div>
+          ) : null}
+          <CampusMapCanvasTools canvas={canvas} />
+        </div>
+        <div className="min-h-0 flex-1 p-4">
+          <CampusMapCanvasSurface canvas={canvas} height="h-full" />
+        </div>
+        <p className="shrink-0 px-5 pb-4 text-center text-label text-sub">{canvas.statusText}</p>
+      </section>
+    </div>
+  );
+}
+
 /** 底图 + 叠加层。外层留白与状态行归调用方。 */
 export function CampusMapCanvasView({
   canvas,
@@ -601,129 +1008,36 @@ export function CampusMapCanvasView({
   canvas: CampusMapCanvasState;
   height?: string;
 }) {
-  const { campus, cursor, draft, drafting, geometry, mode, unit, viewBox: vb } = canvas;
+  const [fullscreen, setFullscreen] = useState(false);
+  const { campus, vb } = { campus: canvas.campus, vb: canvas.viewBox };
+
+  useEffect(() => {
+    if (!fullscreen || canvas.mode) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [fullscreen, canvas.mode]);
+
   if (canvas.status === "loading") return <p className="py-6 text-center text-body text-sub">正在加载校园底图…</p>;
   if (canvas.status === "error") return <ErrorBanner message={canvas.message} />;
   if (!canvas.campusKey) return <EmptyState label="先选择校区" />;
   if (!campus || !vb) return <EmptyState label="当前校区没有可用地图" />;
 
   return (
-    <div className="relative">
-      <div
-        ref={canvas.mapRef}
-        className={`${height} overflow-hidden rounded-lg bg-map-ground [&>svg]:h-full [&>svg]:w-full ${mode ? "cursor-crosshair" : ""}`}
-        onClick={canvas.handleMapClick}
-        onDoubleClick={canvas.handleMapDoubleClick}
-        onMouseLeave={canvas.handleMapLeave}
-        onMouseMove={canvas.handleMapMove}
-        dangerouslySetInnerHTML={{ __html: campus.svgRaw }}
-      />
-      <svg
-        className="pointer-events-none absolute inset-0 h-full w-full"
-        preserveAspectRatio="xMidYMid meet"
-        viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
-      >
-        {/* 已完成：区域 */}
-        {geometry?.area ? (
-          <g>
-            <polygon
-              points={geometry.area.map(([x, y]) => `${x},${y}`).join(" ")}
-              fill={AREA_COLOR}
-              fillOpacity={0.15}
-              stroke={AREA_COLOR}
-              strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
-              strokeWidth={unit * 0.09}
-            />
-            {geometry.area.map(([x, y], i) => (
-              <circle key={i} cx={x} cy={y} r={unit * 0.16} fill="#fff" stroke={AREA_COLOR} strokeWidth={unit * 0.07} />
-            ))}
-          </g>
-        ) : null}
-
-        {/* 已完成：路径 */}
-        {geometry?.path ? (
-          <g>
-            <polyline
-              fill="none"
-              points={geometry.path.map(([x, y]) => `${x},${y}`).join(" ")}
-              stroke={PATH_COLOR}
-              strokeDasharray={`${unit * 0.35} ${unit * 0.25}`}
-              strokeLinecap="round"
-              strokeWidth={unit * 0.12}
-            />
-            <circle cx={geometry.path[0][0]} cy={geometry.path[0][1]} r={unit * 0.2} fill="#fff" stroke={PATH_COLOR} strokeWidth={unit * 0.08} />
-            <circle
-              cx={geometry.path[geometry.path.length - 1][0]}
-              cy={geometry.path[geometry.path.length - 1][1]}
-              r={unit * 0.2}
-              fill={PATH_COLOR}
-            />
-          </g>
-        ) : null}
-
-        {/* 已完成：位置点 */}
-        {geometry?.point ? (
-          <g>
-            <circle cx={geometry.point[0]} cy={geometry.point[1]} r={vb.w / 90} fill={POINT_COLOR} opacity={0.25} />
-            <circle cx={geometry.point[0]} cy={geometry.point[1]} r={vb.w / 200} fill={POINT_COLOR} stroke="#fff" strokeWidth={vb.w / 500} />
-          </g>
-        ) : null}
-
-        {/* 绘制中预览 */}
-        {drafting && draft.length > 0 ? (
-          <g>
-            {mode === "area" && draft.length >= 3 ? (
-              <polygon
-                points={draft.map(([x, y]) => `${x},${y}`).join(" ")}
-                fill={AREA_COLOR}
-                fillOpacity={0.08}
-                stroke="none"
-              />
-            ) : null}
-            <polyline
-              fill="none"
-              points={[...draft, ...(cursor ? [cursor] : [])].map(([x, y]) => `${x},${y}`).join(" ")}
-              stroke={mode === "area" ? AREA_COLOR : PATH_COLOR}
-              strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
-              strokeLinecap="round"
-              strokeWidth={unit * 0.1}
-            />
-            {mode === "area" && canvas.draftReady && cursor && dist(cursor, draft[0]) <= vb.w / 50 ? (
-              <line
-                x1={draft[draft.length - 1][0]}
-                y1={draft[draft.length - 1][1]}
-                x2={draft[0][0]}
-                y2={draft[0][1]}
-                stroke={AREA_COLOR}
-                strokeWidth={unit * 0.1}
-              />
-            ) : null}
-            {draft.map(([x, y], i) => (
-              <circle
-                key={i}
-                cx={x}
-                cy={y}
-                r={i === 0 && mode === "area" ? unit * 0.24 : unit * 0.16}
-                fill="#fff"
-                stroke={mode === "area" ? AREA_COLOR : PATH_COLOR}
-                strokeWidth={unit * 0.07}
-              />
-            ))}
-            {cursor ? (
-              <circle cx={cursor[0]} cy={cursor[1]} r={unit * 0.12} fill={mode === "area" ? AREA_COLOR : PATH_COLOR} opacity={0.6} />
-            ) : null}
-          </g>
-        ) : null}
-
-        {/* 点模式光标预览 */}
-        {mode === "point" && cursor ? (
-          <g>
-            <circle cx={cursor[0]} cy={cursor[1]} r={vb.w / 90} fill={POINT_COLOR} opacity={0.2} />
-            <circle cx={cursor[0]} cy={cursor[1]} r={vb.w / 200} fill={POINT_COLOR} opacity={0.6} />
-          </g>
-        ) : null}
-      </svg>
-    </div>
+    <>
+      {fullscreen ? (
+        <div className={`${height} grid place-items-center rounded-lg bg-page px-4 text-center text-body text-sub`}>
+          地图已在选点窗口中打开
+        </div>
+      ) : (
+        <CampusMapCanvasSurface canvas={canvas} height={height} onFullscreen={() => setFullscreen(true)} />
+      )}
+      {fullscreen && typeof document !== "undefined"
+        ? createPortal(<CampusMapPickerDialog canvas={canvas} onClose={() => setFullscreen(false)} />, document.body)
+        : null}
+    </>
   );
 }
 
