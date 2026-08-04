@@ -2,7 +2,7 @@ import type { SessionPrincipal } from "../domain/types";
 import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
-import { assertActiveMapFilterCategory } from "../lib/taxonomy";
+import { allocateMapFilterKey } from "../lib/taxonomy";
 import { isoNow, makeId, objectValue, oneOf, optionalNumber, optionalString, parseJsonObject, requiredString } from "../lib/values";
 import { audit } from "./audit";
 
@@ -70,8 +70,12 @@ interface FacilityTypeRow {
   collectionReferenceCount: number;
   mapFilterMemberId: string;
   mapFilterCategoryId: string;
-  mapFilterLabel: string;
-  mapFilterActive: number;
+  /** 这个类型自己那个筛选按钮：名称、排序、是否显示。 */
+  filterLabel: string;
+  filterActive: number;
+  filterSortOrder: number;
+  /** >1 表示这个按钮还挂着别的成员（历史数据），此时不允许就地改按钮属性。 */
+  filterMemberCount: number;
 }
 
 /** 后台能改的那几个可见性开关。其余键（buildingSummary / floorDefault）原样保留。 */
@@ -117,13 +121,6 @@ function visibilityPatch(value: unknown, field: string): VisibilityPatch | null 
   return patch;
 }
 
-interface MapFilterCategoryRow {
-  id: string;
-  label: string;
-  active: number;
-  sortOrder: number;
-}
-
 interface FacilityTypeInstanceRow {
   id: string;
   facilityTypeId: string;
@@ -148,6 +145,22 @@ interface WriteBody {
   verificationIntervalDays?: unknown;
   mapFilterCategoryId?: unknown;
   visibilityPolicy?: unknown;
+  /** 这个类型自己那个筛选按钮的属性。缺省时按钮名沿用类型名。 */
+  filterLabel?: unknown;
+  filterSortOrder?: unknown;
+  filterActive?: unknown;
+}
+
+function integerValue(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new HttpError(400, "validation_error", `${field} must be an integer`);
+  }
+  return value;
+}
+
+function booleanFlag(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") throw new HttpError(400, "validation_error", `${field} must be a boolean`);
+  return value;
 }
 
 /**
@@ -157,7 +170,7 @@ interface WriteBody {
  * 没有修订时退回类型名；楼宇名同理走 place_revisions，草稿地点也能显示出来。
  */
 export async function listFacilityTypes(env: Env): Promise<Response> {
-  const [types, instances, mapFilterCategories] = await Promise.all([
+  const [types, instances] = await Promise.all([
     all<FacilityTypeRow>(
       env.DB,
       `select t.id,t.code,t.name,t.category,t.icon_key as iconKey,t.status,
@@ -165,7 +178,8 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
               t.created_at as createdAt,t.updated_at as updatedAt,
               t.visibility_policy_json as visibilityPolicyJson,
               m.id as mapFilterMemberId,m.category_id as mapFilterCategoryId,
-              c.label as mapFilterLabel,c.active as mapFilterActive,
+              c.label as filterLabel,c.active as filterActive,c.sort_order as filterSortOrder,
+              (select count(*) from map_filter_members m2 where m2.category_id=c.id) as filterMemberCount,
               (select count(*) from facility_instances f where f.facility_type_id=t.id) as instanceCount,
               (
                 select count(*) from (
@@ -211,10 +225,6 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
          left join indoor_spaces sp on sp.id=f.indoor_space_id
         order by t.name,placeName,fl.level_order,displayName`,
     ),
-    all<MapFilterCategoryRow>(
-      env.DB,
-      "select id,label,active,sort_order as sortOrder from map_filter_categories order by sort_order,label,id",
-    ),
   ]);
 
   return json({
@@ -222,7 +232,7 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
       const { visibilityPolicyJson, ...fields } = type;
       return {
         ...fields,
-        mapFilterActive: Number(type.mapFilterActive) === 1,
+        filterActive: Number(type.filterActive) === 1,
         // 界面要能看见并改这几个开关，尤其是 campusDefault —— 它决定楼外点位在
         // 不选筛选时到底画不画。原样回全量策略，界面只渲染可编辑的那几个。
         visibilityPolicy: visibilityPolicyOf(visibilityPolicyJson, type.id),
@@ -232,10 +242,6 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
     iconKeys: SUPPORTED_ICON_KEYS,
     visibilityKeys: EDITABLE_VISIBILITY_KEYS,
     categories: CATEGORIES,
-    mapFilterCategories: mapFilterCategories.map((category) => ({
-      ...category,
-      active: Number(category.active) === 1,
-    })),
   });
 }
 
@@ -268,20 +274,30 @@ export async function createFacilityType(
     : oneOf(body.category, "category", CATEGORIES);
   const iconKey = normalizeIconKey(body.iconKey);
   const verificationIntervalDays = normalizeInterval(body.verificationIntervalDays);
-  const mapFilterCategoryId = requiredString(body.mapFilterCategoryId, "mapFilterCategoryId", 100);
-  await assertActiveMapFilterCategory(env, mapFilterCategoryId);
+  const filterLabel = body.filterLabel === undefined ? name : requiredString(body.filterLabel, "filterLabel", 80);
+  const filterSortOrder = body.filterSortOrder === undefined
+    ? 100
+    : integerValue(body.filterSortOrder, "filterSortOrder");
 
   const existing = await first<{ id: string }>(env.DB, "select id from facility_types where code=?", [code]);
   if (existing) throw new HttpError(409, "code_taken", "A facility type with this code already exists");
 
   const id = makeId("facility_type");
+  const mapFilterCategoryId = makeId("mapfilter");
   const memberId = makeId("mapfiltermember");
+  const filterKeyValue = await allocateMapFilterKey(env, code);
   const now = isoNow();
+  // 顺序有讲究：0012 的 require_facility_type_active_map_filter_insert 要求类型在
+  // status='active' 时就已经归属一个启用标签，所以先建 disabled 的类型行、建按钮、
+  // 建成员，最后才把状态改成 active。
   await env.DB.batch([
     env.DB.prepare(
       `insert into facility_types(id,code,name,category,icon_key,visibility_policy_json,verification_interval_days,status,created_at,updated_at)
        values(?,?,?,?,?,?,?,'disabled',?,?)`,
     ).bind(id, code, name, category, iconKey, JSON.stringify(DEFAULT_VISIBILITY_POLICY), verificationIntervalDays, now, now),
+    env.DB.prepare(
+      "insert into map_filter_categories(id,key,label,active,sort_order,created_at,updated_at) values(?,?,?,1,?,?,?)",
+    ).bind(mapFilterCategoryId, filterKeyValue, filterLabel, filterSortOrder, now, now),
     env.DB.prepare(
       `insert into map_filter_members(id,category_id,place_kind_id,facility_type_id,includes_merchants,sort_order,created_at)
        values(?,?,null,?,0,100,?)`,
@@ -290,7 +306,7 @@ export async function createFacilityType(
   ]);
 
   await audit(env, principal, "facility_type.create", "facility_type", id, requestId, null, {
-    code, name, category, iconKey, verificationIntervalDays, mapFilterCategoryId,
+    code, name, category, iconKey, verificationIntervalDays, mapFilterCategoryId, filterLabel, filterSortOrder,
   });
   return json({
     id,
@@ -311,6 +327,10 @@ export async function createFacilityType(
  *
  * code 不可改：它是 release manifest、采集草稿与前端图标表共同依赖的稳定键，
  * 改掉会让既有数据对不上。要换编码就新建一个类型再把旧的停用。
+ *
+ * 类型自身的属性和它那个筛选按钮的属性在同一个请求里改。此前这里收的是
+ * `mapFilterCategoryId`（「把这个类型挪到哪个按钮下」），但按钮与类型本来就是
+ * 一对一的，那个字段等于让维护者去搬一个只装着它自己的容器。
  */
 export async function updateFacilityType(
   request: Request,
@@ -330,12 +350,20 @@ export async function updateFacilityType(
     visibility_policy_json: string;
     map_filter_member_id: string | null;
     map_filter_category_id: string | null;
+    filter_label: string | null;
+    filter_active: number | null;
+    filter_sort_order: number | null;
+    filter_member_count: number;
   }>(
     env.DB,
     `select t.id,t.code,t.name,t.category,t.icon_key,t.status,t.verification_interval_days,
             t.visibility_policy_json,
-            m.id as map_filter_member_id,m.category_id as map_filter_category_id
-       from facility_types t left join map_filter_members m on m.facility_type_id=t.id
+            m.id as map_filter_member_id,m.category_id as map_filter_category_id,
+            c.label as filter_label,c.active as filter_active,c.sort_order as filter_sort_order,
+            coalesce((select count(*) from map_filter_members m2 where m2.category_id=c.id),0) as filter_member_count
+       from facility_types t
+       left join map_filter_members m on m.facility_type_id=t.id
+       left join map_filter_categories c on c.id=m.category_id
       where t.id=?`,
     [id],
   );
@@ -358,17 +386,30 @@ export async function updateFacilityType(
   const patch = visibilityPatch(body.visibilityPolicy, "visibilityPolicy");
   const currentPolicy = visibilityPolicyOf(current.visibility_policy_json, id);
   const nextPolicy = patch === null ? null : { ...currentPolicy, ...patch };
-  const mapFilterCategoryId = body.mapFilterCategoryId === undefined
-    ? current.map_filter_category_id
-    : requiredString(body.mapFilterCategoryId, "mapFilterCategoryId", 100);
-  const targetCategory = await first<{ id: string; active: number }>(
-    env.DB,
-    "select id,active from map_filter_categories where id=?",
-    [mapFilterCategoryId],
-  );
-  if (!targetCategory) throw new HttpError(400, "validation_error", "Map filter does not exist");
+  // 这个类型自己那个筛选按钮的属性。归属不再可改——按钮与类型一对一，「把类型搬到
+  // 别的按钮下」这件事在真实数据里从未发生过，留着它只会让人以为要先去理解按钮。
+  const mapFilterCategoryId = current.map_filter_category_id;
+  const touchesFilter = body.filterLabel !== undefined
+    || body.filterSortOrder !== undefined
+    || body.filterActive !== undefined;
+  if (touchesFilter && Number(current.filter_member_count) > 1) {
+    throw new HttpError(409, "map_filter_shared", "This map filter carries other members; edit it as a group first");
+  }
+  const filterLabel = body.filterLabel === undefined
+    ? String(current.filter_label)
+    : requiredString(body.filterLabel, "filterLabel", 80);
+  const filterSortOrder = body.filterSortOrder === undefined
+    ? Number(current.filter_sort_order)
+    : integerValue(body.filterSortOrder, "filterSortOrder");
+  const filterActive = body.filterActive === undefined
+    ? Number(current.filter_active) === 1
+    : booleanFlag(body.filterActive, "filterActive");
   const nextStatus = status ?? current.status;
-  if (nextStatus === "active") await assertActiveMapFilterCategory(env, mapFilterCategoryId);
+  // 0012 的 require_facility_type_active_map_filter_update 要求类型转 active 时按钮
+  // 已经是启用的。同一个请求里既启用类型又停用按钮无法同时满足，先在这里说清楚。
+  if (nextStatus === "active" && !filterActive) {
+    throw new HttpError(400, "inactive_map_filter", "An enabled facility type needs its map filter enabled too");
+  }
   if (current.status === "active" && nextStatus === "disabled") {
     const editableReference = await first<{ id: string }>(
       env.DB,
@@ -394,14 +435,16 @@ export async function updateFacilityType(
       throw new HttpError(409, "facility_type_in_use", "An active collection workflow still uses this facility type");
     }
   }
-  if (Number(targetCategory.active) !== 1) {
+  // 停用按钮而底下还挂着在用点位，会被 0012 的 protect_used_map_filter_deactivation
+  // 拦掉。先在这里给出可读的错误，否则界面上只能看到一条原始的 SQLite abort 文本。
+  if (Number(current.filter_active) === 1 && !filterActive) {
     const liveInstance = await first<{ id: string }>(
       env.DB,
       "select id from facility_instances where facility_type_id=? and lifecycle_status<>'retired' limit 1",
       [id],
     );
     if (liveInstance) {
-      throw new HttpError(409, "facility_type_in_use", "A facility type with live facilities cannot move to an inactive map filter");
+      throw new HttpError(409, "map_filter_in_use", "A map filter with live facilities cannot be hidden");
     }
   }
 
@@ -413,37 +456,44 @@ export async function updateFacilityType(
   if (status !== null) { sets.push("status=?"); values.push(status); }
   if (verificationIntervalDays !== undefined) { sets.push("verification_interval_days=?"); values.push(verificationIntervalDays); }
   if (nextPolicy !== null) { sets.push("visibility_policy_json=?"); values.push(JSON.stringify(nextPolicy)); }
-  const categoryChanged = mapFilterCategoryId !== current.map_filter_category_id;
-  if (!sets.length && !categoryChanged) throw new HttpError(400, "validation_error", "Nothing to update");
+  if (!sets.length && !touchesFilter) throw new HttpError(400, "validation_error", "Nothing to update");
 
   const now = isoNow();
-  sets.push("updated_at=?");
-  values.push(now, id);
-  const updateType = env.DB.prepare(`update facility_types set ${sets.join(",")} where id=?`).bind(...values);
   const statements: D1PreparedStatement[] = [];
-  const moveMember = categoryChanged
-    ? env.DB.prepare("update map_filter_members set category_id=? where id=?")
-      .bind(mapFilterCategoryId, current.map_filter_member_id)
+  const updateFilter = touchesFilter
+    ? env.DB.prepare("update map_filter_categories set label=?,active=?,sort_order=?,updated_at=? where id=?")
+      .bind(filterLabel, filterActive ? 1 : 0, filterSortOrder, now, mapFilterCategoryId)
     : null;
-  if (current.status === "active" && nextStatus === "disabled") {
-    statements.push(updateType);
-    if (moveMember) statements.push(moveMember);
-  } else {
-    if (moveMember) statements.push(moveMember);
-    statements.push(updateType);
+  if (sets.length) {
+    sets.push("updated_at=?");
+    values.push(now, id);
+    const updateType = env.DB.prepare(`update facility_types set ${sets.join(",")} where id=?`).bind(...values);
+    // 顺序跟着触发器走：类型转 active 前按钮必须已经启用，类型转 disabled 后才能
+    // 动按钮，否则中间态会撞上 require_facility_type_active_map_filter_update。
+    if (current.status === "active" && nextStatus === "disabled") {
+      statements.push(updateType);
+      if (updateFilter) statements.push(updateFilter);
+    } else {
+      if (updateFilter) statements.push(updateFilter);
+      statements.push(updateType);
+    }
+  } else if (updateFilter) {
+    statements.push(updateFilter);
   }
   await env.DB.batch(statements);
 
   await audit(
     env, principal, "facility_type.update", "facility_type", id, requestId,
-    { name: current.name, category: current.category, iconKey: current.icon_key, status: current.status, verificationIntervalDays: current.verification_interval_days, mapFilterCategoryId: current.map_filter_category_id, visibilityPolicy: currentPolicy },
+    { name: current.name, category: current.category, iconKey: current.icon_key, status: current.status, verificationIntervalDays: current.verification_interval_days, filterLabel: current.filter_label, filterActive: Number(current.filter_active) === 1, filterSortOrder: current.filter_sort_order, visibilityPolicy: currentPolicy },
     {
       name: name ?? current.name,
       category: category ?? current.category,
       iconKey: iconKey === undefined ? current.icon_key : iconKey,
       status: nextStatus,
       verificationIntervalDays: verificationIntervalDays === undefined ? current.verification_interval_days : verificationIntervalDays,
-      mapFilterCategoryId,
+      filterLabel,
+      filterActive,
+      filterSortOrder,
       visibilityPolicy: nextPolicy ?? currentPolicy,
     },
   );
@@ -461,6 +511,9 @@ export async function updateFacilityType(
     instanceCount: count,
     mapFilterMemberId: current.map_filter_member_id,
     mapFilterCategoryId,
+    filterLabel,
+    filterActive,
+    filterSortOrder,
   });
 }
 

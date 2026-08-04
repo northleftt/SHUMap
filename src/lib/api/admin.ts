@@ -390,16 +390,7 @@ export async function fetchAdminMapAssetSvg(mapVersionId: string, signal?: Abort
   return response.text();
 }
 
-export interface MapFilterRow {
-  id: string;
-  key: string;
-  label: string;
-  active: boolean;
-  sortOrder: number;
-  members: MapFilterMemberRow[];
-}
-
-/** 归在某个地点类型下的一个地点。标签页用它展开「建筑」这类成员的明细。 */
+/** 归在某个地点类型下的一个地点。地点类型卡片用它展开「建筑」这类的明细。 */
 export interface MapFilterPlaceEntryRow {
   id: string;
   kindId: string;
@@ -411,37 +402,12 @@ export interface MapFilterPlaceEntryRow {
   editorialStatus: string | null;
 }
 
-export interface MapFilterMemberRow {
-  id: string;
-  categoryId: string;
-  placeKindId: string | null;
-  facilityTypeId: string | null;
-  includesMerchants: boolean;
-  sortOrder: number;
-  targetLabel: string;
-  targetCode: string | null;
-  /** 这个成员下挂着多少个对象（地点 / 设施点位 / 商户）。 */
-  usageCount: number;
-  /** 地点类型成员的地点明细；设施类型与商户为空数组（明细各有自己的入口）。 */
-  entries: MapFilterPlaceEntryRow[];
-}
-
-export interface MapFilterTargetRow {
-  id: string;
-  name: string;
-  code?: string;
-}
-
-export interface MapFiltersResponse {
-  items: MapFilterRow[];
-  placeKinds: PlaceKindRow[];
-  unassigned: {
-    placeKinds: MapFilterTargetRow[];
-    facilityTypes: MapFilterTargetRow[];
-    includesMerchants: boolean;
-  };
-}
-
+/**
+ * 一个地点类型，连同它自己那个筛选按钮。
+ *
+ * filterLabel 与 name 经常不同（`building`「建筑」的按钮叫「教学楼」），所以两者
+ * 都在，只是在同一张卡片里编辑，不再需要先去理解「标签」这一层。
+ */
 export interface PlaceKindRow {
   id: string;
   name: string;
@@ -450,65 +416,82 @@ export interface PlaceKindRow {
   placeCount: number;
   mapFilterMemberId: string | null;
   categoryId: string | null;
+  filterKey: string | null;
+  filterLabel: string | null;
+  filterActive: boolean | null;
+  filterSortOrder: number | null;
+  /** >1 表示这个按钮还挂着别的成员（历史数据），此时不能就地改按钮属性。 */
+  filterMemberCount: number;
+  entries: MapFilterPlaceEntryRow[];
+}
+
+/** 商户整类纳入的那一个筛选按钮。它没有「类型」可挂，所以单独一行。 */
+export interface MerchantFilterRow {
+  memberId: string;
+  categoryId: string;
+  filterKey: string;
+  filterLabel: string;
+  filterActive: boolean;
+  filterSortOrder: number;
+  outletCount: number;
+  filterMemberCount: number;
+}
+
+/** 一个按钮挂了多个（或零个）成员的历史数据。正常库里为空。 */
+export interface MapFilterGroupRow {
+  id: string;
+  key: string;
+  label: string;
+  active: boolean;
+  sortOrder: number;
+  memberCount: number;
+  memberLabels: string;
+}
+
+export interface MapFiltersResponse {
+  placeKinds: PlaceKindRow[];
+  merchants: MerchantFilterRow | null;
+  groups: MapFilterGroupRow[];
 }
 
 export function listMapFilters(signal?: AbortSignal): Promise<MapFiltersResponse> {
   return apiFetch<MapFiltersResponse>("/api/admin/map-filters", { signal });
 }
 
-export function createMapFilter(body: { key: string; label: string; sortOrder: number }): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/api/admin/map-filters", { method: "POST", body });
-}
-
-export function updateMapFilter(id: string, body: Partial<Pick<MapFilterRow, "label" | "sortOrder">> & { active?: boolean }): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>(`/api/admin/map-filters/${encodeURIComponent(id)}`, { method: "PATCH", body });
-}
-
-export function deleteMapFilter(id: string): Promise<void> {
-  return apiFetch<void>(`/api/admin/map-filters/${encodeURIComponent(id)}`, { method: "DELETE" });
-}
-
-export function createMapFilterMember(
-  categoryId: string,
-  body: { placeKindId: string } | { facilityTypeId: string } | { includesMerchants: true },
-): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>(`/api/admin/map-filters/${encodeURIComponent(categoryId)}/members`, {
-    method: "POST",
-    body,
-  });
-}
-
-export function updateMapFilterMember(
+/** 按钮属性只在异常分组（一个按钮挂多个成员）里单独改，正常情况走类型自己的接口。 */
+export function updateMapFilter(
   id: string,
-  body: { categoryId?: string; sortOrder?: number },
+  body: { label?: string; sortOrder?: number; active?: boolean },
 ): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>(`/api/admin/map-filter-members/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body,
-  });
-}
-
-export function deleteMapFilterMember(id: string): Promise<void> {
-  return apiFetch<void>(`/api/admin/map-filter-members/${encodeURIComponent(id)}`, { method: "DELETE" });
+  return apiFetch<{ id: string }>(`/api/admin/map-filters/${encodeURIComponent(id)}`, { method: "PATCH", body });
 }
 
 export function listPlaceKinds(signal?: AbortSignal): Promise<ListResponse<PlaceKindRow>> {
   return apiFetch<ListResponse<PlaceKindRow>>("/api/admin/place-kinds", { signal });
 }
 
+/** 不再要求先挑一个标签：服务端顺手建好这个类型自己的筛选按钮。 */
 export function createPlaceKind(body: {
   id: string;
   name: string;
   sortOrder?: number;
   isSearchable?: boolean;
-  categoryId: string;
+  filterLabel?: string;
+  filterSortOrder?: number;
 }): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/api/admin/place-kinds", { method: "POST", body });
 }
 
 export function updatePlaceKind(
   id: string,
-  body: { name?: string; sortOrder?: number; isSearchable?: boolean },
+  body: {
+    name?: string;
+    sortOrder?: number;
+    isSearchable?: boolean;
+    filterLabel?: string;
+    filterSortOrder?: number;
+    filterActive?: boolean;
+  },
 ): Promise<{ id: string }> {
   return apiFetch<{ id: string }>(`/api/admin/place-kinds/${encodeURIComponent(id)}`, { method: "PATCH", body });
 }
@@ -1125,16 +1108,13 @@ export interface FacilityTypeRow {
   collectionReferenceCount: number;
   mapFilterMemberId: string;
   mapFilterCategoryId: string;
-  mapFilterLabel: string;
-  mapFilterActive: boolean;
+  /** 这个类型自己那个筛选按钮：前台显示的名称、排序、要不要出现在筛选栏。 */
+  filterLabel: string;
+  filterActive: boolean;
+  filterSortOrder: number;
+  /** >1 表示这个按钮还挂着别的成员（历史数据），此时按钮属性不能就地改。 */
+  filterMemberCount: number;
   instances: FacilityTypeInstanceRow[];
-}
-
-export interface FacilityTypeMapFilterCategory {
-  id: string;
-  label: string;
-  active: boolean;
-  sortOrder: number;
 }
 
 export interface FacilityTypeWriteResult {
@@ -1155,7 +1135,6 @@ export interface FacilityTypesResponse {
   /** 可选图标 key，界面据此渲染带预览的下拉。 */
   iconKeys: string[];
   categories: string[];
-  mapFilterCategories: FacilityTypeMapFilterCategory[];
 }
 
 /** GET /api/admin/facility-types — 全部类型（含停用）+ 每类型的点位明细。 */
@@ -1163,13 +1142,20 @@ export function listFacilityTypes(signal?: AbortSignal): Promise<FacilityTypesRe
   return apiFetch<FacilityTypesResponse>("/api/admin/facility-types", { signal });
 }
 
+/**
+ * POST /api/admin/facility-types
+ *
+ * 不再需要先挑一个筛选按钮：服务端顺手给新类型建好它自己那一个。filterLabel 缺省
+ * 时沿用类型名称，之后可以单独改（「打印服务」的按钮叫「打印机」）。
+ */
 export function createFacilityType(body: {
   code: string;
   name: string;
   category?: string;
   iconKey?: string | null;
   verificationIntervalDays?: number | null;
-  mapFilterCategoryId: string;
+  filterLabel?: string;
+  filterSortOrder?: number;
 }): Promise<FacilityTypeWriteResult> {
   return apiFetch<FacilityTypeWriteResult>("/api/admin/facility-types", { method: "POST", body });
 }
@@ -1188,7 +1174,10 @@ export function updateFacilityType(
     iconKey?: string | null;
     status?: "active" | "disabled";
     verificationIntervalDays?: number | null;
-    mapFilterCategoryId?: string;
+    /** 这个类型自己那个筛选按钮的属性，跟类型属性同一个请求里改。 */
+    filterLabel?: string;
+    filterSortOrder?: number;
+    filterActive?: boolean;
     visibilityPolicy?: FacilityVisibilityPolicy;
   },
 ): Promise<FacilityTypeWriteResult> {

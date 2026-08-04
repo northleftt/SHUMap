@@ -91,15 +91,15 @@ test("place media stays required because its contract demands it", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 三、标签页看不到每个标签下有哪些成员
+// 三、分类页看不到每个地点类型下有哪些地点
 // ---------------------------------------------------------------------------
 
-test("the labels API returns the places behind every place-kind member", () => {
+test("the taxonomy API returns the places behind every place kind", () => {
   const source = read("worker/modules/map-filters.ts");
   // 之前每个成员只有一个 usageCount：「建筑 121 个地点」一个都点不开，也无从确认
-  // 某个地点归到了哪个标签。
+  // 某个地点归到了哪个筛选按钮。明细现在直接挂在地点类型上（按钮不再是独立一层）。
   assert.match(source, /interface PlaceKindEntryRow/);
-  assert.match(source, /entries: member\.placeKindId === null \? \[\] : entriesByKind\.get\(member\.placeKindId\)/);
+  assert.match(source, /entries: entriesByKind\.get\(kind\.id\) \?\? \[\]/);
   // 名称要能显示草稿地点，与设施类型的 instances 一致（coalesce 到最新修订）。
   assert.match(source, /order by r2\.revision_no desc limit 1/);
 });
@@ -130,10 +130,10 @@ test("the place entry query runs against the real schema", () => {
   db.close();
 });
 
-test("the labels page renders that member list", () => {
-  const page = read("src/admin/pages/LabelsPage.tsx");
+test("the taxonomy page renders that place list", () => {
+  const page = read("src/admin/pages/TaxonomyPage.tsx");
   assert.match(page, /function PlaceEntryList/);
-  assert.match(page, /<PlaceEntryList canEdit=\{canEdit\} entries=\{member\.entries\}/);
+  assert.match(page, /<PlaceEntryList canEdit=\{canEdit\} entries=\{kind\.entries\}/);
   // 明细里要能看出是楼宇还是楼外地点 —— 这决定它出不出独立图钉。
   assert.match(page, /entry\.isBuilding \? "楼宇" : "楼外地点"/);
 });
@@ -158,7 +158,7 @@ test("the visibility switches are editable rather than hard-wired", () => {
   assert.match(worker, /sets\.push\("visibility_policy_json=\?"\)/);
   const client = read("src/lib/api/admin.ts");
   assert.match(client, /visibilityPolicy\?: FacilityVisibilityPolicy;/);
-  const page = read("src/admin/pages/LabelsPage.tsx");
+  const page = read("src/admin/pages/TaxonomyPage.tsx");
   assert.match(page, /admin\.updateFacilityType\(type\.id, \{ visibilityPolicy: \{ \[item\.key\]: !on \} \}\)/);
 });
 
