@@ -168,6 +168,8 @@ export interface FacilityListItem {
   indoorSpaceId?: string | null;
   quantity?: number | null;
   operationalStatus?: string;
+  /** 设施只有三档：planned / active / retired。「坏了」是 operationalStatus 的事。 */
+  lifecycleStatus?: string;
   displayName?: string | null;
   editorialStatus?: EditorialStatus | null;
   [column: string]: unknown;
@@ -179,6 +181,7 @@ export interface MerchantListItem {
   hostPlaceId?: string | null;
   floorId?: string | null;
   indoorSpaceId?: string | null;
+  lifecycleStatus?: string;
   displayName?: string | null;
   businessType?: string | null;
   editorialStatus?: EditorialStatus | null;

@@ -4,14 +4,14 @@ import { asErrorResponse, HttpError, json } from "./lib/http";
 import { handleBootstrap, handleLogin, handleLogout, handleSession, optionalSession, requireSession } from "./modules/auth";
 import { recordAnalyticsEvent } from "./modules/analytics";
 import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCollectionTask } from "./modules/collections";
-import { createFacilityHandler, createFacilityRevisionHandler, getFacility, listFacilities, publicFacilityStatus } from "./modules/facilities";
+import { createFacilityHandler, createFacilityRevisionHandler, deleteFacility, getFacility, listFacilities, publicFacilityStatus, updateFacilityLifecycle } from "./modules/facilities";
 import { createFacilityType, deleteFacilityType, listFacilityTypes, listPublicFacilityTypes, updateFacilityType } from "./modules/facility-types";
 import { processQueue } from "./modules/jobs";
 import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapVersions, uploadMapContent } from "./modules/maps";
 import { createAdminMediaUpload, createPublicMediaUpload, getAdminMediaContent, getPublicMedia } from "./modules/media";
 import { createMerchant, createMerchantRevision, getMerchant, listMerchants, updateMerchantLifecycle } from "./modules/merchants";
 import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
-import { createPlaceHandler, createPlaceRevisionHandler, getPlace, listPlaces } from "./modules/places";
+import { createPlaceHandler, createPlaceRevisionHandler, deletePlace, getPlace, listPlaces, updatePlaceLifecycle } from "./modules/places";
 import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
@@ -232,10 +232,19 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return getPlace(env, place.id);
   }
+  if (method === "DELETE" && place) {
+    principal = await requireSession(request, env, "write:content");
+    return deletePlace(env, principal, place.id, requestId);
+  }
   const placeRevision = match(path, "/api/admin/places/:id/revisions");
   if (method === "POST" && placeRevision) {
     principal = await requireSession(request, env, "write:content");
     return createPlaceRevisionHandler(request, env, principal, placeRevision.id, requestId);
+  }
+  const placeLifecycle = match(path, "/api/admin/places/:id/lifecycle");
+  if (method === "PATCH" && placeLifecycle) {
+    principal = await requireSession(request, env, "write:content");
+    return updatePlaceLifecycle(request, env, principal, placeLifecycle.id, requestId);
   }
 
   if (method === "GET" && path === "/api/admin/facilities") {
@@ -251,10 +260,19 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return getFacility(env, facility.id);
   }
+  if (method === "DELETE" && facility) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteFacility(env, principal, facility.id, requestId);
+  }
   const facilityRevision = match(path, "/api/admin/facilities/:id/revisions");
   if (method === "POST" && facilityRevision) {
     principal = await requireSession(request, env, "write:content");
     return createFacilityRevisionHandler(request, env, principal, facilityRevision.id, requestId);
+  }
+  const facilityLifecycle = match(path, "/api/admin/facilities/:id/lifecycle");
+  if (method === "PATCH" && facilityLifecycle) {
+    principal = await requireSession(request, env, "write:content");
+    return updateFacilityLifecycle(request, env, principal, facilityLifecycle.id, requestId);
   }
 
   // 设施类型（标签）维护。读用 read:admin，增改删用 write:content。

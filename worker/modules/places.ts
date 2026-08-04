@@ -1,12 +1,14 @@
 import type { SessionPrincipal } from "../domain/types";
 import type { PlaceRevisionWrite } from "../../shared/revision-contract";
-import type { Env } from "../types/cloudflare";
+import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
-import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, jsonString, makeId, sha256 } from "../lib/values";
+import { HttpError, json, noContent, readJson } from "../lib/http";
+import { exactObject, isoNow, jsonString, makeId, oneOf, sha256 } from "../lib/values";
 import { normalizePlaceRevision, validatePlaceRevision } from "../lib/revision-contracts";
 import { audit } from "./audit";
-import { listEntityLocations } from "./locations";
+import { listEntityLocations, retireEntityLocations } from "./locations";
+
+const PLACE_LIFECYCLES = ["planned", "active", "temporarily_closed", "retired"] as const;
 
 function bindNewBuildingLocations(locations: PlaceRevisionWrite["structure"]["locations"], placeId: string) {
   return locations.map((location) => ({ ...location, buildingPlaceId: placeId }));
@@ -154,4 +156,127 @@ export async function createPlaceRevisionHandler(
 
 export function normalizeSearchText(value: string): string {
   return value.normalize("NFKC").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+interface PlaceUsage {
+  children: number;
+  facilities: number;
+  merchants: number;
+  transitStops: number;
+  floors: number;
+  submissions: number;
+}
+
+/**
+ * 谁还指着这个地点。这几张表在 schema 里都是 `on delete restrict`（floors 走
+ * buildings 级联，但楼层里的东西不会跟着消失），硬删会直接撞外键报 500，所以先数
+ * 一遍，非零就回 409 带明细，让管理端能说清「先把 3 个设施移走」。
+ */
+async function placeUsage(env: Env, placeId: string): Promise<PlaceUsage> {
+  const row = await first<PlaceUsage>(
+    env.DB,
+    `select (select count(*) from places where parent_place_id=?) as children,
+            (select count(*) from facility_instances where host_place_id=?) as facilities,
+            (select count(*) from merchant_outlets where host_place_id=?) as merchants,
+            (select count(*) from transit_stops where place_id=?) as transitStops,
+            (select count(*) from floors where building_place_id=?) as floors,
+            (select count(*) from content_submissions where target_type='place' and target_id=?) as submissions`,
+    [placeId, placeId, placeId, placeId, placeId, placeId],
+  );
+  if (!row) throw new Error("Could not count place references");
+  return row;
+}
+
+function usageTotal(usage: PlaceUsage): number {
+  return Object.values(usage).reduce((total, count) => total + count, 0);
+}
+
+/**
+ * PATCH /api/admin/places/:id/lifecycle —— 筹建 / 启用 / 暂时关闭 / 停用。
+ *
+ * 生命周期不进修订流：一栋楼今天封闭施工要能当场标出来，不必等审核。名称与介绍
+ * 这类内容仍然只能走修订。retired 之外的取值会触发 0012 的
+ * require_place_active_map_filter_update（地点分类必须归属一个启用的筛选组）。
+ *
+ * 改成 retired 时顺手把位置绑定失效：发布查询已经按 lifecycle 过滤，但
+ * entity_locations 是独立的时间轴，留着会让「停用的地点还占着一个 footprint 图形」
+ * 这类唯一索引冲突在下一次编辑时才炸出来。
+ */
+export async function updatePlaceLifecycle(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  placeId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<{ id: string; lifecycle_status: string }>(
+    env.DB,
+    "select id,lifecycle_status from places where id=?",
+    [placeId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Place does not exist");
+  const body = exactObject(await readJson<unknown>(request), "placeLifecycle", ["lifecycleStatus"]);
+  const lifecycleStatus = oneOf(body.lifecycleStatus, "lifecycleStatus", PLACE_LIFECYCLES);
+  const now = isoNow();
+  await env.DB.prepare("update places set lifecycle_status=?,retired_at=?,updated_at=? where id=?")
+    .bind(lifecycleStatus, lifecycleStatus === "retired" ? now : null, now, placeId)
+    .run();
+  if (lifecycleStatus === "retired") await retireEntityLocations(env, "place", placeId);
+  await audit(env, principal, "place.lifecycle.update", "place", placeId, requestId, before, { lifecycleStatus });
+  return json({ id: placeId, lifecycleStatus });
+}
+
+/**
+ * DELETE /api/admin/places/:id —— 只用来清掉建错的地点。
+ *
+ * 已经有人引用的地点不给删，回 409 让调用方改用停用；停用保留历史与审计线索，
+ * 而删除会把修订、别名、楼宇行一起级联掉。
+ */
+export async function deletePlace(
+  env: Env,
+  principal: SessionPrincipal,
+  placeId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    `select p.id,p.kind_id as kindId,p.campus_id as campusId,p.lifecycle_status as lifecycleStatus,
+            r.display_name as displayName
+       from places p left join place_revisions r on r.id=p.current_revision_id where p.id=?`,
+    [placeId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Place does not exist");
+  const usage = await placeUsage(env, placeId);
+  if (usageTotal(usage) > 0) {
+    throw new HttpError(409, "place_in_use", "This place still has content attached; retire it instead", usage);
+  }
+  // 发布过的地点删掉会让历史 release 的 release_items 指向不存在的实体，
+  // 而那些快照是回滚的依据。这种只能停用。
+  const released = await first<{ count: number }>(
+    env.DB,
+    "select count(*) as count from release_items where entity_type='place' and entity_id=?",
+    [placeId],
+  );
+  if ((released?.count ?? 0) > 0) {
+    throw new HttpError(409, "place_released", "This place appears in a published release; retire it instead");
+  }
+  const anchors = await all<{ anchorId: string }>(
+    env.DB,
+    "select anchor_id as anchorId from entity_locations where entity_type='place' and entity_id=?",
+    [placeId],
+  );
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("delete from entity_locations where entity_type='place' and entity_id=?").bind(placeId),
+  ];
+  if (anchors.length > 0) {
+    const anchorIds = anchors.map((row) => row.anchorId);
+    statements.push(
+      env.DB.prepare(`delete from location_anchors where id in (${anchorIds.map(() => "?").join(",")})`).bind(...anchorIds),
+    );
+  }
+  // 修订、别名、buildings 行都是 on delete cascade，跟着 places 一起走。
+  statements.push(env.DB.prepare("delete from places where id=?").bind(placeId));
+  await env.DB.batch(statements);
+  await audit(env, principal, "place.delete", "place", placeId, requestId, before, null);
+  return noContent();
 }

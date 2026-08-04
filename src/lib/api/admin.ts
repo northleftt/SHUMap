@@ -193,6 +193,33 @@ export function createPlaceRevision(placeId: string, body: PlaceRevisionWrite): 
   });
 }
 
+export type PlaceLifecycle = "planned" | "active" | "temporarily_closed" | "retired";
+
+/**
+ * PATCH /api/admin/places/:id/lifecycle —— 筹建 / 启用 / 暂时关闭 / 停用。
+ *
+ * 名称与介绍走修订流，「这栋楼现在还开不开」即时生效。
+ */
+export function updatePlaceLifecycle(
+  id: string,
+  lifecycleStatus: PlaceLifecycle,
+): Promise<{ id: string; lifecycleStatus: PlaceLifecycle }> {
+  return apiFetch<{ id: string; lifecycleStatus: PlaceLifecycle }>(
+    `/api/admin/places/${encodeURIComponent(id)}/lifecycle`,
+    { method: "PATCH", body: { lifecycleStatus } },
+  );
+}
+
+/**
+ * DELETE /api/admin/places/:id —— 只用来清掉建错的地点。
+ *
+ * 有下级地点 / 设施 / 商户 / 站点 / 楼层 / 供稿引用时回 409 `place_in_use`；
+ * 已经进过发布快照的回 409 `place_released`。两种都该改用停用。
+ */
+export function deletePlace(id: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/places/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 
 // ---------------------------------------------------------------------------
 // Facilities + merchants
@@ -215,6 +242,30 @@ export function createFacilityRevision(id: string, body: FacilityRevisionWrite):
     method: "POST",
     body,
   });
+}
+
+/** 设施没有 temporarily_closed：「暂时不能用」是 operationalStatus 的事。 */
+export type FacilityLifecycle = "planned" | "active" | "retired";
+
+/** PATCH /api/admin/facilities/:id/lifecycle —— 筹建 / 启用 / 停用，即时生效。 */
+export function updateFacilityLifecycle(
+  id: string,
+  lifecycleStatus: FacilityLifecycle,
+): Promise<{ id: string; lifecycleStatus: FacilityLifecycle }> {
+  return apiFetch<{ id: string; lifecycleStatus: FacilityLifecycle }>(
+    `/api/admin/facilities/${encodeURIComponent(id)}/lifecycle`,
+    { method: "PATCH", body: { lifecycleStatus } },
+  );
+}
+
+/**
+ * DELETE /api/admin/facilities/:id —— 只用来清掉建错的设施。
+ *
+ * 被供稿或运营事件引用时回 409 `facility_in_use`；进过发布快照的回
+ * 409 `facility_released`。两种都该改用停用。
+ */
+export function deleteFacility(id: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/facilities/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export function listMerchants<T = unknown>(signal?: AbortSignal): Promise<ListResponse<T>> {

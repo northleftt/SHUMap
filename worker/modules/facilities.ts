@@ -1,11 +1,15 @@
 import type { SessionPrincipal } from "../domain/types";
-import type { Env } from "../types/cloudflare";
+import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
-import { HttpError, json, readJson } from "../lib/http";
-import { isoNow, jsonString, makeId, sha256 } from "../lib/values";
+import { HttpError, json, noContent, readJson } from "../lib/http";
+import { exactObject, isoNow, jsonString, makeId, oneOf, sha256 } from "../lib/values";
 import { normalizeFacilityRevision, validateFacilityRevision } from "../lib/revision-contracts";
 import { audit } from "./audit";
-import { listEntityLocations } from "./locations";
+import { listEntityLocations, retireEntityLocations } from "./locations";
+
+/** facility_instances 只有三档，没有 temporarily_closed —— 设施「暂时不能用」是
+ *  operational_status 的事（实时接口即时生效），与生命周期分开。 */
+const FACILITY_LIFECYCLES = ["planned", "active", "retired"] as const;
 
 export async function listFacilities(env: Env): Promise<Response> {
   const items = await all(
@@ -137,4 +141,97 @@ export async function createFacilityRevisionHandler(
   ]);
   await audit(env, principal, "facility.revision.create", "facility_revision", revisionId, requestId, null, revision);
   return json({ id: revisionId, facilityId, revisionNo: pending?.revision_no ?? next.next_no, editorialStatus: "draft" }, { status: pending ? 200 : 201 });
+}
+
+/**
+ * PATCH /api/admin/facilities/:id/lifecycle —— 筹建 / 启用 / 停用。
+ *
+ * 与商户的生命周期同理，不进修订流：设施撤掉了要能当场标出来。「今天坏了」不走
+ * 这里，那是 operational_status（GET /api/public/facility-status 实时下发）。
+ * retired 之外的取值会触发 0012 的 require_facility_active_map_filter_update
+ * （设施类型必须启用且归属一个启用的筛选组）。
+ */
+export async function updateFacilityLifecycle(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  facilityId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<{ id: string; lifecycle_status: string }>(
+    env.DB,
+    "select id,lifecycle_status from facility_instances where id=?",
+    [facilityId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Facility does not exist");
+  const body = exactObject(await readJson<unknown>(request), "facilityLifecycle", ["lifecycleStatus"]);
+  const lifecycleStatus = oneOf(body.lifecycleStatus, "lifecycleStatus", FACILITY_LIFECYCLES);
+  await env.DB.prepare("update facility_instances set lifecycle_status=?,updated_at=? where id=?")
+    .bind(lifecycleStatus, isoNow(), facilityId)
+    .run();
+  // 停用后位置绑定一并失效：发布查询按 lifecycle 过滤，但 entity_locations 是独立
+  // 时间轴，留着会让「已停用的设施还占着一个主位置」在下次编辑时才炸出来。
+  if (lifecycleStatus === "retired") await retireEntityLocations(env, "facility", facilityId);
+  await audit(env, principal, "facility.lifecycle.update", "facility", facilityId, requestId, before, { lifecycleStatus });
+  return json({ id: facilityId, lifecycleStatus });
+}
+
+/**
+ * DELETE /api/admin/facilities/:id —— 只用来清掉建错的设施。
+ *
+ * 设施没有子实体，唯一的外键是自己的修订（on delete cascade），所以能删的判断只有
+ * 两条：有没有进过发布，有没有被供稿或运营事件指着。进过发布的只能停用，否则历史
+ * release 的 release_items 会指向不存在的实体，而那是回滚的依据。
+ */
+export async function deleteFacility(
+  env: Env,
+  principal: SessionPrincipal,
+  facilityId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    `select f.id,f.facility_type_id as facilityTypeId,f.host_place_id as hostPlaceId,f.floor_id as floorId,
+            f.lifecycle_status as lifecycleStatus,r.display_name as displayName
+       from facility_instances f left join facility_revisions r on r.id=f.current_revision_id where f.id=?`,
+    [facilityId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Facility does not exist");
+  const usage = await first<{ submissions: number; eventTargets: number }>(
+    env.DB,
+    `select (select count(*) from content_submissions where target_type='facility' and target_id=?) as submissions,
+            (select count(*) from operational_event_targets where target_type='facility' and target_id=?) as eventTargets`,
+    [facilityId, facilityId],
+  );
+  const referenced = (usage?.submissions ?? 0) + (usage?.eventTargets ?? 0);
+  if (referenced > 0) {
+    throw new HttpError(409, "facility_in_use", "This facility is referenced by submissions or operational events; retire it instead", usage);
+  }
+  const released = await first<{ count: number }>(
+    env.DB,
+    "select count(*) as count from release_items where entity_type='facility' and entity_id=?",
+    [facilityId],
+  );
+  if ((released?.count ?? 0) > 0) {
+    throw new HttpError(409, "facility_released", "This facility appears in a published release; retire it instead");
+  }
+  const anchors = await all<{ anchorId: string }>(
+    env.DB,
+    "select anchor_id as anchorId from entity_locations where entity_type='facility' and entity_id=?",
+    [facilityId],
+  );
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("delete from entity_locations where entity_type='facility' and entity_id=?").bind(facilityId),
+  ];
+  if (anchors.length > 0) {
+    const anchorIds = anchors.map((row) => row.anchorId);
+    statements.push(
+      env.DB.prepare(`delete from location_anchors where id in (${anchorIds.map(() => "?").join(",")})`).bind(...anchorIds),
+    );
+  }
+  // facility_revisions 是 on delete cascade，跟着实例一起走。
+  statements.push(env.DB.prepare("delete from facility_instances where id=?").bind(facilityId));
+  await env.DB.batch(statements);
+  await audit(env, principal, "facility.delete", "facility", facilityId, requestId, before, null);
+  return noContent();
 }
