@@ -241,7 +241,14 @@ function TripPreviewContent({
   const navigationTarget = (stopId: string, stopName: string): MapTarget | null => {
     const releaseStop = release.manifest.transit.stops.find((stop) => stop.id === stopId);
     if (!releaseStop?.place_id) return null;
-    const place = release.buildings.find((building) => building.poiKey === releaseStop.place_id);
+    // 站点绑的地点可能是楼宇（poiKey 就是 placeId），也可能是独立上图的楼外地点
+    // （poiKey 形如 `place:<id>`）。两种都要认，否则绑在校门这类非楼宇地点的站点
+    // 明明在地图上有点位，这里却取不到导航链接。
+    const place = release.pois.find((poi) =>
+      poi.entityType === "building"
+        ? poi.poiKey === releaseStop.place_id
+        : poi.entityType === "place" && poi.entityId === releaseStop.place_id,
+    );
     if (!place?.navigationUrls) return null;
     return { label: stopName, navigationUrls: place.navigationUrls };
   };

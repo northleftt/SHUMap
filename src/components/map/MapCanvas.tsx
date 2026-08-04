@@ -37,7 +37,7 @@ function getMidpoint(a: Point, b: Point) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
-function createInitialViewport(
+export function createInitialViewport(
   campus: CampusConfig,
   viewBox: Size,
   container: Size,
@@ -53,7 +53,7 @@ function createInitialViewport(
   };
 }
 
-function viewportToWindow(
+export function viewportToWindow(
   viewport: ReturnType<typeof createInitialViewport>,
   container: Size,
 ): ViewWindow {
@@ -65,7 +65,7 @@ function viewportToWindow(
   };
 }
 
-function clampWindow(window: ViewWindow, viewBox: Size, edgePaddingRatio: number) {
+export function clampWindow(window: ViewWindow, viewBox: Size, edgePaddingRatio: number) {
   const padX = viewBox.width * edgePaddingRatio;
   const padY = viewBox.height * edgePaddingRatio;
   const maxX = Math.max(0, viewBox.width - window.width) + padX;
@@ -98,6 +98,47 @@ function createInitialWindow(campus: CampusConfig, viewBox: Size, container: Siz
     viewportToWindow(createInitialViewport(campus, viewBox, container), container),
     viewBox,
     campus.edgePaddingRatio,
+  );
+}
+
+export function focusPointWindow({
+  point,
+  currentWindow,
+  viewBox,
+  container,
+  selectionScaleMultiplier,
+  selectionEdgePaddingRatio,
+  selectionFocusBounds,
+}: {
+  point: Point;
+  currentWindow: ViewWindow;
+  viewBox: Size;
+  container: Size;
+  selectionScaleMultiplier: number;
+  selectionEdgePaddingRatio: number;
+  selectionFocusBounds?: { top: number; bottom: number };
+}): ViewWindow {
+  const fitScale = getFitScale(viewBox, container);
+  const currentScale = getScale(currentWindow, container);
+  const nextScale = Math.max(currentScale, fitScale * selectionScaleMultiplier);
+  const nextWidth = container.width / nextScale;
+  const nextHeight = container.height / nextScale;
+  const safeTop = clamp(selectionFocusBounds?.top ?? 72, 0, container.height - 1);
+  const safeBottom = clamp(
+    selectionFocusBounds?.bottom ?? container.height - 120,
+    safeTop + 40,
+    container.height,
+  );
+  const targetScreenY = safeTop + (safeBottom - safeTop) * 0.5;
+  return clampWindow(
+    {
+      x: point.x - nextWidth / 2,
+      y: point.y - (targetScreenY / container.height) * nextHeight,
+      width: nextWidth,
+      height: nextHeight,
+    },
+    viewBox,
+    selectionEdgePaddingRatio,
   );
 }
 
@@ -174,6 +215,8 @@ interface MapCanvasProps {
   featureBindings: MapFeatureBinding[];
   matchedFeatureIds: string[];
   selectedFeatureId: string | null;
+  /** 选中的独立 POI 坐标；与底图共用 svg_viewbox。 */
+  selectedPoint?: Point | null;
   selectionFocusBounds?: {
     top: number;
     bottom: number;
@@ -184,6 +227,8 @@ interface MapCanvasProps {
   overlay?: React.ReactNode;
   /** 点中叠加层事件图形（data-overlay-event-id）时回调；图形自身 click 会被指针捕获吞掉 */
   onTapOverlayEvent?: (eventId: string) => void;
+  /** 点中独立 POI 图标（data-overlay-poi-key）时回调。 */
+  onTapOverlayPoi?: (poiKey: string) => void;
   /** 视口 viewBox 窗口变化回调（叠加层同步用） */
   onViewWindowChange?: (window: MapViewWindow) => void;
   /** 缩放控件位置：移动端右中，桌面端右下 */
@@ -197,11 +242,13 @@ export function MapCanvas({
   featureBindings,
   matchedFeatureIds,
   selectedFeatureId,
+  selectedPoint,
   selectionFocusBounds,
   onSelectFeature,
   onTapEmpty,
   overlay,
   onTapOverlayEvent,
+  onTapOverlayPoi,
   onViewWindowChange,
   zoomControlPosition = "center-right",
   viewResetNonce,
@@ -228,6 +275,7 @@ export function MapCanvas({
   const onSelectFeatureRef = useRef(onSelectFeature);
   const onTapEmptyRef = useRef(onTapEmpty);
   const onTapOverlayEventRef = useRef(onTapOverlayEvent);
+  const onTapOverlayPoiRef = useRef(onTapOverlayPoi);
   const viewWindowRef = useRef<ViewWindow>({
     x: 0,
     y: 0,
@@ -287,6 +335,10 @@ export function MapCanvas({
   useEffect(() => {
     onTapOverlayEventRef.current = onTapOverlayEvent;
   }, [onTapOverlayEvent]);
+
+  useEffect(() => {
+    onTapOverlayPoiRef.current = onTapOverlayPoi;
+  }, [onTapOverlayPoi]);
 
   useEffect(() => {
     viewWindowRef.current = viewWindow;
@@ -425,25 +477,43 @@ export function MapCanvas({
   }, [campus.svgRaw, featureBindings, matchedFeatureIds, selectedFeatureId]);
 
   useEffect(() => {
-    if (!selectedFeatureId || !svgRef.current) {
+    if ((!selectedFeatureId && !selectedPoint) || !svgRef.current) return;
+
+    let targetCenter: Point;
+    let targetBox: Pick<DOMRect, "x" | "y" | "width" | "height"> | null = null;
+    if (selectedFeatureId) {
+      const binding = featureBindings.find((item) => item.id === selectedFeatureId);
+      if (!binding) throw new Error(`Map data contract violation: unknown feature ${selectedFeatureId}`);
+      const target = Array.from(svgRef.current.querySelectorAll<SVGGraphicsElement>("[id]"))
+        .find((element) => element.id === binding.sourceElementId);
+      if (!target) {
+        throw new Error(
+          `Map SVG data contract violation: feature ${binding.id} references missing element ${binding.sourceElementId}`,
+        );
+      }
+      targetBox = target.getBBox();
+      targetCenter = {
+        x: targetBox.x + targetBox.width / 2,
+        y: targetBox.y + targetBox.height / 2,
+      };
+    } else {
+      targetCenter = selectedPoint!;
+    }
+
+    if (!targetBox) {
+      setViewWindow(focusPointWindow({
+        point: targetCenter,
+        currentWindow: viewWindowRef.current,
+        viewBox,
+        container: containerSize,
+        selectionScaleMultiplier: campus.selectionScaleMultiplier,
+        selectionEdgePaddingRatio: campus.selectionEdgePaddingRatio,
+        selectionFocusBounds,
+      }));
       return;
     }
 
-    const binding = featureBindings.find((item) => item.id === selectedFeatureId);
-    if (!binding) throw new Error(`Map data contract violation: unknown feature ${selectedFeatureId}`);
-    const target = Array.from(svgRef.current.querySelectorAll<SVGGraphicsElement>("[id]"))
-      .find((element) => element.id === binding.sourceElementId);
-    if (!target) {
-      throw new Error(
-        `Map SVG data contract violation: feature ${binding.id} references missing element ${binding.sourceElementId}`,
-      );
-    }
-
-    const box = target.getBBox();
-    const fitScale = Math.min(
-      containerSize.width / viewBox.width,
-      containerSize.height / viewBox.height,
-    );
+    const fitScale = getFitScale(viewBox, containerSize);
     const currentScale = getScale(viewWindowRef.current, containerSize);
     const nextScale = Math.max(currentScale, fitScale * campus.selectionScaleMultiplier);
     const nextWidth = containerSize.width / nextScale;
@@ -456,19 +526,17 @@ export function MapCanvas({
     );
     const safePadding = Math.max(18, Math.min(36, (safeBottom - safeTop) * 0.08));
     const targetScreenY = safeTop + (safeBottom - safeTop) * 0.5;
-    const boxCenterX = box.x + box.width / 2;
-    const boxCenterY = box.y + box.height / 2;
-    const idealY = boxCenterY - (targetScreenY / containerSize.height) * nextHeight;
-    const minYForBoxVisible =
-      box.y + box.height - ((safeBottom - safePadding) / containerSize.height) * nextHeight;
-    const maxYForBoxVisible =
-      box.y - ((safeTop + safePadding) / containerSize.height) * nextHeight;
-    const nextY = clamp(idealY, minYForBoxVisible, maxYForBoxVisible);
+    const idealY = targetCenter.y - (targetScreenY / containerSize.height) * nextHeight;
+    const nextY = clamp(
+      idealY,
+      targetBox.y + targetBox.height - ((safeBottom - safePadding) / containerSize.height) * nextHeight,
+      targetBox.y - ((safeTop + safePadding) / containerSize.height) * nextHeight,
+    );
 
     setViewWindow(
       clampWindow(
         {
-          x: boxCenterX - nextWidth / 2,
+          x: targetCenter.x - nextWidth / 2,
           y: nextY,
           width: nextWidth,
           height: nextHeight,
@@ -486,6 +554,7 @@ export function MapCanvas({
     containerSize,
     featureBindings,
     selectedFeatureId,
+    selectedPoint,
     selectionFocusBounds,
     viewBox,
   ]);
@@ -663,6 +732,14 @@ export function MapCanvas({
         ?.getAttribute("data-overlay-event-id");
       if (overlayEventId) {
         onTapOverlayEventRef.current?.(overlayEventId);
+        gestureRef.current.dragged = false;
+        return;
+      }
+      const overlayPoiKey = hit
+        ?.closest?.("[data-overlay-poi-key]")
+        ?.getAttribute("data-overlay-poi-key");
+      if (overlayPoiKey) {
+        onTapOverlayPoiRef.current?.(overlayPoiKey);
         gestureRef.current.dragged = false;
         return;
       }

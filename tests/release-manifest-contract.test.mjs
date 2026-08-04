@@ -186,10 +186,14 @@ test("release manifest parser rejects database flags encoded with the wrong type
   assert.throws(() => parseReleaseManifest(value), /isPrimary must be 0 or 1/);
 });
 
-test("release manifest parser requires every merchant host place", () => {
+test("release manifest parser allows an independent merchant without a host place", () => {
   const value = manifestFixture();
-  delete value.merchants[0].hostPlaceId;
-  assert.throws(() => parseReleaseManifest(value), /merchants\[0\]\.hostPlaceId is required/);
+  value.merchants[0].hostPlaceId = null;
+  assert.equal(parseReleaseManifest(value).merchants[0].hostPlaceId, null);
+
+  const missing = manifestFixture();
+  delete missing.merchants[0].hostPlaceId;
+  assert.throws(() => parseReleaseManifest(missing), /merchants\[0\]\.hostPlaceId is required/);
 });
 
 test("release manifest parser rejects malformed service hours and contacts", () => {

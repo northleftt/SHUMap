@@ -48,11 +48,9 @@ test("merchants group onto their host place and sort by name", () => {
   assert.equal(grouped.get("place_canteen").length, 1);
 });
 
-test("outlets without a host place violate the release contract", () => {
-  assert.throws(
-    () => groupMerchantsByPlace([merchant({ id: "m1", hostPlaceId: null })]),
-    /hostPlaceId must identify the place/,
-  );
+test("independent outlets stay out of host-place groups", () => {
+  const grouped = groupMerchantsByPlace([merchant({ id: "m1", hostPlaceId: null })]);
+  assert.equal(grouped.size, 0);
 });
 
 test("an empty merchants array yields an empty grouping", () => {

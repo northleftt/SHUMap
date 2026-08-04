@@ -50,7 +50,7 @@ export interface ReleaseFacility {
 export interface ReleaseMerchant {
   id: string;
   organizationId: string | null;
-  hostPlaceId: string;
+  hostPlaceId: string | null;
   floorId: string | null;
   indoorSpaceId: string | null;
   revisionId: string;

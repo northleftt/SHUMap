@@ -1,10 +1,11 @@
-import { Building2, ChevronRight, CircleAlert, Navigation, Store, X } from "lucide-react";
+import { Building2, ChevronRight, CircleAlert, MapPin, Navigation, Store, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { SearchInput } from "../../components/ui/SearchInput";
+import { facilityIconByKey } from "../../lib/facilityIcons";
 import { useRecents } from "../../lib/storage/recents";
-import type { MapBuilding } from "../../lib/types";
+import type { MapPoi } from "../../lib/types";
 import { CampusSwitcher } from "./CampusSwitcher";
 import type { useMapPageState } from "./useMapPageState";
 
@@ -14,12 +15,12 @@ type MapState = Extract<ReturnType<typeof useMapPageState>, { releaseStatus: "re
 export function DesktopMapPanel({ state }: { state: MapState }) {
   const { recents } = useRecents();
   const filters = state.releaseData.filters;
-  const recentBuildings = recents
-    .map((item) => state.campusBuildings.find((b) => b.poiKey === item.placeId))
-    .filter((b): b is MapBuilding => Boolean(b))
+  const recentPois = recents
+    .map((item) => state.campusPois.find((poi) => poi.poiKey === item.placeId))
+    .filter((poi): poi is MapPoi => Boolean(poi))
     .slice(0, 6);
 
-  const list = state.searchActive ? state.filteredResults : recentBuildings;
+  const list = state.searchActive ? state.filteredResults : recentPois;
 
   return (
     <aside className="flex w-[360px] shrink-0 flex-col border-r border-line bg-surface">
@@ -55,7 +56,7 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
               ? "搜索失败"
               : state.searchActive
             ? `${state.filteredResults.length} 个结果`
-            : recentBuildings.length > 0
+            : recentPois.length > 0
               ? "最近查看"
               : "搜索或点击地图查看地点"}
         </div>
@@ -75,7 +76,15 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
         ) : state.searchActive && list.length === 0 ? (
           <EmptyState title="没有匹配的地点" subtitle="换个关键词或筛选条件试试" />
         ) : (
-          list.map((building) => (
+          list.map((building) => {
+            const Icon = building.entityType === "building"
+              ? Building2
+              : building.entityType === "merchant"
+                ? Store
+                : building.entityType === "facility"
+                  ? facilityIconByKey(building.markerIconKey)
+                  : MapPin;
+            return (
             <button
               key={building.poiKey}
               type="button"
@@ -85,7 +94,7 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
               onClick={() => state.openPoi(building.poiKey, "search_result")}
             >
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-page text-sub">
-                <Building2 size={19} />
+                <Icon size={19} />
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-body font-semibold text-ink">{building.name}</span>
@@ -94,7 +103,8 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
                 </span>
               </span>
             </button>
-          ))
+            );
+          })
         )}
       </div>
     </aside>
@@ -107,7 +117,7 @@ export function PoiMapCard({
   onClose,
   onOpenMerchants,
 }: {
-  building: MapBuilding;
+  building: MapPoi;
   onClose: () => void;
   /** 打开楼内商户（桌面端详情面板）。 */
   onOpenMerchants?: () => void;
@@ -164,13 +174,15 @@ export function PoiMapCard({
             到这去
           </a>
         ) : null}
-        <button
-          type="button"
-          className="flex-1 rounded-full bg-page py-2.5 text-body font-medium text-ink active:bg-line"
-          onClick={() => navigate(`/places/${building.poiKey}/floors`)}
-        >
-          楼层设施
-        </button>
+        {building.entityType === "building" ? (
+          <button
+            type="button"
+            className="flex-1 rounded-full bg-page py-2.5 text-body font-medium text-ink active:bg-line"
+            onClick={() => navigate(`/places/${building.entityId}/floors`)}
+          >
+            楼层设施
+          </button>
+        ) : null}
       </div>
     </div>
   );

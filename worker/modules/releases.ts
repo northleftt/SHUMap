@@ -68,7 +68,7 @@ interface FacilityCandidate {
 interface MerchantCandidate {
   id: string;
   organizationId: string | null;
-  hostPlaceId: string;
+  hostPlaceId: string | null;
   floorId: string | null;
   indoorSpaceId: string | null;
   revisionId: string;
@@ -576,7 +576,7 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
   const releaseFacilities = facilities.map(releaseFacility);
   const releaseMerchants = merchants.map(releaseMerchant);
   const releaseMaps = maps.map(releaseMap);
-  const searchDocuments = buildSearchDocuments(releasePlaces, releaseFacilities, releaseMerchants, locations);
+  const searchDocuments = buildSearchDocuments(releasePlaces, releaseFacilities, releaseMerchants, locations, floors);
   const manifest: ReleaseManifest = {
     schemaVersion: 2,
     release: { id: releaseId, version, createdAt },
@@ -760,7 +760,9 @@ function validateCandidate(
     if (ownerCount !== 1) errors.push("Merchant outlets must belong to exactly one active map filter");
   }
   for (const merchant of candidate.merchants) {
-    if (!placeIds.has(merchant.hostPlaceId)) errors.push(`Merchant ${merchant.id} must reference a published host place`);
+    if (merchant.hostPlaceId && !placeIds.has(merchant.hostPlaceId)) {
+      errors.push(`Merchant ${merchant.id} refers to an unpublished host place`);
+    }
   }
   for (const facility of candidate.facilities) {
     if (facility.hostPlaceId && !placeIds.has(facility.hostPlaceId)) errors.push(`Facility ${facility.id} refers to an unpublished host place`);
@@ -826,57 +828,120 @@ function validateCandidate(
   } };
 }
 
-function buildSearchDocuments(
+export function buildSearchDocuments(
   places: ReleasePlace[],
   facilities: ReleaseFacility[],
   merchants: ReleaseMerchant[],
   locations: LocationCandidate[],
+  floors: FloorCandidate[] = [],
 ): SearchDocumentCandidate[] {
-  const primaryLocation = new Map<string, LocationCandidate>();
+  const locationsByEntity = new Map<string, LocationCandidate[]>();
   for (const location of locations) {
-    if (databaseBoolean(location.isPrimary, `location ${location.id} isPrimary`)) {
-      primaryLocation.set(`${location.entityType}:${location.entityId}`, location);
+    const key = `${location.entityType}:${location.entityId}`;
+    databaseBoolean(location.isPrimary, `location ${location.id} isPrimary`);
+    const entityLocations = locationsByEntity.get(key) ?? [];
+    entityLocations.push(location);
+    locationsByEntity.set(key, entityLocations);
+  }
+  for (const entityLocations of locationsByEntity.values()) {
+    entityLocations.sort((left, right) =>
+      right.isPrimary - left.isPrimary || left.id.localeCompare(right.id),
+    );
+  }
+  const placeById = new Map(places.map((place) => [place.id, place]));
+  const campusByPlace = new Map(
+    places.flatMap((place) => place.campusId ? [[place.id, place.campusId] as const] : []),
+  );
+  const buildingIds = new Set(places.filter((place) => place.isBuilding).map((place) => place.id));
+  const buildingByFloor = new Map(floors.map((floor) => [floor.id, floor.buildingPlaceId]));
+  const entityLocationsFor = (entityType: LocationCandidate["entityType"], entityId: string) =>
+    locationsByEntity.get(`${entityType}:${entityId}`) ?? [];
+  const locationFor = (entityType: LocationCandidate["entityType"], entityId: string) =>
+    entityLocationsFor(entityType, entityId)[0];
+  const campusInPlaceChain = (placeId: string | null): string | null => {
+    const visited = new Set<string>();
+    let currentId = placeId;
+    while (currentId) {
+      if (visited.has(currentId)) throw new Error(`Place hierarchy contains a cycle at ${currentId}`);
+      visited.add(currentId);
+      const place = placeById.get(currentId);
+      if (!place) return null;
+      const campusId = campusByPlace.get(place.id);
+      if (campusId) return campusId;
+      const locationCampusId = campusFromLocations("place", place.id);
+      if (locationCampusId) return locationCampusId;
+      currentId = place.parentPlaceId;
     }
-  }
-  const campusByPlace = new Map<string, string>();
-  for (const place of places) {
-    if (place.campusId) campusByPlace.set(place.id, place.campusId);
-  }
+    return null;
+  };
+  const buildingInPlaceChain = (placeId: string | null): string | null => {
+    const visited = new Set<string>();
+    let currentId = placeId;
+    while (currentId) {
+      if (visited.has(currentId)) throw new Error(`Place hierarchy contains a cycle at ${currentId}`);
+      visited.add(currentId);
+      const place = placeById.get(currentId);
+      if (!place) return null;
+      if (buildingIds.has(place.id)) return place.id;
+      const anchoredBuildingId = buildingFromLocations("place", place.id);
+      if (anchoredBuildingId) return anchoredBuildingId;
+      currentId = place.parentPlaceId;
+    }
+    return null;
+  };
+  const campusFromLocations = (entityType: LocationCandidate["entityType"], entityId: string) =>
+    entityLocationsFor(entityType, entityId).find((location) => location.campus_id)?.campus_id ?? null;
+  const buildingFromLocations = (entityType: LocationCandidate["entityType"], entityId: string) =>
+    entityLocationsFor(entityType, entityId).reduce<string | null>((buildingPlaceId, location) => {
+      if (buildingPlaceId) return buildingPlaceId;
+      if (location.building_place_id && buildingIds.has(location.building_place_id)) {
+        return location.building_place_id;
+      }
+      const floorBuildingId = location.floor_id ? buildingByFloor.get(location.floor_id) : undefined;
+      return floorBuildingId && buildingIds.has(floorBuildingId) ? floorBuildingId : null;
+    }, null);
+  const campusForHostedEntity = (
+    entityType: "facility" | "merchant_outlet",
+    record: ReleaseFacility | ReleaseMerchant,
+  ): string | null => campusFromLocations(entityType, record.id) ?? campusInPlaceChain(record.hostPlaceId);
+  const buildingForHostedEntity = (
+    entityType: "facility" | "merchant_outlet",
+    record: ReleaseFacility | ReleaseMerchant,
+  ): string | null => {
+    const floorBuildingId = record.floorId ? buildingByFloor.get(record.floorId) ?? null : null;
+    return buildingFromLocations(entityType, record.id)
+      ?? floorBuildingId
+      ?? buildingInPlaceChain(record.hostPlaceId);
+  };
   return [
     ...places.map((record) => document(
       "place",
       record,
-      primaryLocation.get(`place:${record.id}`),
+      locationFor("place", record.id),
       10,
-      record.campusId,
-      record.isBuilding ? record.id : null,
+      campusFromLocations("place", record.id) ?? campusInPlaceChain(record.id),
+      buildingFromLocations("place", record.id) ?? buildingInPlaceChain(record.id),
       null,
     )),
     ...facilities.map((record) => document(
       "facility",
       record,
-      primaryLocation.get(`facility:${record.id}`),
+      locationFor("facility", record.id),
       8,
-      record.hostPlaceId ? requiredCampus(campusByPlace, record.hostPlaceId, `facility ${record.id}`) : null,
-      record.hostPlaceId,
+      campusForHostedEntity("facility", record),
+      buildingForHostedEntity("facility", record),
       record.floorId,
     )),
     ...merchants.map((record) => document(
       "merchant_outlet",
       record,
-      primaryLocation.get(`merchant_outlet:${record.id}`),
+      locationFor("merchant_outlet", record.id),
       7,
-      requiredCampus(campusByPlace, record.hostPlaceId, `merchant ${record.id}`),
-      record.hostPlaceId,
+      campusForHostedEntity("merchant_outlet", record),
+      buildingForHostedEntity("merchant_outlet", record),
       record.floorId,
     )),
   ];
-}
-
-function requiredCampus(campuses: Map<string, string>, placeId: string, field: string): string {
-  const campusId = campuses.get(placeId);
-  if (!campusId) throw new Error(`${field} host place ${placeId} has no campus`);
-  return campusId;
 }
 
 function document(

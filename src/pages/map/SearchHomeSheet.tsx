@@ -1,17 +1,25 @@
-import { Building2, CircleAlert, SearchX } from "lucide-react";
+import { Building2, CircleAlert, MapPin, SearchX, Store } from "lucide-react";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { useRecents } from "../../lib/storage/recents";
-import type { FilterKey, MapBuilding } from "../../lib/types";
+import { facilityIconByKey } from "../../lib/facilityIcons";
+import type { FilterKey, MapPoi } from "../../lib/types";
 import type { MapSearchStatus } from "./useMapPageState";
 
-function PlaceSquareIcon() {
+function PlaceSquareIcon({ poi }: { poi: MapPoi }) {
+  const Icon = poi.entityType === "building"
+    ? Building2
+    : poi.entityType === "merchant"
+      ? Store
+      : poi.entityType === "facility"
+        ? facilityIconByKey(poi.markerIconKey)
+        : MapPin;
   return (
     <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary-container text-primary">
-      <Building2 size={19} />
+      <Icon size={19} />
     </span>
   );
 }
@@ -24,7 +32,7 @@ export function SearchHomeSheet({
   searchStatus,
   searchError,
   results,
-  buildings,
+  pois,
   filters,
   onQueryChange,
   onQueryFocus,
@@ -38,8 +46,8 @@ export function SearchHomeSheet({
   searchActive: boolean;
   searchStatus: MapSearchStatus;
   searchError: string;
-  results: MapBuilding[];
-  buildings: MapBuilding[];
+  results: MapPoi[];
+  pois: MapPoi[];
   filters: Array<{ key: FilterKey; label: string }>;
   onQueryChange: (value: string) => void;
   onQueryFocus: () => void;
@@ -49,9 +57,9 @@ export function SearchHomeSheet({
   onResultClick: (poiKey: string) => void;
 }) {
   const { recents } = useRecents();
-  const recentBuildings = recents
-    .map((view) => buildings.find((building) => building.poiKey === view.placeId))
-    .filter((building): building is MapBuilding => Boolean(building))
+  const recentPois = recents
+    .map((view) => pois.find((poi) => poi.poiKey === view.placeId))
+    .filter((poi): poi is MapPoi => Boolean(poi))
     .slice(0, 6);
 
   return (
@@ -110,7 +118,7 @@ export function SearchHomeSheet({
               {results.map((building) => (
                 <ListRow
                   key={building.poiKey}
-                  icon={<PlaceSquareIcon />}
+                  icon={<PlaceSquareIcon poi={building} />}
                   title={building.name}
                   subtitle={`${building.kindName} · ${building.campusLabel}`}
                   onClick={() => onResultClick(building.poiKey)}
@@ -119,14 +127,14 @@ export function SearchHomeSheet({
             </div>
           )}
         </div>
-      ) : recentBuildings.length > 0 ? (
+      ) : recentPois.length > 0 ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <SectionHeader title="最近查看" />
           <div className="mt-2 divide-y divide-line overflow-hidden rounded-2xl bg-surface">
-            {recentBuildings.map((building) => (
+            {recentPois.map((building) => (
               <ListRow
                 key={building.poiKey}
-                icon={<PlaceSquareIcon />}
+                icon={<PlaceSquareIcon poi={building} />}
                 title={building.name}
                 subtitle={`${building.kindName} · ${building.campusLabel}`}
                 onClick={() => onResultClick(building.poiKey)}

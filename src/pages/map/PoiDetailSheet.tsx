@@ -1,26 +1,33 @@
 import { Building2, ChevronLeft, ChevronRight, Clock, Heart, Navigation, Phone, Store, Wallet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { OperationalEvent } from "../../lib/api/types";
+import type { FacilityStatusResponse, OperationalEvent } from "../../lib/api/types";
 import { IconBadge } from "../../components/ui/IconBadge";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SeverityBanner, severityOf } from "../../components/ui/SeverityBanner";
 import { facilityIcon } from "../../lib/facilityIcons";
-import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
+import { facilityStatusLabel, resolveFacilityStatus } from "../../lib/hooks/useFacilityStatus";
 import { MapAppSheet, type MapTarget } from "../../lib/nav";
 import { useFavorites } from "../../lib/storage/favorites";
-import type { MapBuilding, MerchantSummary, PoiDetailData } from "../../lib/types";
+import type { MapPoi, MerchantSummary, PoiDetailData } from "../../lib/types";
 
 const FACT_ICONS = [Clock, Building2, Phone];
 
-/** M2 楼宇 POI 详情（商户 outlet 复用同一版式）。 */
+type FacilityStatusState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; statuses: FacilityStatusResponse["statuses"] };
+
+/** M2 POI 详情；楼宇、楼外地点与独立设施共用主体版式。 */
 export function PoiDetailSheet({
   building,
   events,
+  facilityStatus,
   initialMerchantId = null,
 }: {
-  building: MapBuilding;
+  building: MapPoi;
   events: OperationalEvent[] | null;
+  facilityStatus: FacilityStatusState;
   /** 深链/搜索命中商户时直接展开该商户视图。 */
   initialMerchantId?: string | null;
 }) {
@@ -42,22 +49,33 @@ export function PoiDetailSheet({
   const openMerchant = merchants.find((merchant) => merchant.id === openMerchantId) ?? null;
 
   // 楼内设施来自发布快照；运营状态另走实时接口覆盖。
-  const facilityStatus = useFacilityStatus();
   const facilities = building.facilities;
 
-  // 运营信息槽位：targets 命中本楼或楼内设施的活动事件；无事件整体隐藏
+  // 运营信息槽位：楼宇含楼内设施；独立点按自己的实体类型匹配。
   const facilityIds = new Set(facilities.map((facility) => facility.id));
   const activeEvents = events?.filter((event) =>
     event.targets.some(
       (target) =>
-        (target.targetType === "place" && target.targetId === building.poiKey) ||
-        (target.targetType === "facility" && facilityIds.has(target.targetId)),
+        (target.targetType === "place"
+          && (building.entityType === "building" || building.entityType === "place")
+          && target.targetId === building.entityId)
+        || (target.targetType === "facility"
+          && (facilityIds.has(target.targetId) || (building.entityType === "facility" && target.targetId === building.entityId)))
+        || (target.targetType === "merchant_outlet"
+          && building.entityType === "merchant"
+          && target.targetId === building.entityId),
     ),
   ) ?? null;
   const bannerEvent = activeEvents?.[0] ?? null;
 
   const facts = building.detail.facts;
   const media = building.detail.media.filter((item) => item.url.trim());
+  const independentFacilityStatus = building.entityType === "facility" && facilityStatus.status === "ready"
+    ? resolveFacilityStatus(facilityStatus.statuses, building.entityId)
+    : building.facilityOperationalStatus;
+  const facilitySnapshotStatus = building.entityType === "facility"
+    ? facilityStatusLabel(independentFacilityStatus ?? "unknown")
+    : null;
 
   // 商户详情不单设页面：在同一 sheet 内复用 M2 结构渲染
   if (openMerchant) {
@@ -102,13 +120,28 @@ export function PoiDetailSheet({
 
       <MapAppSheet target={navTarget} onClose={() => setNavTarget(null)} />
 
+      {facilitySnapshotStatus ? (
+        <div className="mt-3 px-5">
+          <p className="rounded-xl bg-warning-bg px-3 py-2 text-body text-warning">{facilitySnapshotStatus}</p>
+        </div>
+      ) : null}
+      {building.entityType === "facility" && facilityStatus.status === "error" ? (
+        <div className="mt-3 px-5">
+          <p className="rounded-xl bg-error-bg px-3 py-2 text-aux text-error">
+            设施实时状态加载失败：{facilityStatus.message}
+          </p>
+        </div>
+      ) : null}
+
       {/* 运营信息通栏横幅（severity 三色，无事件隐藏） */}
       {bannerEvent ? (
         <div className="mt-3">
           <SeverityBanner
             severity={severityOf(bannerEvent.severity)}
             title={bannerEvent.title}
-            onClick={() => navigate(`/places/${building.poiKey}/operations`)}
+            onClick={building.entityType === "building" || building.entityType === "place"
+              ? () => navigate(`/places/${building.entityId}/operations`)
+              : undefined}
           />
         </div>
       ) : null}
@@ -144,12 +177,12 @@ export function PoiDetailSheet({
           </div>
         ) : null}
 
-        {/* 楼内设施指引 */}
-        <div className="mt-4">
+        {/* 楼宇专属的楼层设施入口。 */}
+        {building.entityType === "building" ? <div className="mt-4">
           <SectionHeader
             title="楼内设施指引"
             action={
-              <button type="button" className="text-primary" onClick={() => navigate(`/places/${building.poiKey}/floors`)}>
+              <button type="button" className="text-primary" onClick={() => navigate(`/places/${building.entityId}/floors`)}>
                 查看楼层图 ›
               </button>
             }
@@ -180,7 +213,7 @@ export function PoiDetailSheet({
           ) : facilities.length === 0 ? (
             <p className="mt-2 text-aux text-sub">该楼宇的设施信息正在完善中</p>
           ) : null}
-        </div>
+        </div> : null}
 
         {/* 楼内商户（release manifest merchants，按 hostPlaceId 归到本楼） */}
         {merchants.length > 0 ? (
@@ -306,7 +339,7 @@ function MerchantDetailView({
   merchant,
   onBack,
 }: {
-  building: MapBuilding;
+  building: MapPoi;
   merchant: MerchantSummary;
   onBack: () => void;
 }) {

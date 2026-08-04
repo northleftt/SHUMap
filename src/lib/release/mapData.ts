@@ -3,8 +3,10 @@
 import { fetchMapAssetSvg, getCurrentRelease } from "../api/public";
 import type {
   PublicPlaceFacility,
+  ReleaseFacility,
   ReleaseLocation,
   ReleaseManifest,
+  ReleaseMerchant,
   ReleasePlace,
 } from "../api/types";
 import type {
@@ -12,11 +14,15 @@ import type {
   CampusKey,
   FilterKey,
   MapBuilding,
+  MapPoi,
+  MapPoiPoint,
+  MapPoiVisibility,
+  MerchantSummary,
   NavigationUrls,
   PoiDetailData,
 } from "../types";
 import { NAVIGATION_CRS } from "../../../shared/revision-contract";
-import { groupMerchantsByPlace } from "./merchants";
+import { groupMerchantsByPlace, normalizeMerchant } from "./merchants";
 
 type CampusDisplayConfig = Omit<
   CampusConfig,
@@ -157,6 +163,72 @@ function detailOf(place: ReleasePlace): PoiDetailData {
   };
 }
 
+function optionalText(value: unknown, field: string): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw contractError(`${field} must be a string when present`);
+  return value.trim();
+}
+
+function mediaOf(value: unknown, field: string): PoiDetailData["media"] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw contractError(`${field} must be an array`);
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw contractError(`${field}[${index}] must be an object`);
+    }
+    const row = item as Record<string, unknown>;
+    if (row.role !== "cover" && row.role !== "gallery") {
+      throw contractError(`${field}[${index}].role must be cover or gallery`);
+    }
+    const url = optionalText(row.url, `${field}[${index}].url`);
+    if (!url) throw contractError(`${field}[${index}].url must be non-empty`);
+    const id = optionalText(row.id, `${field}[${index}].id`);
+    const alt = optionalText(row.alt, `${field}[${index}].alt`);
+    const caption = optionalText(row.caption, `${field}[${index}].caption`);
+    return {
+      ...(id ? { id } : {}),
+      role: row.role,
+      url,
+      ...(alt ? { alt } : {}),
+      ...(caption ? { caption } : {}),
+    };
+  });
+}
+
+function facilityDetail(facility: ReleaseFacility): PoiDetailData {
+  const content = facility.content;
+  const facts = [
+    facility.serviceHours?.text ? { label: "服务时间", value: facility.serviceHours.text } : null,
+    optionalText(content.fee, `facility ${facility.id} content.fee`)
+      ? { label: "费用", value: optionalText(content.fee, `facility ${facility.id} content.fee`) }
+      : null,
+    optionalText(content.locationDescription, `facility ${facility.id} content.locationDescription`)
+      ? { label: "位置", value: optionalText(content.locationDescription, `facility ${facility.id} content.locationDescription`) }
+      : null,
+  ].filter((fact): fact is { label: string; value: string } => fact !== null);
+  return {
+    summary: optionalText(content.note, `facility ${facility.id} content.note`),
+    description: "",
+    media: mediaOf(content.media, `facility ${facility.id} content.media`),
+    facts,
+  };
+}
+
+function merchantDetail(merchant: MerchantSummary): PoiDetailData {
+  const facts = [
+    merchant.openingHours ? { label: "营业时间", value: merchant.openingHours } : null,
+    merchant.stallCode ? { label: "档口号", value: merchant.stallCode } : null,
+    merchant.avgPrice ? { label: "人均", value: merchant.avgPrice } : null,
+    merchant.phone ? { label: "联系电话", value: merchant.phone } : null,
+  ].filter((fact): fact is { label: string; value: string } => fact !== null);
+  return {
+    summary: merchant.summary,
+    description: "",
+    media: merchant.media,
+    facts,
+  };
+}
+
 interface NavPoint {
   longitude: number;
   latitude: number;
@@ -209,6 +281,216 @@ function navigationUrls(point: NavPoint): NavigationUrls {
     baidu: `https://api.map.baidu.com/direction?destination=latlng:${latitude},${longitude}|name:${name}&mode=driving&coord_type=gcj02&output=html&src=SHUMap`,
     system: `geo:${latitude},${longitude}?q=${latitude},${longitude}(${name})`,
   };
+}
+
+const DEFAULT_POINT_VISIBILITY: MapPoiVisibility = {
+  default: true,
+  searchable: true,
+  filterable: true,
+  search: true,
+  filter: true,
+  whenUnavailable: true,
+};
+
+function policyBoolean(policy: Record<string, unknown>, key: string, fallback: boolean, facilityId: string): boolean {
+  const value = policy[key];
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") {
+    throw contractError(`facility ${facilityId} visibilityPolicy.${key} must be a boolean`);
+  }
+  return value;
+}
+
+function facilityVisibility(facility: ReleaseFacility): MapPoiVisibility {
+  return {
+    default: policyBoolean(facility.visibilityPolicy, "campusDefault", false, facility.id),
+    searchable: policyBoolean(facility.visibilityPolicy, "searchable", true, facility.id),
+    filterable: policyBoolean(facility.visibilityPolicy, "filterable", true, facility.id),
+    search: policyBoolean(facility.visibilityPolicy, "showOnSearch", true, facility.id),
+    filter: policyBoolean(facility.visibilityPolicy, "showOnFilter", true, facility.id),
+    whenUnavailable: policyBoolean(facility.visibilityPolicy, "showWhenUnavailable", true, facility.id),
+  };
+}
+
+function primaryPointLocations(manifest: ReleaseManifest): Map<string, ReleaseLocation> {
+  const candidates = new Map<string, ReleaseLocation[]>();
+  for (const location of manifest.locations) {
+    if (
+      location.geometry_type !== "Point"
+      || location.crs !== "svg_viewbox"
+      || location.floor_id !== null
+      || location.indoor_space_id !== null
+    ) continue;
+    const key = `${location.entityType}:${location.entityId}`;
+    const list = candidates.get(key) ?? [];
+    list.push(location);
+    candidates.set(key, list);
+  }
+  const rolePriority = new Map([
+    ["primary_display", 0],
+    ["service_position", 1],
+    ["centroid", 2],
+    ["main_entrance", 3],
+    ["other", 4],
+  ]);
+  const result = new Map<string, ReleaseLocation>();
+  for (const [key, list] of candidates) {
+    list.sort((left, right) =>
+      right.isPrimary - left.isPrimary
+      || (rolePriority.get(left.role) ?? 100) - (rolePriority.get(right.role) ?? 100)
+      || left.id.localeCompare(right.id),
+    );
+    result.set(key, list[0]);
+  }
+  return result;
+}
+
+function locationsByEntity(manifest: ReleaseManifest): Map<string, ReleaseLocation[]> {
+  const result = new Map<string, ReleaseLocation[]>();
+  for (const location of manifest.locations) {
+    const key = `${location.entityType}:${location.entityId}`;
+    const locations = result.get(key) ?? [];
+    locations.push(location);
+    result.set(key, locations);
+  }
+  for (const locations of result.values()) {
+    locations.sort((left, right) => right.isPrimary - left.isPrimary || left.id.localeCompare(right.id));
+  }
+  return result;
+}
+
+function releasedBuildingFromLocations(
+  locations: ReleaseLocation[] | undefined,
+  buildingIds: Set<string>,
+  buildingByFloor: Map<string, string>,
+): string | null {
+  for (const location of locations ?? []) {
+    if (location.building_place_id && buildingIds.has(location.building_place_id)) {
+      return location.building_place_id;
+    }
+    const floorBuildingId = location.floor_id ? buildingByFloor.get(location.floor_id) : undefined;
+    if (floorBuildingId && buildingIds.has(floorBuildingId)) return floorBuildingId;
+  }
+  return null;
+}
+
+function releasedBuildingInPlaceChain(
+  placeId: string | null,
+  placeById: Map<string, ReleasePlace>,
+  entityLocations: Map<string, ReleaseLocation[]>,
+  buildingIds: Set<string>,
+  buildingByFloor: Map<string, string>,
+): string | null {
+  const visited = new Set<string>();
+  let currentId = placeId;
+  while (currentId) {
+    if (visited.has(currentId)) {
+      throw contractError(`place hierarchy contains a cycle at ${currentId}`);
+    }
+    visited.add(currentId);
+    const place = placeById.get(currentId);
+    if (!place) return null;
+    if (buildingIds.has(place.id)) return place.id;
+    const anchoredBuildingId = releasedBuildingFromLocations(
+      entityLocations.get(`place:${place.id}`),
+      buildingIds,
+      buildingByFloor,
+    );
+    if (anchoredBuildingId) return anchoredBuildingId;
+    currentId = place.parentPlaceId;
+  }
+  return null;
+}
+
+function campusFromLocations(
+  locations: ReleaseLocation[] | undefined,
+  campusIdByMapVersion: Map<string, string>,
+): string | null {
+  for (const location of locations ?? []) {
+    if (location.campus_id) return location.campus_id;
+    const campusId = location.map_version_id ? campusIdByMapVersion.get(location.map_version_id) : undefined;
+    if (campusId) return campusId;
+  }
+  return null;
+}
+
+function campusInPlaceChain(
+  placeId: string | null,
+  placeById: Map<string, ReleasePlace>,
+  entityLocations: Map<string, ReleaseLocation[]>,
+  campusIdByMapVersion: Map<string, string>,
+): string | null {
+  const visited = new Set<string>();
+  let currentId = placeId;
+  while (currentId) {
+    if (visited.has(currentId)) {
+      throw contractError(`place hierarchy contains a cycle at ${currentId}`);
+    }
+    visited.add(currentId);
+    const place = placeById.get(currentId);
+    if (!place) return null;
+    if (place.campusId) return place.campusId;
+    const locationCampusId = campusFromLocations(
+      entityLocations.get(`place:${place.id}`),
+      campusIdByMapVersion,
+    );
+    if (locationCampusId) return locationCampusId;
+    currentId = place.parentPlaceId;
+  }
+  return null;
+}
+
+function pointOf(location: ReleaseLocation): MapPoiPoint {
+  if (!location.geometry_json) throw contractError(`point location ${location.id} has no geometry`);
+  let geometry: { type?: unknown; coordinates?: unknown };
+  try {
+    geometry = JSON.parse(location.geometry_json) as { type?: unknown; coordinates?: unknown };
+  } catch {
+    throw contractError(`point location ${location.id} contains invalid geometry JSON`);
+  }
+  if (
+    geometry.type !== "Point"
+    || !Array.isArray(geometry.coordinates)
+    || geometry.coordinates.length !== 2
+    || geometry.coordinates.some((coordinate) => typeof coordinate !== "number" || !Number.isFinite(coordinate))
+  ) {
+    throw contractError(`point location ${location.id} must contain a finite GeoJSON Point`);
+  }
+  return { x: geometry.coordinates[0] as number, y: geometry.coordinates[1] as number };
+}
+
+function campusOfPoint(
+  location: ReleaseLocation,
+  fallbackCampusId: string | null,
+  campusById: Map<string, CampusConfig>,
+  campusByMapVersion: Map<string, CampusConfig>,
+  label: string,
+): CampusConfig {
+  const fromMap = location.map_version_id ? campusByMapVersion.get(location.map_version_id) : undefined;
+  if (location.map_version_id && !fromMap) {
+    throw contractError(`${label} point ${location.id} uses a map version outside campus maps`);
+  }
+  const campusId = location.campus_id ?? fallbackCampusId;
+  const fromCampus = campusId ? campusById.get(campusId) : undefined;
+  const campus = fromMap ?? fromCampus;
+  if (!campus) throw contractError(`${label} point ${location.id} does not identify a released campus map`);
+  if (fromMap && fromCampus && fromMap.id !== fromCampus.id) {
+    throw contractError(`${label} point ${location.id} has conflicting campus and map version`);
+  }
+  return campus;
+}
+
+function directFilterGroups(
+  manifest: ReleaseManifest,
+  member: { placeKindId?: string; facilityTypeId?: string; merchant?: boolean },
+): FilterKey[] {
+  return manifest.mapFilters
+    .filter((filter) =>
+      (member.placeKindId ? filter.placeKindIds.includes(member.placeKindId) : false)
+      || (member.facilityTypeId ? filter.facilityTypeIds.includes(member.facilityTypeId) : false)
+      || (member.merchant ? filter.includesMerchants : false),
+    )
+    .map((filter) => filter.key);
 }
 
 function filterGroups(
@@ -286,9 +568,13 @@ export function buildMapBuildings(
         id: place.id,
         poiKey: place.id,
         revisionId: place.revisionId,
+        entityType: "building" as const,
+        entityId: place.id,
         mapFeatureId: footprint.map_feature_id,
         mapVersionId: footprint.map_version_id,
         sourceElementId: footprint.sourceElementId,
+        markerPoint: null,
+        markerIconKey: null,
         name: place.displayName,
         campusKey: campus.key,
         campusLabel: campus.label,
@@ -304,8 +590,205 @@ export function buildMapBuildings(
         navigationUrls: nav ? navigationUrls(navPoint(nav, place.displayName)) : null,
         facilities: releaseFacilitiesForPlace(manifest, place.id),
         merchants,
+        facilityOperationalStatus: null,
+        visibility: DEFAULT_POINT_VISIBILITY,
       };
     });
+}
+
+/** Build independent POIs. Any entity bound to a building stays inside that building's detail. */
+export function buildMapPointPois(
+  manifest: ReleaseManifest,
+  campuses: CampusConfig[],
+): MapPoi[] {
+  const points = primaryPointLocations(manifest);
+  const entityLocations = locationsByEntity(manifest);
+  const campusById = new Map(campuses.map((campus) => [campus.id, campus]));
+  const campusByMapVersion = new Map(campuses.map((campus) => [campus.mapVersionId, campus]));
+  const campusIdByMapVersion = new Map(campuses.map((campus) => [campus.mapVersionId, campus.id]));
+  const navigation = new Map<string, ReleaseLocation>();
+  for (const location of manifest.locations) {
+    if (location.role !== "navigation_target") continue;
+    const key = `${location.entityType}:${location.entityId}`;
+    if (navigation.has(key)) throw contractError(`${key} has multiple navigation locations`);
+    navigation.set(key, location);
+  }
+  const typeById = facilityTypesById(manifest);
+  const placeById = new Map(manifest.places.map((place) => [place.id, place]));
+  const buildingIds = new Set(manifest.places.filter((place) => place.isBuilding).map((place) => place.id));
+  const buildingByFloor = new Map(manifest.floors.map((floor) => [floor.id, floor.buildingPlaceId]));
+  const merchantsByPlace = groupMerchantsByPlace(manifest.merchants);
+  const result: MapPoi[] = [];
+
+  for (const place of manifest.places) {
+    if (place.isBuilding) continue;
+    const location = points.get(`place:${place.id}`);
+    if (!location) continue;
+    const buildingPlaceId = releasedBuildingInPlaceChain(
+      place.id,
+      placeById,
+      entityLocations,
+      buildingIds,
+      buildingByFloor,
+    );
+    if (buildingPlaceId) continue;
+    const campus = campusOfPoint(
+      location,
+      campusInPlaceChain(place.id, placeById, entityLocations, campusIdByMapVersion),
+      campusById,
+      campusByMapVersion,
+      `place ${place.id}`,
+    );
+    const nav = navigation.get(`place:${place.id}`);
+    const facilities = releaseFacilitiesForPlace(manifest, place.id);
+    const merchants = merchantsByPlace.get(place.id) ?? [];
+    result.push({
+      id: `place:${place.id}`,
+      poiKey: `place:${place.id}`,
+      revisionId: place.revisionId,
+      entityType: "place",
+      entityId: place.id,
+      mapFeatureId: null,
+      mapVersionId: null,
+      sourceElementId: null,
+      markerPoint: pointOf(location),
+      markerIconKey: place.kindId === "transit_stop"
+        ? "bus"
+        : place.kindId === "sports_venue"
+          ? "sports"
+          : place.kindId === "service_place"
+            ? "service"
+            : "generic",
+      name: place.displayName,
+      campusKey: campus.key,
+      campusLabel: campus.label,
+      kindId: place.kindId,
+      kindName: place.kindName,
+      filterGroups: filterGroups(
+        manifest,
+        place,
+        new Set(manifest.facilities.filter((facility) => facility.hostPlaceId === place.id).map((facility) => facility.facilityTypeId)),
+        merchants.length > 0,
+      ),
+      detail: detailOf(place),
+      navigationUrls: nav ? navigationUrls(navPoint(nav, place.displayName)) : null,
+      facilities,
+      merchants,
+      facilityOperationalStatus: null,
+      visibility: DEFAULT_POINT_VISIBILITY,
+    });
+  }
+
+  for (const facility of manifest.facilities) {
+    const location = points.get(`facility:${facility.id}`);
+    if (!location) continue;
+    const buildingPlaceId = releasedBuildingFromLocations(
+      entityLocations.get(`facility:${facility.id}`),
+      buildingIds,
+      buildingByFloor,
+    ) ?? (facility.floorId ? buildingByFloor.get(facility.floorId) ?? null : null)
+      ?? releasedBuildingInPlaceChain(
+        facility.hostPlaceId,
+        placeById,
+        entityLocations,
+        buildingIds,
+        buildingByFloor,
+      );
+    if (buildingPlaceId) continue;
+    const hostCampusId = campusInPlaceChain(
+      facility.hostPlaceId,
+      placeById,
+      entityLocations,
+      campusIdByMapVersion,
+    );
+    const campus = campusOfPoint(location, hostCampusId, campusById, campusByMapVersion, `facility ${facility.id}`);
+    const type = typeById.get(facility.facilityTypeId);
+    if (!type) throw contractError(`facility ${facility.id} references missing facility type ${facility.facilityTypeId}`);
+    const nav = navigation.get(`facility:${facility.id}`);
+    result.push({
+      id: `facility:${facility.id}`,
+      poiKey: `facility:${facility.id}`,
+      revisionId: facility.revisionId,
+      entityType: "facility",
+      entityId: facility.id,
+      mapFeatureId: null,
+      mapVersionId: null,
+      sourceElementId: null,
+      markerPoint: pointOf(location),
+      markerIconKey: type.iconKey,
+      name: facility.displayName,
+      campusKey: campus.key,
+      campusLabel: campus.label,
+      kindId: facility.facilityTypeId,
+      kindName: type.name,
+      filterGroups: directFilterGroups(manifest, { facilityTypeId: facility.facilityTypeId }),
+      detail: facilityDetail(facility),
+      navigationUrls: nav ? navigationUrls(navPoint(nav, facility.displayName)) : null,
+      facilities: [],
+      merchants: [],
+      facilityOperationalStatus: facility.operationalStatus,
+      visibility: facilityVisibility(facility),
+    });
+  }
+
+  for (const merchant of manifest.merchants) {
+    const location = points.get(`merchant_outlet:${merchant.id}`);
+    if (!location) continue;
+    const buildingPlaceId = releasedBuildingFromLocations(
+      entityLocations.get(`merchant_outlet:${merchant.id}`),
+      buildingIds,
+      buildingByFloor,
+    ) ?? (merchant.floorId ? buildingByFloor.get(merchant.floorId) ?? null : null)
+      ?? releasedBuildingInPlaceChain(
+        merchant.hostPlaceId,
+        placeById,
+        entityLocations,
+        buildingIds,
+        buildingByFloor,
+      );
+    if (buildingPlaceId) continue;
+    const hostCampusId = campusInPlaceChain(
+      merchant.hostPlaceId,
+      placeById,
+      entityLocations,
+      campusIdByMapVersion,
+    );
+    const campus = campusOfPoint(location, hostCampusId, campusById, campusByMapVersion, `merchant ${merchant.id}`);
+    const normalized = normalizeMerchant(merchant);
+    const nav = navigation.get(`merchant_outlet:${merchant.id}`);
+    result.push({
+      id: `merchant:${merchant.id}`,
+      poiKey: `merchant:${merchant.id}`,
+      revisionId: merchant.revisionId,
+      entityType: "merchant",
+      entityId: merchant.id,
+      mapFeatureId: null,
+      mapVersionId: null,
+      sourceElementId: null,
+      markerPoint: pointOf(location),
+      markerIconKey: "store",
+      name: merchant.displayName,
+      campusKey: campus.key,
+      campusLabel: campus.label,
+      kindId: "merchant_outlet",
+      kindName: merchant.businessType?.trim() || "商户",
+      filterGroups: directFilterGroups(manifest, { merchant: true }),
+      detail: merchantDetail(normalized),
+      navigationUrls: nav ? navigationUrls(navPoint(nav, merchant.displayName)) : null,
+      facilities: [],
+      merchants: [],
+      facilityOperationalStatus: null,
+      visibility: DEFAULT_POINT_VISIBILITY,
+    });
+  }
+
+  return result;
+}
+
+/** Public helper for focused projection tests without loading map assets. */
+export function buildMapPois(manifest: ReleaseManifest, campuses: CampusConfig[]): MapPoi[] {
+  const buildings = buildMapBuildings(manifest, campuses);
+  return [...buildings, ...buildMapPointPois(manifest, campuses)];
 }
 
 async function loadCampuses(
@@ -343,6 +826,8 @@ export interface LoadedRelease {
   manifest: ReleaseManifest;
   campuses: [CampusConfig, ...CampusConfig[]];
   buildings: MapBuilding[];
+  /** Campus-map entries: buildings plus independent outdoor point POIs. */
+  pois: MapPoi[];
   filters: Array<{ key: FilterKey; label: string }>;
 }
 
@@ -350,12 +835,15 @@ export interface LoadedRelease {
 export async function loadRelease(signal?: AbortSignal): Promise<LoadedRelease> {
   const manifest = await getCurrentRelease(signal);
   const campuses = await loadCampuses(manifest, signal);
+  const pois = buildMapPois(manifest, campuses);
+  const buildings = pois.filter((poi): poi is MapBuilding => poi.entityType === "building");
   return {
     releaseId: manifest.release.id,
     version: manifest.release.version,
     manifest,
     campuses,
-    buildings: buildMapBuildings(manifest, campuses),
+    buildings,
+    pois,
     filters: manifest.mapFilters.map((filter) => ({ key: filter.key, label: filter.label })),
   };
 }

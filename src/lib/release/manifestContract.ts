@@ -173,7 +173,7 @@ function merchant(value: unknown, field: string): ReleaseMerchant {
   return {
     id: requiredString(row.id, `${field}.id`),
     organizationId: nullableString(row.organizationId, `${field}.organizationId`),
-    hostPlaceId: requiredString(row.hostPlaceId, `${field}.hostPlaceId`),
+    hostPlaceId: nullableString(row.hostPlaceId, `${field}.hostPlaceId`),
     floorId: nullableString(row.floorId, `${field}.floorId`),
     indoorSpaceId: nullableString(row.indoorSpaceId, `${field}.indoorSpaceId`),
     revisionId: requiredString(row.revisionId, `${field}.revisionId`),

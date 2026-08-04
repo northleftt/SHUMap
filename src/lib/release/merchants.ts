@@ -93,9 +93,7 @@ export function normalizeMerchant(merchant: ReleaseMerchant): MerchantSummary {
 export function groupMerchantsByPlace(merchants: ReleaseMerchant[]): Map<string, MerchantSummary[]> {
   const byPlace = new Map<string, MerchantSummary[]>();
   for (const merchant of merchants) {
-    if (!merchant.hostPlaceId) {
-      throw contractError(merchant.id, "hostPlaceId", "must identify the place that renders the outlet");
-    }
+    if (!merchant.hostPlaceId) continue;
     const list = byPlace.get(merchant.hostPlaceId) ?? [];
     list.push(normalizeMerchant(merchant));
     byPlace.set(merchant.hostPlaceId, list);

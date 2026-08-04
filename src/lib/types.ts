@@ -1,4 +1,4 @@
-import type { PublicPlaceFacility } from "./api/types";
+import type { FacilityOperationalStatus, PublicPlaceFacility } from "./api/types";
 
 export type CampusKey = "baoshan" | "jiading" | "yanchang";
 
@@ -76,18 +76,40 @@ export interface CampusConfig {
   selectionScaleMultiplier: number;
 }
 
+/** A campus-map POI backed by an SVG footprint or an independent point marker. */
+export type MapPoiKind = "building" | "place" | "facility" | "merchant";
+
+export interface MapPoiPoint {
+  x: number;
+  y: number;
+}
+
+export interface MapPoiVisibility {
+  default: boolean;
+  searchable: boolean;
+  filterable: boolean;
+  search: boolean;
+  filter: boolean;
+  whenUnavailable: boolean;
+}
+
 /**
- * A release-derived building rendered on the campus map.
+ * Release-derived POI used by the campus map, search list, and detail sheet.
  *
- * `id` / `poiKey` is the stable place ID and the sole business identity.
+ * Buildings keep their imported SVG identity. Independent outdoor entities use
+ * `markerPoint` and intentionally leave the three footprint fields null.
  */
-export interface MapBuilding {
+export interface MapPoi {
   id: string;
   poiKey: string;
   revisionId: string;
-  mapFeatureId: string;
-  mapVersionId: string;
-  sourceElementId: string;
+  entityType: MapPoiKind;
+  entityId: string;
+  mapFeatureId: string | null;
+  mapVersionId: string | null;
+  sourceElementId: string | null;
+  markerPoint: MapPoiPoint | null;
+  markerIconKey: string | null;
   name: string;
   campusKey: CampusKey;
   campusLabel: string;
@@ -100,6 +122,27 @@ export interface MapBuilding {
   facilities: PublicPlaceFacility[];
   /** 楼内商户（release manifest 的 merchants 按 hostPlaceId 归组）。 */
   merchants: MerchantSummary[];
+  /** 独立设施的发布快照状态；其他 POI 没有该字段。 */
+  facilityOperationalStatus: FacilityOperationalStatus | null;
+  /** 设施类型策略控制默认、搜索、筛选及不可用状态下的小图标。 */
+  visibility: MapPoiVisibility;
+}
+
+/** Buildings remain a distinct subset for floors, shuttle links, and collection flows. */
+export interface MapBuilding extends MapPoi {
+  entityType: "building";
+  mapFeatureId: string;
+  mapVersionId: string;
+  sourceElementId: string;
+  markerPoint: null;
+}
+
+export interface MapPointPoi extends MapPoi {
+  entityType: "place" | "facility" | "merchant";
+  mapFeatureId: null;
+  mapVersionId: null;
+  sourceElementId: null;
+  markerPoint: MapPoiPoint;
 }
 
 /** The only rendering identity MapCanvas accepts from application code. */

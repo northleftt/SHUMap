@@ -2,6 +2,7 @@ import { Crosshair, Layers, Maximize2, Minimize2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MapCanvas, type MapViewWindow } from "../../components/map/MapCanvas";
 import { MapEventOverlay, buildEventOverlayItems } from "../../components/map/MapEventOverlay";
+import { MapPoiOverlay } from "../../components/map/MapPoiOverlay";
 import { useSheetDrag } from "../../components/sheet/useSheetDrag";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { LoadingState } from "../../components/ui/EmptyState";
@@ -120,11 +121,12 @@ export function MapPage() {
   // 同理必须 memo（在提前 return 之前，保证 hook 顺序稳定）
   const featureBindings = useMemo(
     () =>
-      (state.campusBuildings ?? []).map((building) => ({
-        id: building.mapFeatureId,
-        sourceElementId: building.sourceElementId,
-      })),
-    [state.campusBuildings],
+      (state.campusPois ?? []).flatMap((poi) =>
+        poi.mapFeatureId && poi.sourceElementId
+          ? [{ id: poi.mapFeatureId, sourceElementId: poi.sourceElementId }]
+          : [],
+      ),
+    [state.campusPois],
   );
 
   if (state.releaseStatus === "loading") {
@@ -154,8 +156,10 @@ export function MapPage() {
           featureBindings={featureBindings}
           matchedFeatureIds={state.matchedFeatureIds}
           selectedFeatureId={state.selectedPoi?.mapFeatureId ?? null}
+          selectedPoint={state.selectedPoi?.markerPoint ?? null}
           selectionFocusBounds={selectionFocusBounds}
           onSelectFeature={state.openPoiByFeatureId}
+          onTapOverlayPoi={state.openPointPoi}
           onTapEmpty={() => {
             if (selectedEventId) setSelectedEventId(null);
             else if (layerPanelOpen) setLayerPanelOpen(false);
@@ -170,14 +174,22 @@ export function MapPage() {
           onViewWindowChange={setViewWindow}
           zoomControlPosition={isMobile ? "center-right" : "bottom-right"}
           overlay={
-            layerOn ? (
-              <MapEventOverlay
+            <>
+              <MapPoiOverlay
                 viewWindow={viewWindow}
-                items={overlayItems}
-                selectedEventId={selectedEventId}
-                onSelect={setSelectedEventId}
+                pois={state.visiblePointPois}
+                selectedPoiKey={state.selectedPoi?.poiKey ?? null}
+                onSelect={state.openPointPoi}
               />
-            ) : null
+              {layerOn ? (
+                <MapEventOverlay
+                  viewWindow={viewWindow}
+                  items={overlayItems}
+                  selectedEventId={selectedEventId}
+                  onSelect={setSelectedEventId}
+                />
+              ) : null}
+            </>
           }
         />
 
@@ -308,6 +320,7 @@ export function MapPage() {
               <PoiDetailSheet
                 building={state.selectedPoi}
                 events={operations.status === "ready" ? operations.activeEvents : null}
+                facilityStatus={state.facilityStatus}
                 initialMerchantId={state.selectedMerchantId}
               />
             </div>
@@ -361,6 +374,7 @@ export function MapPage() {
                   <PoiDetailSheet
                     building={state.selectedPoi}
                     events={operations.status === "ready" ? operations.activeEvents : null}
+                    facilityStatus={state.facilityStatus}
                     initialMerchantId={state.selectedMerchantId}
                   />
                 </div>
@@ -373,7 +387,7 @@ export function MapPage() {
                     searchStatus={state.searchStatus}
                     searchError={state.searchError}
                     results={state.filteredResults}
-                    buildings={state.releaseData.buildings}
+                    pois={state.releaseData.pois}
                     filters={state.releaseData.filters}
                     onQueryChange={state.handleQueryChange}
                     onQueryFocus={state.handleQueryFocus}
