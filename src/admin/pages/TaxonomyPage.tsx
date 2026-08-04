@@ -897,13 +897,38 @@ function MerchantFilterCard({
  * 正常库里这一段不出现。真出现了必须如实列出来：这种按钮改名会同时影响多个类型，
  * 而空按钮会被发版校验直接拒绝，光看上面两份清单看不出问题在哪。
  */
-function FilterGroupsPanel({ groups }: { groups: MapFilterGroupRow[] }) {
+function FilterGroupsPanel({
+  groups,
+  canEdit,
+  onChanged,
+}: {
+  groups: MapFilterGroupRow[];
+  canEdit: boolean;
+  onChanged: (message: string) => void;
+}) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  async function removeEmpty(group: MapFilterGroupRow) {
+    setBusy(group.id);
+    setError("");
+    try {
+      await admin.deleteMapFilter(group.id);
+      onChanged(`已删除空按钮「${group.label}」`);
+    } catch (err) {
+      setError(labelError(err, "删除失败"));
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <Panel title="需要处理的按钮">
       <p className="text-aux leading-relaxed text-sub">
         正常情况下每个筛选按钮恰好对应一个类型。下面这些按钮不是——挂了多个类型的按钮改名会同时影响
         它们全部，一个类型都没挂的按钮会被发版校验拒绝。
       </p>
+      {error ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
       <div className="mt-3 divide-y divide-line">
         {groups.map((group) => (
           <div className="flex flex-wrap items-center gap-3 py-3" key={group.id}>
@@ -914,6 +939,14 @@ function FilterGroupsPanel({ groups }: { groups: MapFilterGroupRow[] }) {
             </Pill>
             <span className="flex-1 text-aux text-sub">{group.memberLabels || "—"}</span>
             <Pill tone={group.active ? "ok" : "neutral"}>{group.active ? "显示中" : "已隐藏"}</Pill>
+            {/* 空按钮是唯一能在这里直接收拾干净的：它没挂任何类型，删掉不影响别的东西，
+                而留着它会让发版校验一直失败。挂了多个类型的按钮不给一键操作 —— 那要先决定
+                每个类型各自归到哪个新按钮下，不是一次点击能表达的。 */}
+            {canEdit && group.memberCount === 0 ? (
+              <GhostButton danger disabled={busy === group.id} onClick={() => void removeEmpty(group)}>
+                <Trash2 size={13} />删除空按钮
+              </GhostButton>
+            ) : null}
           </div>
         ))}
       </div>
@@ -1072,7 +1105,9 @@ export function TaxonomyPage() {
         <MerchantFilterCard canEdit={canEdit} merchants={filters.merchants} onChanged={afterChange} />
       )}
 
-      {filters.groups.length > 0 ? <FilterGroupsPanel groups={filters.groups} /> : null}
+      {filters.groups.length > 0 ? (
+        <FilterGroupsPanel canEdit={canEdit} groups={filters.groups} onChanged={afterChange} />
+      ) : null}
     </div>
   );
 }

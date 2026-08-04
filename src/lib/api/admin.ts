@@ -466,6 +466,17 @@ export function updateMapFilter(
   return apiFetch<{ id: string }>(`/api/admin/map-filters/${encodeURIComponent(id)}`, { method: "PATCH", body });
 }
 
+/**
+ * DELETE /api/admin/map-filters/:id —— 只用来清掉一个成员都没挂的空按钮。
+ *
+ * 空按钮会被发版校验直接拒（`Active map filter ... has no members`），所以异常分组
+ * 里必须给得出这条出路，否则页面只能报出问题而无法解决它。服务端对还挂着成员的
+ * 按钮回 409 `map_filter_not_empty`。
+ */
+export function deleteMapFilter(id: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/map-filters/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export function listPlaceKinds(signal?: AbortSignal): Promise<ListResponse<PlaceKindRow>> {
   return apiFetch<ListResponse<PlaceKindRow>>("/api/admin/place-kinds", { signal });
 }
