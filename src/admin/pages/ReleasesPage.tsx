@@ -1,11 +1,13 @@
-import { CheckCircle2, CircleAlert, TriangleAlert } from "lucide-react";
+import { CheckCircle2, CircleAlert, MinusCircle, PencilLine, PlusCircle, TriangleAlert } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
 import { getOptionalCurrentRelease } from "../../lib/api/public";
 import type { ReleaseManifest } from "../../lib/api/types";
-import type { MapLifecycleStatus } from "../../lib/api/admin";
+import type { MapLifecycleStatus, PendingChangeKind, PendingChangeRow, PendingEntityType } from "../../lib/api/admin";
 import { useAuth } from "../AuthContext";
+import { usePendingRelease } from "../PendingReleaseContext";
 import {
   EmptyState,
   ErrorBanner,
@@ -22,8 +24,112 @@ import {
 } from "../components/primitives";
 
 // ---------------------------------------------------------------------------
-// 发布中心（当前版本 + 发布表单 + 校验报告 + 回滚）
+// 发布中心（待发布改动 + 当前版本 + 发布表单 + 校验报告 + 回滚）
 // ---------------------------------------------------------------------------
+
+const ENTITY_LABEL: Record<PendingEntityType, string> = {
+  place: "地点",
+  facility: "设施",
+  merchant_outlet: "商户",
+  transit_stop: "校车站点",
+  map_version: "地图版本",
+};
+
+const CHANGE_LABEL: Record<PendingChangeKind, string> = {
+  added: "新增",
+  changed: "修改",
+  removed: "移除",
+};
+
+const CHANGE_ICON: Record<PendingChangeKind, typeof PlusCircle> = {
+  added: PlusCircle,
+  changed: PencilLine,
+  removed: MinusCircle,
+};
+
+const CHANGE_TONE: Record<PendingChangeKind, string> = {
+  added: "text-success",
+  changed: "text-primary",
+  removed: "text-error",
+};
+
+/** 能点进去改的那几类给链接；站点在校车页里，地图版本在地图页里。 */
+function editPathOf(row: PendingChangeRow): string | null {
+  if (row.change === "removed") return null;
+  if (row.entityType === "place") return `/admin/content/places/${row.entityId}`;
+  if (row.entityType === "facility") return `/admin/content/facilities/${row.entityId}`;
+  if (row.entityType === "merchant_outlet") return `/admin/content/merchants/${row.entityId}`;
+  if (row.entityType === "transit_stop") return "/admin/transit";
+  return "/admin/maps";
+}
+
+/**
+ * 待发布改动清单。
+ *
+ * 「地图数据只来自 release」这条约定的代价是：后台改完，用户端要等下一次发版才会
+ * 变。此前后台没有任何地方说这件事，改完看不到效果时无从判断是自己填错了还是只差
+ * 一次发版。这块面板就是回答后者，并且顺手把「差哪些」列清楚。
+ */
+function PendingChangesPanel({ pending }: { pending: admin.PendingReleaseChanges | null }) {
+  if (!pending) {
+    return (
+      <Panel title="待发布改动">
+        <InfoNote>正在比对当前数据与线上版本…</InfoNote>
+      </Panel>
+    );
+  }
+  if (!pending.hasPendingChanges) {
+    return (
+      <Panel title="待发布改动">
+        <p className="flex items-center gap-1.5 text-body text-success">
+          <CheckCircle2 size={16} />
+          没有待发布的改动，线上内容与后台一致。
+        </p>
+      </Panel>
+    );
+  }
+
+  const grouped = new Map<PendingEntityType, PendingChangeRow[]>();
+  for (const row of pending.changes) {
+    grouped.set(row.entityType, [...(grouped.get(row.entityType) ?? []), row]);
+  }
+
+  return (
+    <Panel title={`待发布改动 · ${pending.total} 项`}>
+      <div className="space-y-4">
+        <InfoNote tone="warning">
+          以下改动已经保存在后台，但<span className="font-semibold">用户端还看不到</span>——地图与搜索的数据只来自已发布版本。
+          下面发一个新版本即可生效。
+          {pending.release ? `当前线上版本 ${pending.release.version}，发布于 ${fmtDateTime(pending.release.activatedAt)}。` : "目前还没有任何已发布版本。"}
+        </InfoNote>
+
+        {[...grouped.entries()].map(([entityType, rows]) => (
+          <div key={entityType}>
+            <p className="mb-1.5 text-label text-sub">{ENTITY_LABEL[entityType]} · {rows.length} 项</p>
+            <div className="divide-y divide-line rounded-lg bg-page">
+              {rows.map((row) => {
+                const Icon = CHANGE_ICON[row.change];
+                const path = editPathOf(row);
+                return (
+                  <div className="flex items-center gap-2.5 px-3 py-2" key={`${row.entityType}:${row.entityId}`}>
+                    <Icon className={CHANGE_TONE[row.change]} size={14} />
+                    <span className={`w-10 shrink-0 text-label ${CHANGE_TONE[row.change]}`}>{CHANGE_LABEL[row.change]}</span>
+                    <span className="min-w-0 flex-1 truncate text-body text-ink">{row.displayName}</span>
+                    {path ? (
+                      <Link className="shrink-0 text-aux font-medium text-primary hover:underline" to={path}>查看 ›</Link>
+                    ) : (
+                      <span className="shrink-0 text-label text-sub">已从后台移除</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
 
 /** 地图版本生命周期状态的中文文案。 */
 const MAP_STATUS_LABEL: Record<MapLifecycleStatus, string> = {
@@ -53,6 +159,8 @@ function countsSummary(counts: Record<string, number>): string {
 export function ReleasesPage() {
   const { hasPermission } = useAuth();
   const canRollback = hasPermission("rollback:release");
+  // 与侧栏小黄点同一份数据：两处说法不一致会比没有提示更糟。
+  const { pending, reload: reloadPending } = usePendingRelease();
   const { state, reload } = useAsyncData(async (signal) => {
     const [maps, release] = await Promise.all([
       admin.listMapVersions(signal),
@@ -92,6 +200,9 @@ export function ReleasesPage() {
         setVersion("");
         setSummary("");
         reload();
+        // 发版成功后清单应当立刻变空，小黄点也跟着灭掉。不重算的话侧栏会继续
+        // 提示「有改动待发版」，而那件事刚刚已经做完了。
+        reloadPending();
       }
     } catch (err) {
       // 校验失败时协调器用 422 + { id, status, validation } 应答（不是 { error } 信封），
@@ -114,6 +225,9 @@ export function ReleasesPage() {
       setRollbackMsg(`已回滚到 ${rollbackId.trim()}`);
       setRollbackId("");
       reload();
+      // 回滚换掉了 active release，比对的基准也就换了：回到旧版本后，本来已发布的
+      // 内容重新变成「待发布」。不重算清单会停在回滚前的说法。
+      reloadPending();
     } catch (err) {
       setError(errorMessage(err, "回滚失败"));
     } finally {
@@ -123,6 +237,10 @@ export function ReleasesPage() {
 
   return (
     <div className="space-y-4">
+      {/* 待发布改动放在最上面：进这个页面最常见的问题就是「我改的东西为什么没生效」，
+          答案得第一眼看到，而不是翻到页面下半部分。 */}
+      <PendingChangesPanel pending={pending} />
+
       {/* 当前线上版本 */}
       <Panel padded={false}>
         {release ? (

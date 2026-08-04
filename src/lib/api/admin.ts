@@ -991,6 +991,34 @@ export function rollbackRelease(releaseId: string, body: { reason: string | null
   return apiFetch(`/api/admin/releases/${encodeURIComponent(releaseId)}/rollback`, { method: "POST", body });
 }
 
+export type PendingEntityType = "place" | "facility" | "merchant_outlet" | "transit_stop" | "map_version";
+export type PendingChangeKind = "added" | "changed" | "removed";
+
+export interface PendingChangeRow {
+  entityType: PendingEntityType;
+  entityId: string;
+  displayName: string;
+  change: PendingChangeKind;
+}
+
+export interface PendingReleaseChanges {
+  /** 当前线上版本；从未发过版时为 null（此时所有内容都算「新增」）。 */
+  release: { id: string; version: string; activatedAt: string } | null;
+  hasPendingChanges: boolean;
+  total: number;
+  changes: PendingChangeRow[];
+}
+
+/**
+ * GET /api/admin/releases/pending —— 当前库与线上快照的差异。
+ *
+ * 「地图数据只来自 release」的代价是后台改完不发版则线上不变；这个端点回答
+ * 「现在到底攒了哪些待发布的改动」，侧栏的小黄点与发布中心的清单都用它。
+ */
+export function pendingReleaseChanges(signal?: AbortSignal): Promise<PendingReleaseChanges> {
+  return apiFetch<PendingReleaseChanges>("/api/admin/releases/pending", { signal });
+}
+
 // ---------------------------------------------------------------------------
 // 账户管理（requires manage:users）
 // ---------------------------------------------------------------------------

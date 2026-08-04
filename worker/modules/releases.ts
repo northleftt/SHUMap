@@ -1012,3 +1012,154 @@ function merchantSearchText(content: MerchantContent): string {
     .filter((value): value is string => typeof value === "string")
     .join(" ");
 }
+
+// ---------------------------------------------------------------------------
+// 待发布改动（GET /api/admin/releases/pending）
+//
+// 「地图数据只来自 release」这条约定有个副作用：后台改完东西，线上要等到发一次版
+// 才会变。此前后台没有任何地方说这件事，于是改完看不到效果，无从判断是自己填错了
+// 还是只差一次发版 —— 这个端点就是回答后者。
+//
+// 判定依据是 release_items.item_hash 与当前可发布集合的 content_hash 对比。
+// content_hash 覆盖 structure_json（见 places.ts / facilities.ts / merchants.ts），
+// 而位置就存在 structure_json.locations 里，所以「在校区图上挪了个点」同样算改动，
+// 不需要另外去比锚点表。
+//
+// 过滤条件必须与 buildCandidate 完全一致，否则会出现「这里说有改动，发版却不带它」
+// 这种更糟的不一致。两处都是 lifecycle + approval_pending + editorial_status 三条。
+// ---------------------------------------------------------------------------
+
+type PendingEntityType = "place" | "facility" | "merchant_outlet" | "transit_stop" | "map_version";
+type PendingChangeKind = "added" | "changed" | "removed";
+
+interface PendingChange {
+  entityType: PendingEntityType;
+  entityId: string;
+  displayName: string;
+  change: PendingChangeKind;
+}
+
+interface HashedRow {
+  entityId: string;
+  displayName: string | null;
+  itemHash: string;
+}
+
+/** 当前集合 vs 已发布集合 → 新增 / 变更 / 移除。名称缺失时退回 id，界面不至于空着。 */
+function diffHashed(
+  entityType: PendingEntityType,
+  current: HashedRow[],
+  released: HashedRow[],
+): PendingChange[] {
+  const releasedByEntity = new Map(released.map((row) => [row.entityId, row]));
+  const changes: PendingChange[] = [];
+  for (const row of current) {
+    const before = releasedByEntity.get(row.entityId);
+    if (!before) {
+      changes.push({ entityType, entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "added" });
+    } else if (before.itemHash !== row.itemHash) {
+      changes.push({ entityType, entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "changed" });
+    }
+  }
+  const currentIds = new Set(current.map((row) => row.entityId));
+  for (const row of released) {
+    if (currentIds.has(row.entityId)) continue;
+    // 停用或删除的实体：已发布快照里还在，当前集合里没有了。
+    changes.push({ entityType, entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "removed" });
+  }
+  return changes;
+}
+
+export async function pendingReleaseChanges(env: Env): Promise<Response> {
+  const active = await first<{ id: string; version: string; createdAt: string; activatedAt: string | null }>(
+    env.DB,
+    "select id,version,created_at as createdAt,activated_at as activatedAt from releases where status='active'",
+  );
+
+  const [places, facilities, merchants, stops, mapVersions] = await Promise.all([
+    all<HashedRow>(env.DB, `select p.id as entityId,r.display_name as displayName,r.content_hash as itemHash
+       from places p join place_revisions r on r.id=p.current_revision_id
+      where p.lifecycle_status<>'retired' and p.approval_pending=0 and r.editorial_status='approved'`),
+    all<HashedRow>(env.DB, `select f.id as entityId,r.display_name as displayName,r.content_hash as itemHash
+       from facility_instances f join facility_revisions r on r.id=f.current_revision_id
+      where f.lifecycle_status='active' and f.approval_pending=0 and r.editorial_status='approved'`),
+    all<HashedRow>(env.DB, `select m.id as entityId,r.display_name as displayName,r.content_hash as itemHash
+       from merchant_outlets m join merchant_revisions r on r.id=m.current_revision_id
+      where m.lifecycle_status<>'retired' and m.approval_pending=0 and r.editorial_status='approved'`),
+    all<{ entityId: string; displayName: string; updatedAt: string }>(
+      env.DB,
+      "select id as entityId,name as displayName,updated_at as updatedAt from transit_stops where status='active' order by name,id",
+    ),
+    all<{ entityId: string; displayName: string }>(env.DB, `select mv.id as entityId,mv.version_label as displayName
+       from map_versions mv where mv.lifecycle_status in ('ready','published')
+        and mv.id=(select mv2.id from map_versions mv2
+                    where mv2.lifecycle_status in ('ready','published')
+                      and coalesce(mv2.campus_id,'')=coalesce(mv.campus_id,'')
+                      and coalesce(mv2.floor_id,'')=coalesce(mv.floor_id,'')
+                    order by mv2.created_at desc,mv2.id desc limit 1)`),
+  ]);
+
+  // 从未发过版：当前所有可发布内容都是「新增」，这也是最直白的说法。
+  if (!active) {
+    const changes = [
+      ...places.map((row) => ({ entityType: "place" as const, entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "added" as const })),
+      ...facilities.map((row) => ({ entityType: "facility" as const, entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "added" as const })),
+      ...merchants.map((row) => ({ entityType: "merchant_outlet" as const, entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "added" as const })),
+      ...stops.map((row) => ({ entityType: "transit_stop" as const, entityId: row.entityId, displayName: row.displayName, change: "added" as const })),
+      ...mapVersions.map((row) => ({ entityType: "map_version" as const, entityId: row.entityId, displayName: row.displayName, change: "added" as const })),
+    ];
+    return json({ release: null, hasPendingChanges: changes.length > 0, total: changes.length, changes });
+  }
+
+  const [releasedPlaces, releasedFacilities, releasedMerchants, releasedMaps] = await Promise.all([
+    all<HashedRow>(env.DB, `select ri.entity_id as entityId,ri.item_hash as itemHash,r.display_name as displayName
+       from release_items ri left join place_revisions r on r.id=ri.revision_id
+      where ri.release_id=? and ri.entity_type='place'`, [active.id]),
+    all<HashedRow>(env.DB, `select ri.entity_id as entityId,ri.item_hash as itemHash,r.display_name as displayName
+       from release_items ri left join facility_revisions r on r.id=ri.revision_id
+      where ri.release_id=? and ri.entity_type='facility'`, [active.id]),
+    all<HashedRow>(env.DB, `select ri.entity_id as entityId,ri.item_hash as itemHash,r.display_name as displayName
+       from release_items ri left join merchant_revisions r on r.id=ri.revision_id
+      where ri.release_id=? and ri.entity_type='merchant_outlet'`, [active.id]),
+    all<{ entityId: string; displayName: string | null }>(env.DB, `select rmv.map_version_id as entityId,mv.version_label as displayName
+       from release_map_versions rmv left join map_versions mv on mv.id=rmv.map_version_id
+      where rmv.release_id=?`, [active.id]),
+  ]);
+
+  const changes: PendingChange[] = [
+    ...diffHashed("place", places, releasedPlaces),
+    ...diffHashed("facility", facilities, releasedFacilities),
+    ...diffHashed("merchant_outlet", merchants, releasedMerchants),
+  ];
+
+  // 站点与地图版本没有 item_hash 可比：release_items 只记三类带修订的实体。
+  //
+  // 站点退回时间比较 —— 它没有修订流，改一个字段即时落库，updated_at 就是唯一的
+  // 变更痕迹。判据取 activated_at（快照真正生效的时刻），没有则退回 created_at。
+  // 这条比哈希弱：发版后仅改了不进快照的字段（如 code）也会被算作改动。宁可多报，
+  // 也不要让「站点挪了位置」这种真改动无声无息。
+  const releasedAt = active.activatedAt ?? active.createdAt;
+  for (const stop of stops) {
+    if (stop.updatedAt > releasedAt) {
+      changes.push({ entityType: "transit_stop", entityId: stop.entityId, displayName: stop.displayName, change: "changed" });
+    }
+  }
+  const releasedMapIds = new Set(releasedMaps.map((row) => row.entityId));
+  const currentMapIds = new Set(mapVersions.map((row) => row.entityId));
+  for (const row of mapVersions) {
+    if (!releasedMapIds.has(row.entityId)) {
+      changes.push({ entityType: "map_version", entityId: row.entityId, displayName: row.displayName, change: "added" });
+    }
+  }
+  for (const row of releasedMaps) {
+    if (currentMapIds.has(row.entityId)) continue;
+    changes.push({ entityType: "map_version", entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "removed" });
+  }
+
+  return json({
+    release: { id: active.id, version: active.version, activatedAt: releasedAt },
+    hasPendingChanges: changes.length > 0,
+    total: changes.length,
+    changes,
+  });
+}

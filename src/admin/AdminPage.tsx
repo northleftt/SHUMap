@@ -17,6 +17,7 @@ import {
 import { useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
+import { PendingReleaseProvider, usePendingRelease } from "./PendingReleaseContext";
 import { ErrorBanner, Field, errorMessage } from "./components/primitives";
 import { OverviewPage } from "./pages/OverviewPage";
 import { ContentPage } from "./pages/ContentPage";
@@ -153,6 +154,7 @@ function LoginPage() {
 
 function Sidebar({ displayName, email }: { displayName: string; email: string }) {
   const { hasPermission } = useAuth();
+  const { pending } = usePendingRelease();
   const groups = NAV_GROUPS
     .map((group) => ({
       label: group.label,
@@ -187,6 +189,16 @@ function Sidebar({ displayName, email }: { displayName: string; email: string })
               >
                 <item.icon size={16} />
                 {item.label}
+                {/* 小黄点：库里有改动但还没发版。只挂在发布中心那一项上，因为它是
+                    唯一能解决这件事的地方；数字用 total，让人知道量级。 */}
+                {item.to === "/admin/releases" && pending && pending.hasPendingChanges ? (
+                  <span
+                    className="ml-auto inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-warning px-1.5 text-[10px] font-semibold text-white"
+                    title={`有 ${pending.total} 项改动尚未发版`}
+                  >
+                    {pending.total > 99 ? "99+" : pending.total}
+                  </span>
+                ) : null}
               </NavLink>
             ))}
           </div>
@@ -327,12 +339,16 @@ export function AdminPage() {
   }
 
   return (
-    <div className="flex h-full w-full overflow-hidden bg-page text-ink">
-      <Sidebar displayName={auth.user.displayName} email={auth.user.email} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar displayName={auth.user.displayName} />
-        <main className="min-h-0 flex-1 overflow-y-auto p-6">{routes}</main>
+    // Provider 包在整个后台外面：侧栏的小黄点与发布中心的清单必须读同一份数据，
+    // 两处说法不一致会比没有提示更糟。
+    <PendingReleaseProvider>
+      <div className="flex h-full w-full overflow-hidden bg-page text-ink">
+        <Sidebar displayName={auth.user.displayName} email={auth.user.email} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Topbar displayName={auth.user.displayName} />
+          <main className="min-h-0 flex-1 overflow-y-auto p-6">{routes}</main>
+        </div>
       </div>
-    </div>
+    </PendingReleaseProvider>
   );
 }

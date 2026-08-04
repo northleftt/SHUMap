@@ -54,6 +54,8 @@ import {
   updateTrip,
 } from "./modules/transit";
 
+import { pendingReleaseChanges } from "./modules/releases";
+
 export { ReleaseCoordinator } from "./modules/releases";
 
 const SECURITY_HEADERS = {
@@ -550,6 +552,12 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     return updateUser(request, env, principal, adminUser.id, requestId);
   }
 
+  // 待发布改动：读操作，用 read:admin 而不是 publish:release —— 没有发版权限的编辑
+  // 也需要知道「我改的东西还没上线」，否则他们会以为自己填错了。
+  if (method === "GET" && path === "/api/admin/releases/pending") {
+    await requireSession(request, env, "read:admin");
+    return pendingReleaseChanges(env);
+  }
   if (method === "POST" && path === "/api/admin/releases") {
     principal = await requireSession(request, env, "publish:release");
     return coordinatorRequest(request, env, "/release", principal, requestId);
