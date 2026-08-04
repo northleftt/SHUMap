@@ -53,14 +53,14 @@ export interface LocationDraft {
   origin?: LocationOrigin;
 }
 
-export function emptyLocation(): LocationDraft {
+export function emptyLocation(role: LocationRole = "primary_display"): LocationDraft {
   return {
     id: crypto.randomUUID(),
     campusId: "",
     buildingPlaceId: "",
     floorId: "",
     indoorSpaceId: "",
-    role: "primary_display",
+    role,
     locationHint: "",
     longitude: "",
     latitude: "",

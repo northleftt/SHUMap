@@ -104,7 +104,7 @@ test("revision hashes cover structural data and floor media rehash keeps it", ()
 test("new transit directions submit the complete chosen stop sequence", () => {
   const page = read("src/admin/pages/TransitPage.tsx");
   const worker = read("worker/modules/transit.ts");
-  assert.match(page, /stops: createPatternStops/);
+  assert.match(page, /stops: directionStops/);
   assert.doesNotMatch(page, /stops\.slice\(0, 2\)/);
   assert.match(worker, /A stop can appear only once in a pattern/);
   assert.match(worker, /MAX_PATTERN_STOPS/);

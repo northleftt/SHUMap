@@ -258,12 +258,19 @@ export interface TransitStopLocationRow extends Record<string, unknown> {
   isPrimary: boolean;
 }
 
-/** 站点可借用的地点（照片 / 联系方式 / 导航点都挂在地点上）。 */
+/**
+ * 站点可借用的地点（照片 / 联系方式 / 导航点都挂在地点上）。
+ *
+ * `isBuilding` 决定这条绑定在用户端到底有没有效果：客户端的 POI 列表只由带建筑
+ * 轮廓的地点构成，校车详情页的「导航到这里」也是顺着这份列表找的。绑一个没有
+ * 楼宇结构的地点，数据库收得下，但用户端什么都不会多出来。
+ */
 export interface TransitPlaceOptionRow {
   id: string;
   displayName: string | null;
   kindId: string;
   campusId: string | null;
+  isBuilding: boolean;
 }
 
 export interface TransitRouteRow {
@@ -306,6 +313,7 @@ export interface ServiceCalendarRow {
   friday: number;
   saturday: number;
   sunday: number;
+  sourceId: string | null;
 }
 
 export type TransitBookingPolicy = "required" | "optional" | "not_required";

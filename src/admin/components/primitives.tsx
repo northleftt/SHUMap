@@ -227,12 +227,15 @@ export function GhostButton({
   disabled,
   danger,
   className = "",
+  title,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   danger?: boolean;
   className?: string;
+  /** 悬浮提示。禁用状态下用来说明为什么点不了。 */
+  title?: string;
 }) {
   return (
     <button
@@ -241,6 +244,7 @@ export function GhostButton({
       } ${className}`}
       disabled={disabled}
       onClick={onClick}
+      title={title}
       type="button"
     >
       {children}

@@ -44,7 +44,7 @@ async function assertCodeAvailable(
   if (code === null) return;
   const row = await first<{ id: string }>(env.DB, `select id from ${table} where code=?`, [code]);
   if (row && row.id !== excludeId) {
-    throw new HttpError(409, "conflict", `Code ${code} is already used by another record`);
+    throw new HttpError(409, "transit_code_taken", `Code ${code} is already used by another record`);
   }
 }
 
@@ -103,10 +103,19 @@ export async function listTransit(env: Env): Promise<Response> {
   ]);
   // Names of the places a stop can borrow its photos / contact rows from, so the
   // editor can label the binding without a second round trip.
-  const places = await all(
+  //
+  // `isBuilding` travels with each row because it decides whether the binding
+  // does anything on the client: `buildMapBuildings` only emits places with a
+  // building footprint, and the shuttle sheet resolves a stop's navigation link
+  // through that list. Binding a stop to a place without building structure is
+  // accepted by the schema but produces no photo, no contact row and no
+  // "navigate here" — the editor has to say so rather than let it look wired up.
+  const places = await all<Record<string, unknown>>(
     env.DB,
-    `select p.id,r.display_name as displayName,p.kind_id as kindId,p.campus_id as campusId
+    `select p.id,r.display_name as displayName,p.kind_id as kindId,p.campus_id as campusId,
+            case when b.place_id is null then 0 else 1 end as isBuilding
        from places p left join place_revisions r on r.id=p.current_revision_id
+       left join buildings b on b.place_id=p.id
       where p.lifecycle_status<>'retired' order by coalesce(r.display_name,p.id)`,
   );
   return json({
@@ -119,7 +128,9 @@ export async function listTransit(env: Env): Promise<Response> {
     exceptions,
     trips,
     stopTimes,
-    places,
+    // Same normalization as GET /api/admin/places, so the flag is a boolean on
+    // both admin payloads rather than 0/1 in one and true/false in the other.
+    places: places.map((row) => ({ ...row, isBuilding: Number(row.isBuilding) === 1 })),
   });
 }
 
@@ -192,7 +203,7 @@ export async function updateStop(
       [stopId],
     );
     if ((inUse?.total ?? 0) > 0) {
-      throw new HttpError(409, "conflict", "Remove this stop from every route direction before retiring it");
+      throw new HttpError(409, "transit_stop_in_use", "Remove this stop from every route direction before retiring it");
     }
   }
 
@@ -421,7 +432,7 @@ export async function updatePattern(
     "select id from transit_patterns where route_id=? and direction_id=? and name=? and id<>?",
     [before.route_id, directionId, name, patternId],
   );
-  if (clash) throw new HttpError(409, "conflict", "This route already has a direction with that name and travel direction");
+  if (clash) throw new HttpError(409, "transit_pattern_duplicate", "This route already has a direction with that name and travel direction");
   await env.DB.prepare("update transit_patterns set name=?,direction_id=? where id=?").bind(name, directionId, patternId).run();
   await audit(env, principal, "transit.pattern.update", "transit_pattern", patternId, requestId, before, { name, directionId });
   return json({ id: patternId });
@@ -579,7 +590,7 @@ export async function updateCalendar(
       [calendarId, validFrom, validTo],
     );
     if ((orphaned?.total ?? 0) > 0) {
-      throw new HttpError(409, "conflict", `${orphaned?.total} recorded exception date(s) fall outside the new date range; edit them together with the range`);
+      throw new HttpError(409, "calendar_range_excludes_exceptions", `${orphaned?.total} recorded exception date(s) fall outside the new date range; edit them together with the range`);
     }
   }
   await env.DB.batch(statements);
