@@ -1,15 +1,15 @@
-import { MapPin, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import * as admin from "../../lib/api/admin";
 import { objectValue, oneOf, requiredBoolean } from "../../lib/dataContract";
-import type { SpacesResponse } from "../adminTypes";
+import type { Campus, SpacesResponse } from "../adminTypes";
+import type { CampusKey } from "../../lib/types";
 import { ErrorBanner, Field, GhostButton, InfoNote, Panel, SelectField, errorMessage } from "./primitives";
 import {
   CANVAS_CRS,
   CampusMapCanvas,
   campusKeyOfRow,
   campusMapBinding,
-  campusMapVersions,
   canvasOfGeoJson,
   canvasToolOfGeometryType,
   geoJsonOfCanvas,
@@ -253,6 +253,48 @@ function hasCanvasGeometry(row: LocationDraft): boolean {
   return Boolean(origin && origin.crs === CANVAS_CRS && origin.geometry !== null && origin.geometry !== undefined);
 }
 
+/**
+ * row.campusId → 画布需要的 campusKey。
+ *
+ * 找不到或代码不认识时返回 null（画布转而提示先选校区），不抛：位置行的校区可以
+ * 一时空着，整张编辑页不该因此打不开。
+ */
+function canvasCampusKey(campusId: string, campuses: Campus[]): CampusKey | null {
+  const row = campuses.find((candidate) => candidate.id === campusId);
+  if (!row) return null;
+  try {
+    return campusKeyOfRow(row);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 已存的画布几何 → 画布 value；这一行没画过东西就是 null。
+ *
+ * 几何类型不在当前用途允许的工具里就当没画（改了「用途」会走到这一步），
+ * 否则画布会拿点的解析器去读一个多边形，直接抛在渲染里。
+ */
+function canvasValueOf(
+  row: LocationDraft,
+  campusKey: CampusKey,
+  tools: readonly CanvasTool[],
+): CanvasGeometry | null {
+  const origin = row.origin;
+  if (!origin || !hasCanvasGeometry(row)) return null;
+  const tool = canvasToolOfGeometryType(origin.geometryType);
+  if (!tool || !tools.includes(tool)) return null;
+  return canvasOfGeoJson(origin.geometry, tool, campusKey, `位置 ${row.id} 的几何`);
+}
+
+/** 清掉这一行的画布几何，保留其余字段。 */
+function withoutCanvasGeometry(row: LocationDraft): Partial<LocationDraft> {
+  return {
+    mapVersionId: "",
+    origin: row.origin ? { ...row.origin, geometryType: "Point", geometry: null, crs: null } : undefined,
+  };
+}
+
 function geometryTypeFromFeature(feature: admin.MapFeatureRow): GeometryType {
   return oneOf(feature.geometryType, `map feature ${feature.id}.geometryType`, ["Point", "LineString", "Polygon", "MultiPolygon"] as const);
 }
@@ -334,7 +376,10 @@ export function LocationEditor({
     return () => controller.abort();
   }, [featuresByVersion, requestedVersions]);
 
-  return <Panel title="地图位置" action={<GhostButton disabled={disabled} onClick={() => onChange([...value, { ...emptyLocation(), isPrimary: value.length === 0 }])}><Plus size={14} />添加位置</GhostButton>}>
+  // 调用方传进来的 title 之前被硬编码的面板标题吃掉了：校车的「上车 / 下车点」、
+  // 设施的「楼外位置」、商户的「门店位置」都显示成「地图位置」，同一页上两块位置
+  // 面板还会同名。
+  return <Panel title={title} action={<GhostButton disabled={disabled} onClick={() => onChange([...value, { ...emptyLocation(allowedRoles[0]), isPrimary: value.length === 0 }])}><Plus size={14} />添加位置</GhostButton>}>
     {featureError ? <ErrorBanner message={featureError} /> : null}
     {value.length === 0 ? <InfoNote>还没有地图位置</InfoNote> : <div className="space-y-3">{value.map((row, index) => {
       const floors = spaces.floors.filter((floor) => !row.buildingPlaceId || floor.buildingPlaceId === row.buildingPlaceId);
@@ -359,13 +404,69 @@ export function LocationEditor({
         value: feature.id,
         label: `${feature.label ?? feature.sourceElementId ?? feature.id} · ${feature.kind}`,
       }));
-      const patchCampus = (campusId: string) => patch(index, { campusId, mapVersionId: "", mapFeatureId: "" });
+      // 楼宇的校区由楼宇自身决定，校区下拉是只读回显，画布得跟着那一个。
+      const effectiveCampusId = isBuilding === true ? buildingCampusId ?? "" : row.campusId;
+      const canvasTools = CANVAS_TOOLS_BY_ROLE[row.role] ?? null;
+      const campusKey = canvasCampusKey(effectiveCampusId, spaces.campuses);
+      const drawn = hasCanvasGeometry(row);
+      const typedPoint = Boolean(row.longitude.trim() || row.latitude.trim());
+      // 底图与地图版本在渲染前就解析好：解析失败只换成一条提示，不让画布的
+      // 事件回调在保存瞬间抛出来。
+      let canvasBinding: { campusId: string; mapVersionId: string } | null = null;
+      let canvasBlocked = "";
+      if (canvasTools && campusKey) {
+        try {
+          canvasBinding = campusMapBinding(campusKey, spaces.campuses, mapVersions);
+        } catch (error) {
+          canvasBlocked = errorMessage(error, "该校区没有可用底图");
+        }
+      }
+      // 换校区就换了底图坐标系，旧坐标在新底图上落在别处，只能一并清掉。
+      const patchCampus = (campusId: string) => patch(index, drawn
+        ? { campusId, mapFeatureId: "", ...withoutCanvasGeometry(row) }
+        : { campusId, mapVersionId: "", mapFeatureId: "" });
+      const canvasValue = canvasTools && campusKey ? canvasValueOf(row, campusKey, canvasTools) : null;
+      /** 画布产出 → 这一行的 origin。画布坐标必须与它所属的地图版本同时写库。 */
+      const applyCanvas = (next: CanvasGeometry | null) => {
+        if (!canvasBinding) return;
+        const picked = pickSingleShape(canvasValue, next);
+        const shape = picked ? geoJsonOfCanvas(picked.geometry, picked.tool) : null;
+        if (!shape) {
+          patch(index, withoutCanvasGeometry(row));
+          return;
+        }
+        patch(index, {
+          campusId: canvasBinding.campusId,
+          mapVersionId: canvasBinding.mapVersionId,
+          mapFeatureId: "",
+          // 图上点过就以图为准：经纬度留着会在 locationInput 里反过来盖掉画布几何。
+          longitude: "",
+          latitude: "",
+          origin: {
+            geometryType: shape.geometryType,
+            geometry: shape.geometry,
+            crs: CANVAS_CRS,
+            precisionLevel: "exact",
+            accuracyMeters: row.origin?.accuracyMeters ?? null,
+            sourceId: row.origin?.sourceId ?? null,
+            validFrom: row.origin?.validFrom ?? null,
+            validTo: row.origin?.validTo ?? null,
+          },
+        });
+      };
       return <div className="space-y-3 rounded-xl border border-line p-3" key={row.id}>
         <div className="grid grid-cols-2 gap-2">
           <SelectField
             disabled={disabled || roleOptions.length < 2}
             label="用途"
-            onChange={(role) => patch(index, { role: oneOf(role, "location.role", ALL_ROLES) })}
+            onChange={(role) => {
+              const next = oneOf(role, "location.role", ALL_ROLES);
+              // 换了用途，图上已画的形状可能不再是这个用途允许的类型（影响范围→
+              // 主要展示位置就是面变点）。留着它会把一个多边形当成展示点存出去。
+              const tool = row.origin ? canvasToolOfGeometryType(row.origin.geometryType) : null;
+              const stillAllowed = tool !== null && (CANVAS_TOOLS_BY_ROLE[next] ?? []).includes(tool);
+              patch(index, drawn && !stillAllowed ? { role: next, ...withoutCanvasGeometry(row) } : { role: next });
+            }}
             options={roleOptions}
             value={row.role}
           />
@@ -388,18 +489,19 @@ export function LocationEditor({
           <SelectField disabled={disabled} label="楼层" onChange={(floorId) => patch(index, { floorId, indoorSpaceId: "" })} options={floors.map((floor) => ({ value: floor.id, label: floor.displayName }))} placeholder="不指定" value={row.floorId} />
           <SelectField disabled={disabled} label="室内空间" onChange={(indoorSpaceId) => patch(index, { indoorSpaceId })} options={indoor.map((space) => ({ value: space.id, label: space.displayName }))} placeholder="不指定" value={row.indoorSpaceId} />
           <Field disabled={disabled} label="位置说明" onChange={(locationHint) => patch(index, { locationHint })} placeholder="如 北门入口" value={row.locationHint} />
-          <Field disabled={disabled || Boolean(row.mapFeatureId)} label="GCJ-02 经度（可选）" onChange={(longitude) => patch(index, { longitude })} placeholder="121.40" type="number" value={row.longitude} />
-          <Field disabled={disabled || Boolean(row.mapFeatureId)} label="GCJ-02 纬度（可选）" onChange={(latitude) => patch(index, { latitude })} placeholder="31.32" type="number" value={row.latitude} />
+          {/* 图上点过就锁住经纬度：两者都会落到同一处几何，留着能改必然有一个被静默丢弃。 */}
+          <Field disabled={disabled || Boolean(row.mapFeatureId) || drawn} label="GCJ-02 经度（可选）" onChange={(longitude) => patch(index, { longitude })} placeholder={drawn ? "已在图上标点" : "121.40"} type="number" value={row.longitude} />
+          <Field disabled={disabled || Boolean(row.mapFeatureId) || drawn} label="GCJ-02 纬度（可选）" onChange={(latitude) => patch(index, { latitude })} placeholder={drawn ? "已在图上标点" : "31.32"} type="number" value={row.latitude} />
           <SelectField
-            disabled={disabled || Boolean(row.longitude.trim() || row.latitude.trim())}
+            disabled={disabled || typedPoint || drawn}
             label="地图版本（可选）"
             onChange={(mapVersionId) => patch(index, { mapVersionId, mapFeatureId: "", origin: row.origin ? { ...row.origin, geometryType: "Point", geometry: null, crs: null } : undefined })}
             options={versionOptions}
-            placeholder="不绑定地图图形"
+            placeholder={drawn ? "已由图上标点绑定" : "不绑定地图图形"}
             value={row.mapVersionId}
           />
           <SelectField
-            disabled={disabled || !row.mapVersionId || loadingVersions.has(row.mapVersionId)}
+            disabled={disabled || !row.mapVersionId || loadingVersions.has(row.mapVersionId) || drawn}
             label="地图图形（可选）"
             onChange={(mapFeatureId) => {
               if (!mapFeatureId) {
@@ -429,6 +531,35 @@ export function LocationEditor({
             value={row.mapFeatureId}
           />
         </div>
+
+        {/* 校区图选点：这是唯一能产出 svg_viewbox 坐标的入口，也就是让这处位置
+            真正出现在用户端地图上的那一步。手填的 GCJ-02 经纬度只喂导航链接，
+            渲染层不认，所以两者并列摆着而不是互相替代。 */}
+        {canvasTools === null ? null : !campusKey ? (
+          <InfoNote>先选校区，才能在校园图上标点。</InfoNote>
+        ) : canvasBlocked ? (
+          <InfoNote tone="warning">{canvasBlocked}</InfoNote>
+        ) : typedPoint ? (
+          <InfoNote>已手填经纬度。清空经纬度后可改为在校园图上标点，那样才会在地图上出现图钉。</InfoNote>
+        ) : row.mapFeatureId ? (
+          <InfoNote>已绑定导入的地图图形，不需要再标点。</InfoNote>
+        ) : (
+          <div className="space-y-2 rounded-lg bg-page p-3">
+            <p className="text-aux text-sub">在校园图上标点（决定是否在地图上出现）</p>
+            <CampusMapCanvas
+              campuses={spaces.campuses}
+              campusKey={campusKey}
+              disabled={disabled}
+              height="h-[360px]"
+              labels={{ point: ROLE_LABELS[row.role] }}
+              mapVersions={mapVersions}
+              onChange={applyCanvas}
+              tools={canvasTools}
+              value={canvasValue}
+            />
+          </div>
+        )}
+
         <div className="flex justify-end gap-2">{!row.isPrimary ? <GhostButton disabled={disabled} onClick={() => onChange(value.map((item, i) => ({ ...item, isPrimary: i === index })))}>设为主要位置</GhostButton> : null}<GhostButton danger disabled={disabled} onClick={() => onChange(value.filter((_, i) => i !== index))}><Trash2 size={14} />删除</GhostButton></div>
       </div>;
     })}</div>}
