@@ -12,7 +12,6 @@ import type {
   TransitPickupType,
   TransitResponse,
   TransitRouteRow,
-  TransitStopRow,
   TransitStopStatus,
 } from "../adminTypes";
 import {

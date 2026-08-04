@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "noEmit": true,
     "isolatedModules": true,
+    "noUnusedLocals": true,
     "types": ["@cloudflare/workers-types"]
   },
   "include": ["./**/*.ts"]

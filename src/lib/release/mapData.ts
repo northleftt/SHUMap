@@ -6,7 +6,6 @@ import type {
   ReleaseFacility,
   ReleaseLocation,
   ReleaseManifest,
-  ReleaseMerchant,
   ReleasePlace,
   TransitStop,
 } from "../api/types";

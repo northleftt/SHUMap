@@ -14,7 +14,11 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // 开着它是因为吃过一次亏：LocationEditor 曾经 import 了整套校区图选点、还定义了
+    // CANVAS_TOOLS_BY_ROLE，但从不渲染画布。typecheck 全绿，功能却没有入口。
+    // 未用的 import 与局部变量从此是错误，这类「写了一半」不会再静默留在仓库里。
+    "noUnusedLocals": true
   },
   "include": ["src"],
   "references": []

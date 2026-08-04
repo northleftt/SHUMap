@@ -65,7 +65,6 @@ export function shouldRenderPointPoi({
 export function useMapPageState() {
   const releaseState = useRelease();
   const facilityStatus = useFacilityStatus();
-  const releaseStatus = releaseState.status;
   const release = releaseState.status === "ready" ? releaseState.release : null;
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedCampus, setSelectedCampus] = useState<CampusKey | null>(null);
@@ -84,7 +83,6 @@ export function useMapPageState() {
   const deepLinkAppliedRef = useRef(false);
   const { addRecent } = useRecents();
 
-  const campuses = release ? release.campuses : null;
   const pois = release ? release.pois : null;
   const selectedCampusIndex = release && selectedCampus
     ? release.campuses.findIndex((item) => item.key === selectedCampus)

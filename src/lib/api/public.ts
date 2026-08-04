@@ -7,7 +7,6 @@ import { parseReleaseManifest } from "../release/manifestContract";
 import { parseFacilityStatusResponse, parseOperationalEventsResponse } from "./publicContract";
 import type {
   CampaignsResponse,
-  CollectionTaskDto,
   CollectionTasksResponse,
   OwnedCollectionTaskDto,
   FacilityStatusResponse,

@@ -129,7 +129,7 @@ export function MapsPage() {
       await admin.uploadMediaContent(intent.mediaAssetId, bytes, "image/svg+xml");
       setProgress("创建导入任务…");
       // map_versions 的 check 约束是 campus_id / floor_id 二选一，import-jobs 同样要求恰好一个。
-      const job = await admin.createImportJob({
+      await admin.createImportJob({
         mediaAssetId: intent.mediaAssetId,
         campusId: targetKind === "campus" ? campusId : null,
         floorId: targetKind === "floor" ? floorId : null,
