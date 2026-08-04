@@ -3,7 +3,7 @@ import type { D1PreparedStatement, Env } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json, readJson } from "../lib/http";
 import { assertActiveMapFilterCategory } from "../lib/taxonomy";
-import { isoNow, makeId, oneOf, optionalNumber, optionalString, requiredString } from "../lib/values";
+import { isoNow, makeId, objectValue, oneOf, optionalNumber, optionalString, parseJsonObject, requiredString } from "../lib/values";
 import { audit } from "./audit";
 
 // ---------------------------------------------------------------------------
@@ -34,7 +34,13 @@ export const CATEGORIES = ["service", "study", "amenity", "navigation", "commerc
 
 /**
  * 新建类型的默认可见性策略。与种子数据里最常见的一组取值一致：可搜索、可筛选、
- * 进楼宇概览，不默认铺满校区图和楼层图。后续如需精细控制再单独做界面。
+ * 进楼宇概览，不默认铺满校区图和楼层图。
+ *
+ * `campusDefault` 是「不选任何筛选时校区图上直接显示」的开关。它默认 false，而
+ * 楼外设施的图钉正是由它决定要不要画（见 useMapPageState 的 shouldRenderPointPoi：
+ * 没有搜索词也没有选筛选时，只看 visibility.default）。默认关着是对的——否则一个
+ * 校区几百个卫生间会糊满地图——但必须能在后台改，否则新建的楼外点位永远不出现，
+ * 而管理员没有任何办法自己解决。
  */
 const DEFAULT_VISIBILITY_POLICY = {
   searchable: true,
@@ -59,12 +65,56 @@ interface FacilityTypeRow {
   verificationIntervalDays: number | null;
   createdAt: string;
   updatedAt: string;
+  visibilityPolicyJson: string;
   instanceCount: number;
   collectionReferenceCount: number;
   mapFilterMemberId: string;
   mapFilterCategoryId: string;
   mapFilterLabel: string;
   mapFilterActive: number;
+}
+
+/** 后台能改的那几个可见性开关。其余键（buildingSummary / floorDefault）原样保留。 */
+const EDITABLE_VISIBILITY_KEYS = [
+  "campusDefault", "searchable", "filterable", "showOnSearch", "showOnFilter", "showWhenUnavailable",
+] as const;
+
+type VisibilityPatch = Partial<Record<(typeof EDITABLE_VISIBILITY_KEYS)[number], boolean>>;
+
+/**
+ * 读出存着的策略。这一列是 `not null check(json_valid(...))`，所以解析失败属于
+ * 数据损坏，不能静默兜底成默认值——那会让「我明明打开了校区默认显示」变成谜。
+ */
+function visibilityPolicyOf(raw: string, typeId: string): Record<string, unknown> {
+  const parsed = parseJsonObject(raw, `facility_types ${typeId} visibility_policy_json`);
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== "boolean") {
+      throw new Error(`facility_types ${typeId} visibility_policy_json.${key} must be a boolean`);
+    }
+  }
+  return parsed;
+}
+
+/** 请求体里的可见性开关 → 补丁。全部缺省时返回 null，表示这次不动策略。 */
+function visibilityPatch(value: unknown, field: string): VisibilityPatch | null {
+  if (value === undefined) return null;
+  const body = objectValue(value, field);
+  const patch: VisibilityPatch = {};
+  for (const key of Object.keys(body)) {
+    if (!(EDITABLE_VISIBILITY_KEYS as readonly string[]).includes(key)) {
+      throw new HttpError(400, "validation_error", `${field}.${key} is not an editable visibility switch`);
+    }
+  }
+  for (const key of EDITABLE_VISIBILITY_KEYS) {
+    if (!Object.hasOwn(body, key)) continue;
+    const raw = body[key];
+    if (typeof raw !== "boolean") throw new HttpError(400, "validation_error", `${field}.${key} must be a boolean`);
+    patch[key] = raw;
+  }
+  if (Object.keys(patch).length === 0) {
+    throw new HttpError(400, "validation_error", `${field} must contain at least one switch`);
+  }
+  return patch;
 }
 
 interface MapFilterCategoryRow {
@@ -97,6 +147,7 @@ interface WriteBody {
   status?: unknown;
   verificationIntervalDays?: unknown;
   mapFilterCategoryId?: unknown;
+  visibilityPolicy?: unknown;
 }
 
 /**
@@ -112,6 +163,7 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
       `select t.id,t.code,t.name,t.category,t.icon_key as iconKey,t.status,
               t.verification_interval_days as verificationIntervalDays,
               t.created_at as createdAt,t.updated_at as updatedAt,
+              t.visibility_policy_json as visibilityPolicyJson,
               m.id as mapFilterMemberId,m.category_id as mapFilterCategoryId,
               c.label as mapFilterLabel,c.active as mapFilterActive,
               (select count(*) from facility_instances f where f.facility_type_id=t.id) as instanceCount,
@@ -166,12 +218,19 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
   ]);
 
   return json({
-    items: types.map((type) => ({
-      ...type,
-      mapFilterActive: Number(type.mapFilterActive) === 1,
-      instances: instances.filter((instance) => instance.facilityTypeId === type.id),
-    })),
+    items: types.map((type) => {
+      const { visibilityPolicyJson, ...fields } = type;
+      return {
+        ...fields,
+        mapFilterActive: Number(type.mapFilterActive) === 1,
+        // 界面要能看见并改这几个开关，尤其是 campusDefault —— 它决定楼外点位在
+        // 不选筛选时到底画不画。原样回全量策略，界面只渲染可编辑的那几个。
+        visibilityPolicy: visibilityPolicyOf(visibilityPolicyJson, type.id),
+        instances: instances.filter((instance) => instance.facilityTypeId === type.id),
+      };
+    }),
     iconKeys: SUPPORTED_ICON_KEYS,
+    visibilityKeys: EDITABLE_VISIBILITY_KEYS,
     categories: CATEGORIES,
     mapFilterCategories: mapFilterCategories.map((category) => ({
       ...category,
@@ -268,11 +327,13 @@ export async function updateFacilityType(
     icon_key: string | null;
     status: string;
     verification_interval_days: number | null;
+    visibility_policy_json: string;
     map_filter_member_id: string | null;
     map_filter_category_id: string | null;
   }>(
     env.DB,
     `select t.id,t.code,t.name,t.category,t.icon_key,t.status,t.verification_interval_days,
+            t.visibility_policy_json,
             m.id as map_filter_member_id,m.category_id as map_filter_category_id
        from facility_types t left join map_filter_members m on m.facility_type_id=t.id
       where t.id=?`,
@@ -292,6 +353,11 @@ export async function updateFacilityType(
   const iconKey = body.iconKey === undefined ? undefined : normalizeIconKey(body.iconKey);
   const status = body.status === undefined ? null : oneOf<FacilityTypeStatus>(body.status, "status", STATUSES);
   const verificationIntervalDays = body.verificationIntervalDays === undefined ? undefined : normalizeInterval(body.verificationIntervalDays);
+  // 补丁式合并：只覆盖请求里给到的开关，buildingSummary / floorDefault 这些界面上
+  // 没有的键原样留着，别因为一次改「校区默认显示」把种子里的其他策略抹平。
+  const patch = visibilityPatch(body.visibilityPolicy, "visibilityPolicy");
+  const currentPolicy = visibilityPolicyOf(current.visibility_policy_json, id);
+  const nextPolicy = patch === null ? null : { ...currentPolicy, ...patch };
   const mapFilterCategoryId = body.mapFilterCategoryId === undefined
     ? current.map_filter_category_id
     : requiredString(body.mapFilterCategoryId, "mapFilterCategoryId", 100);
@@ -346,6 +412,7 @@ export async function updateFacilityType(
   if (iconKey !== undefined) { sets.push("icon_key=?"); values.push(iconKey); }
   if (status !== null) { sets.push("status=?"); values.push(status); }
   if (verificationIntervalDays !== undefined) { sets.push("verification_interval_days=?"); values.push(verificationIntervalDays); }
+  if (nextPolicy !== null) { sets.push("visibility_policy_json=?"); values.push(JSON.stringify(nextPolicy)); }
   const categoryChanged = mapFilterCategoryId !== current.map_filter_category_id;
   if (!sets.length && !categoryChanged) throw new HttpError(400, "validation_error", "Nothing to update");
 
@@ -369,7 +436,7 @@ export async function updateFacilityType(
 
   await audit(
     env, principal, "facility_type.update", "facility_type", id, requestId,
-    { name: current.name, category: current.category, iconKey: current.icon_key, status: current.status, verificationIntervalDays: current.verification_interval_days, mapFilterCategoryId: current.map_filter_category_id },
+    { name: current.name, category: current.category, iconKey: current.icon_key, status: current.status, verificationIntervalDays: current.verification_interval_days, mapFilterCategoryId: current.map_filter_category_id, visibilityPolicy: currentPolicy },
     {
       name: name ?? current.name,
       category: category ?? current.category,
@@ -377,6 +444,7 @@ export async function updateFacilityType(
       status: nextStatus,
       verificationIntervalDays: verificationIntervalDays === undefined ? current.verification_interval_days : verificationIntervalDays,
       mapFilterCategoryId,
+      visibilityPolicy: nextPolicy ?? currentPolicy,
     },
   );
 
@@ -389,6 +457,7 @@ export async function updateFacilityType(
     iconKey: iconKey === undefined ? current.icon_key : iconKey,
     status: nextStatus,
     verificationIntervalDays: verificationIntervalDays === undefined ? current.verification_interval_days : verificationIntervalDays,
+    visibilityPolicy: nextPolicy ?? currentPolicy,
     instanceCount: count,
     mapFilterMemberId: current.map_filter_member_id,
     mapFilterCategoryId,

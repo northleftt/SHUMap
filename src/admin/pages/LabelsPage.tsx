@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Pencil, Plus, Store, Tags, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Eye, EyeOff, Pencil, Plus, Store, Tags, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
@@ -6,6 +6,7 @@ import type {
   FacilityTypeInstanceRow,
   FacilityTypeRow,
   MapFilterMemberRow,
+  MapFilterPlaceEntryRow,
   MapFilterRow,
   PlaceKindRow,
 } from "../../lib/api/admin";
@@ -72,6 +73,41 @@ const OPERATIONAL_LABELS: Record<string, string> = {
   unavailable: "不可用",
   unknown: "状态未知",
 };
+
+/**
+ * 设施类型的显示开关。
+ *
+ * `campusDefault` 是「不选任何筛选时，校区图上直接画出它的图钉」。种子数据里它一律
+ * 是 false，于是新建的楼外设施在地图上永远看不到——而这件事此前后台无法修改，管理员
+ * 只能干等。fallback 与服务端 DEFAULT_VISIBILITY_POLICY 一致：策略里缺这个键时按
+ * 默认值显示，别把「没设置」画成「已关闭」。
+ */
+const VISIBILITY_SWITCHES = [
+  {
+    key: "campusDefault" as const,
+    label: "校区图默认显示",
+    fallback: false,
+    hint: "关掉时，只有搜到它或选中它所属标签才会出现在地图上",
+  },
+  {
+    key: "searchable" as const,
+    label: "可被搜索",
+    fallback: true,
+    hint: "关掉后搜索结果里不再出现这个类型的点位",
+  },
+  {
+    key: "filterable" as const,
+    label: "可被筛选",
+    fallback: true,
+    hint: "关掉后点它所属的标签也不会把它筛出来",
+  },
+  {
+    key: "showWhenUnavailable" as const,
+    label: "不可用时仍显示",
+    fallback: true,
+    hint: "关掉后，实时状态为「不可用」的点位会从地图上隐去",
+  },
+];
 
 function IconPreview({ iconKey, size = 18 }: { iconKey: string | null; size?: number }) {
   const Icon = facilityIconByKey(iconKey);
@@ -180,7 +216,55 @@ function InstanceList({ instances, canEdit }: { instances: FacilityTypeInstanceR
   );
 }
 
-/** 成员在标签卡片里的一枚胶囊：显示归属对象 + 换标签下拉 + 移出。 */
+/** 一个地点类型成员下挂着的地点清单，点进去到地点编辑页。 */
+function PlaceEntryList({ entries, canEdit }: { entries: MapFilterPlaceEntryRow[]; canEdit: boolean }) {
+  return (
+    <table className="mt-2 w-full border-collapse">
+      <thead>
+        <tr className="text-left text-label text-sub">
+          <th className="px-3 pb-1.5 font-medium">名称</th>
+          <th className="px-3 pb-1.5 font-medium">校区</th>
+          <th className="px-3 pb-1.5 font-medium">形态</th>
+          <th className="px-3 pb-1.5 font-medium">状态</th>
+          <th className="px-3 pb-1.5 text-right font-medium" />
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map((entry) => (
+          <tr className="border-t border-line" key={entry.id}>
+            <td className="px-3 py-2 text-body text-ink">{entry.displayName}</td>
+            <td className="px-3 py-2 text-aux text-sub">{entry.campusName ?? "未指定校区"}</td>
+            <td className="px-3 py-2 text-aux text-sub">{entry.isBuilding ? "楼宇" : "楼外地点"}</td>
+            <td className="px-3 py-2">
+              <span className="flex flex-wrap items-center gap-1.5">
+                <Pill tone={entry.lifecycleStatus === "active" ? "ok" : "neutral"}>
+                  {LIFECYCLE_LABELS[entry.lifecycleStatus] ?? entry.lifecycleStatus}
+                </Pill>
+                {entry.editorialStatus === null ? (
+                  <span className="text-label text-sub">尚无已发布修订</span>
+                ) : null}
+              </span>
+            </td>
+            <td className="px-3 py-2 text-right">
+              {canEdit ? (
+                <Link className="text-aux font-medium text-primary hover:underline" to={`/admin/content/places/${entry.id}`}>
+                  去编辑
+                </Link>
+              ) : null}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * 标签卡片里的一个成员：归属对象 + 换标签下拉 + 移出，地点类型还能展开看成员。
+ *
+ * 展开这件事只有地点类型有：设施类型的点位明细在下面「设施类型」区里按类型展开
+ * （同一份数据不做两个入口），商户是整类纳入，没有可枚举的对象。
+ */
 function MemberChip({
   member,
   labels,
@@ -198,45 +282,71 @@ function MemberChip({
   onMove: (memberId: string, categoryId: string) => void;
   onRemove: (memberId: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const facilityType = member.facilityTypeId === null ? null : facilityTypeById.get(member.facilityTypeId) ?? null;
   const kindTone = member.includesMerchants ? "商户" : member.placeKindId !== null ? "地点类型" : "设施类型";
+  const expandable = member.placeKindId !== null;
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-page py-1 pl-2.5 pr-1 text-aux">
-      {member.includesMerchants ? (
-        <Store className="text-sub" size={14} />
-      ) : facilityType ? (
-        (() => {
-          const Icon = facilityIconByKey(facilityType.iconKey);
-          return <Icon className="text-sub" size={14} />;
-        })()
-      ) : null}
-      <span className="font-medium text-ink">{member.targetLabel}</span>
-      <span className="text-sub">{kindTone}</span>
-      {canEdit ? (
-        <>
-          <select
-            aria-label={`把「${member.targetLabel}」移到别的标签`}
-            className="rounded border border-line bg-surface px-1 py-0.5"
-            disabled={busy}
-            onChange={(event) => onMove(member.id, event.target.value)}
-            value={member.categoryId}
-          >
-            {labels.map((option) => (
-              <option key={option.id} value={option.id}>{option.label}</option>
-            ))}
-          </select>
+    <div className="w-full rounded-xl bg-page px-2.5 py-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 text-aux">
+        {expandable ? (
           <button
-            aria-label={`把「${member.targetLabel}」移出这个标签`}
-            className="grid h-6 w-6 place-items-center rounded-full text-sub hover:bg-line"
-            disabled={busy}
-            onClick={() => onRemove(member.id)}
+            aria-expanded={open}
+            aria-label={open ? `收起「${member.targetLabel}」下的地点` : `展开「${member.targetLabel}」下的地点`}
+            className="grid h-6 w-6 place-items-center rounded-full text-sub hover:bg-line disabled:opacity-40"
+            disabled={member.entries.length === 0}
+            onClick={() => setOpen((value) => !value)}
+            title={member.entries.length === 0 ? "这个类型下还没有地点" : open ? "收起" : "展开看成员"}
             type="button"
           >
-            <X size={13} />
+            {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
           </button>
-        </>
-      ) : null}
-    </span>
+        ) : null}
+        {member.includesMerchants ? (
+          <Store className="text-sub" size={14} />
+        ) : facilityType ? (
+          (() => {
+            const Icon = facilityIconByKey(facilityType.iconKey);
+            return <Icon className="text-sub" size={14} />;
+          })()
+        ) : null}
+        <span className="font-medium text-ink">{member.targetLabel}</span>
+        <span className="text-sub">{kindTone}</span>
+        <span className="text-sub">
+          {member.includesMerchants
+            ? `${member.usageCount} 个商户`
+            : member.placeKindId !== null
+              ? `${member.usageCount} 个地点`
+              : `${member.usageCount} 个点位`}
+        </span>
+        <span className="flex-1" />
+        {canEdit ? (
+          <>
+            <select
+              aria-label={`把「${member.targetLabel}」移到别的标签`}
+              className="rounded border border-line bg-surface px-1 py-0.5"
+              disabled={busy}
+              onChange={(event) => onMove(member.id, event.target.value)}
+              value={member.categoryId}
+            >
+              {labels.map((option) => (
+                <option key={option.id} value={option.id}>{option.label}</option>
+              ))}
+            </select>
+            <button
+              aria-label={`把「${member.targetLabel}」移出这个标签`}
+              className="grid h-6 w-6 place-items-center rounded-full text-sub hover:bg-line"
+              disabled={busy}
+              onClick={() => onRemove(member.id)}
+              type="button"
+            >
+              <X size={13} />
+            </button>
+          </>
+        ) : null}
+      </div>
+      {open && member.entries.length > 0 ? <PlaceEntryList canEdit={canEdit} entries={member.entries} /> : null}
+    </div>
   );
 }
 
@@ -447,6 +557,32 @@ function FacilityTypeRowCard({
       </div>
 
       {error ? <div className="px-4 pb-3"><ErrorBanner message={error} /></div> : null}
+
+      {/* 显示开关。放在这里而不是编辑弹窗里，是因为「点位加了但地图上看不到」时，
+          第一个要查的就是它，得一眼能看见当前是开还是关。 */}
+      {canEdit ? (
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-3.5">
+          <span className="text-label text-sub">显示</span>
+          {VISIBILITY_SWITCHES.map((item) => {
+            const on = type.visibilityPolicy[item.key] ?? item.fallback;
+            return (
+              <GhostButton
+                disabled={busy}
+                key={item.key}
+                onClick={() => void run(
+                  () => admin.updateFacilityType(type.id, { visibilityPolicy: { [item.key]: !on } }),
+                  on ? `已关闭「${type.name}」的${item.label}` : `已打开「${type.name}」的${item.label}`,
+                  "修改显示开关失败",
+                )}
+                title={item.hint}
+              >
+                {on ? <Eye size={13} /> : <EyeOff size={13} />}
+                {item.label}
+              </GhostButton>
+            );
+          })}
+        </div>
+      ) : null}
 
       {confirmDelete ? (
         <div className="mx-4 mb-3 rounded-lg bg-error-bg px-4 py-3">
@@ -720,7 +856,8 @@ export function LabelsPage() {
                   </div>
                 )}
 
-                <div className="mt-3 flex flex-wrap gap-2">
+                {/* 成员现在每行一条：地点类型能展开出下面挂着的地点，横排胶囊放不下。 */}
+                <div className="mt-3 space-y-2">
                   {label.members.map((member) => (
                     <MemberChip
                       busy={busy}

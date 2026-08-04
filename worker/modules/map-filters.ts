@@ -26,7 +26,30 @@ interface MapFilterMemberRow {
   usageCount: number;
 }
 
-type MapFilterMemberResponse = Omit<MapFilterMemberRow, "includesMerchants"> & { includesMerchants: boolean };
+/**
+ * 挂在一个地点类型下的单个地点。
+ *
+ * 标签页此前只给成员一个 usageCount，「建筑」下面写着 121 个地点却一个都看不到、
+ * 点不开。这份明细让归属关系可核对：某个地点到底算在哪个标签里。
+ */
+interface PlaceKindEntryRow {
+  id: string;
+  kindId: string;
+  displayName: string;
+  lifecycleStatus: string;
+  isBuilding: number;
+  campusId: string | null;
+  campusName: string | null;
+  editorialStatus: string | null;
+}
+
+type PlaceKindEntryResponse = Omit<PlaceKindEntryRow, "isBuilding"> & { isBuilding: boolean };
+
+type MapFilterMemberResponse = Omit<MapFilterMemberRow, "includesMerchants"> & {
+  includesMerchants: boolean;
+  /** 仅地点类型成员有明细；设施类型在「设施类型」区展开，商户是整类纳入。 */
+  entries: PlaceKindEntryResponse[];
+};
 
 interface MapFilterMemberTarget {
   placeKindId: string | null;
@@ -197,7 +220,7 @@ async function categoryHasLiveUsage(env: Env, categoryId: string): Promise<boole
 }
 
 export async function listMapFilters(env: Env): Promise<Response> {
-  const [categories, members, placeKinds, facilityTypes, merchantMember] = await Promise.all([
+  const [categories, members, placeKinds, facilityTypes, merchantMember, placeEntries] = await Promise.all([
     all<MapFilterCategoryRow>(
       env.DB,
       "select id,key,label,active,sort_order as sortOrder from map_filter_categories order by sort_order,label,id",
@@ -238,12 +261,42 @@ export async function listMapFilters(env: Env): Promise<Response> {
         order by ft.category,ft.name,ft.id`,
     ),
     first<{ id: string }>(env.DB, "select id from map_filter_members where includes_merchants=1"),
+    // 每个地点类型下到底有哪些地点。此前这里只给一个 usageCount 计数，界面上
+    // 「建筑」下面挂了 121 个地点却一个都点不开，也无从确认某个地点归到了哪个标签。
+    // 名称走 coalesce(当前修订, 最新修订)，草稿地点同样能显示出来 —— 与设施类型的
+    // instances 一致。
+    all<PlaceKindEntryRow>(
+      env.DB,
+      `select p.id,p.kind_id as kindId,
+              coalesce(pr.display_name,
+                (select r2.display_name from place_revisions r2 where r2.place_id=p.id order by r2.revision_no desc limit 1),
+                p.id
+              ) as displayName,
+              p.lifecycle_status as lifecycleStatus,
+              case when b.place_id is null then 0 else 1 end as isBuilding,
+              p.campus_id as campusId,c.name as campusName,
+              pr.editorial_status as editorialStatus
+         from places p
+         left join buildings b on b.place_id=p.id
+         left join campuses c on c.id=p.campus_id
+         left join place_revisions pr on pr.id=p.current_revision_id
+        order by p.kind_id,displayName,p.id`,
+    ),
   ]);
+  const entriesByKind = new Map<string, PlaceKindEntryResponse[]>();
+  for (const row of placeEntries) {
+    const list = entriesByKind.get(row.kindId) ?? [];
+    list.push({ ...row, isBuilding: Number(row.isBuilding) === 1 });
+    entriesByKind.set(row.kindId, list);
+  }
   const membersByCategory = new Map<string, MapFilterMemberResponse[]>();
   for (const member of members) {
     membersByCategory.set(member.categoryId, [...(membersByCategory.get(member.categoryId) ?? []), {
       ...member,
       includesMerchants: Number(member.includesMerchants) === 1,
+      // 只有地点类型成员带明细；设施类型的明细在「设施类型」区里按类型展开，
+      // 商户成员是整类纳入，没有可枚举的对象。
+      entries: member.placeKindId === null ? [] : entriesByKind.get(member.placeKindId) ?? [],
     }]);
   }
   const normalizedPlaceKinds = placeKinds.map((kind) => ({

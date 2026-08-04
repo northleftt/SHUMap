@@ -13,7 +13,17 @@ export interface MediaRow {
   floorLevelCode?: string;
 }
 
+/**
+ * content.media → 表单行。
+ *
+ * 缺字段等于「没有照片」，不是数据坏了：设施与商户的 media 在存储契约里是可选的
+ * （`validateOptionalMedia` 只在字段存在时校验），编辑器保存时也会在没有照片时
+ * 主动 `delete content.media`。所以一个从没传过照片的设施，content 就是 `{}`，
+ * 之前这里直接 `arrayValue(undefined)` 抛出「media must be an array」，把整个
+ * 编辑页挡在门外 —— 恰恰是最常见的那种设施打不开。
+ */
 export function readMedia(value: unknown): MediaRow[] {
+  if (value === undefined || value === null) return [];
   return arrayValue(value, "media").map((raw, index) => {
     const field = `media[${index}]`;
     const row = objectValue(raw, field);

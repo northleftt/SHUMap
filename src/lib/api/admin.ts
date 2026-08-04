@@ -399,6 +399,18 @@ export interface MapFilterRow {
   members: MapFilterMemberRow[];
 }
 
+/** 归在某个地点类型下的一个地点。标签页用它展开「建筑」这类成员的明细。 */
+export interface MapFilterPlaceEntryRow {
+  id: string;
+  kindId: string;
+  displayName: string;
+  lifecycleStatus: string;
+  isBuilding: boolean;
+  campusId: string | null;
+  campusName: string | null;
+  editorialStatus: string | null;
+}
+
 export interface MapFilterMemberRow {
   id: string;
   categoryId: string;
@@ -408,6 +420,10 @@ export interface MapFilterMemberRow {
   sortOrder: number;
   targetLabel: string;
   targetCode: string | null;
+  /** 这个成员下挂着多少个对象（地点 / 设施点位 / 商户）。 */
+  usageCount: number;
+  /** 地点类型成员的地点明细；设施类型与商户为空数组（明细各有自己的入口）。 */
+  entries: MapFilterPlaceEntryRow[];
 }
 
 export interface MapFilterTargetRow {
@@ -1047,6 +1063,25 @@ export interface FacilityTypeInstanceRow {
   editorialStatus: string | null;
 }
 
+/**
+ * 设施类型的可见性开关。
+ *
+ * `campusDefault` 决定「不选任何筛选时校区图上要不要直接画这个类型的图钉」——
+ * 楼外设施能不能被看见就取决于它（见 useMapPageState 的 shouldRenderPointPoi）。
+ * 其余键控制搜索与筛选命中时的行为。buildingSummary / floorDefault 属于楼内展示，
+ * 后台暂不提供开关，但服务端会原样保留。
+ */
+export interface FacilityVisibilityPolicy {
+  campusDefault?: boolean;
+  searchable?: boolean;
+  filterable?: boolean;
+  showOnSearch?: boolean;
+  showOnFilter?: boolean;
+  showWhenUnavailable?: boolean;
+  buildingSummary?: boolean;
+  floorDefault?: boolean;
+}
+
 export interface FacilityTypeRow {
   id: string;
   code: string;
@@ -1057,6 +1092,7 @@ export interface FacilityTypeRow {
   verificationIntervalDays: number | null;
   createdAt: string;
   updatedAt: string;
+  visibilityPolicy: FacilityVisibilityPolicy;
   instanceCount: number;
   collectionReferenceCount: number;
   mapFilterMemberId: string;
@@ -1110,7 +1146,12 @@ export function createFacilityType(body: {
   return apiFetch<FacilityTypeWriteResult>("/api/admin/facility-types", { method: "POST", body });
 }
 
-/** PATCH /api/admin/facility-types/:id — code 不可改；status='disabled' 即停用。 */
+/**
+ * PATCH /api/admin/facility-types/:id — code 不可改；status='disabled' 即停用。
+ *
+ * `visibilityPolicy` 是补丁：只提交要改的那几个开关，服务端与已存策略合并，
+ * 界面上没有的键（buildingSummary / floorDefault）原样保留。
+ */
 export function updateFacilityType(
   id: string,
   body: {
@@ -1120,6 +1161,7 @@ export function updateFacilityType(
     status?: "active" | "disabled";
     verificationIntervalDays?: number | null;
     mapFilterCategoryId?: string;
+    visibilityPolicy?: FacilityVisibilityPolicy;
   },
 ): Promise<FacilityTypeWriteResult> {
   return apiFetch<FacilityTypeWriteResult>(`/api/admin/facility-types/${encodeURIComponent(id)}`, { method: "PATCH", body });

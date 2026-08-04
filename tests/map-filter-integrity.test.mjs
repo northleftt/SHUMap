@@ -75,6 +75,13 @@ test("live POIs require taxonomy targets attached to active map filters", () => 
 test("live map-filter categories and members cannot be deactivated, moved, or removed", () => {
   const db = database();
   insertPlace(db, "place_live", "building");
+  // 搬去哪儿需要一个停用标签。以前这里借用种子里的 map_filter_outdoor，但 0019 把
+  // 楼外那四个标签全启用了（否则后台建不了楼外地点），种子里已没有天然停用的标签。
+  // 断言的是触发器行为，不是种子长什么样，所以样本自己造。
+  db.exec(`
+    insert into map_filter_categories(id,key,label,active,sort_order,created_at,updated_at)
+    values('map_filter_move_target','moveTarget','搬运目标（停用）',0,900,datetime('now'),datetime('now'));
+  `);
 
   assert.throws(
     () => db.exec("update map_filter_categories set active=0 where id='map_filter_teaching'"),
@@ -82,7 +89,7 @@ test("live map-filter categories and members cannot be deactivated, moved, or re
   );
   assert.throws(
     () => db.exec(`
-      update map_filter_members set category_id='map_filter_outdoor'
+      update map_filter_members set category_id='map_filter_move_target'
        where id='map_filter_member_teaching'
     `),
     /live map filter member cannot move to an inactive map filter/,
@@ -98,7 +105,7 @@ test("live map-filter categories and members cannot be deactivated, moved, or re
   );
   assert.throws(
     () => db.exec(`
-      update map_filter_members set category_id='map_filter_outdoor'
+      update map_filter_members set category_id='map_filter_move_target'
        where id='map_filter_member_printing'
     `),
     /live map filter member cannot move to an inactive map filter/,
