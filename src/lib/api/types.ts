@@ -118,7 +118,7 @@ export interface ReleaseMapVersion {
 }
 
 export interface ReleaseLocation {
-  entityType: "place" | "facility" | "merchant_outlet";
+  entityType: "place" | "facility" | "merchant_outlet" | "transit_stop";
   entityId: string;
   role: string;
   isPrimary: 0 | 1;

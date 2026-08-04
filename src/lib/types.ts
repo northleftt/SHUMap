@@ -77,7 +77,7 @@ export interface CampusConfig {
 }
 
 /** A campus-map POI backed by an SVG footprint or an independent point marker. */
-export type MapPoiKind = "building" | "place" | "facility" | "merchant";
+export type MapPoiKind = "building" | "place" | "facility" | "merchant" | "transit_stop";
 
 export interface MapPoiPoint {
   x: number;
@@ -102,7 +102,11 @@ export interface MapPoiVisibility {
 export interface MapPoi {
   id: string;
   poiKey: string;
-  revisionId: string;
+  /**
+   * 校车站点不走修订流（改一个字段即时生效），所以没有修订号。其余实体都有。
+   * 供稿要基于修订号提交，因此取这个字段的地方必须先判空。
+   */
+  revisionId: string | null;
   entityType: MapPoiKind;
   entityId: string;
   mapFeatureId: string | null;
@@ -131,6 +135,7 @@ export interface MapPoi {
 /** Buildings remain a distinct subset for floors, shuttle links, and collection flows. */
 export interface MapBuilding extends MapPoi {
   entityType: "building";
+  revisionId: string;
   mapFeatureId: string;
   mapVersionId: string;
   sourceElementId: string;
@@ -138,7 +143,7 @@ export interface MapBuilding extends MapPoi {
 }
 
 export interface MapPointPoi extends MapPoi {
-  entityType: "place" | "facility" | "merchant";
+  entityType: "place" | "facility" | "merchant" | "transit_stop";
   mapFeatureId: null;
   mapVersionId: null;
   sourceElementId: null;

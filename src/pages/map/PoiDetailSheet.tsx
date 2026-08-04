@@ -63,6 +63,11 @@ export function PoiDetailSheet({
           && (facilityIds.has(target.targetId) || (building.entityType === "facility" && target.targetId === building.entityId)))
         || (target.targetType === "merchant_outlet"
           && building.entityType === "merchant"
+          && target.targetId === building.entityId)
+        // 站点停用、临时改点这类通知就是挂在 transit_stop 上的，站点自己成为
+        // 图钉之后，这条横幅得能落到它的详情里。
+        || (target.targetType === "transit_stop"
+          && building.entityType === "transit_stop"
           && target.targetId === building.entityId),
     ),
   ) ?? null;

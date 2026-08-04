@@ -10,11 +10,12 @@ import type { FilterKey, MapPoi } from "../../lib/types";
 import type { MapSearchStatus } from "./useMapPageState";
 
 function PlaceSquareIcon({ poi }: { poi: MapPoi }) {
+  // 设施与校车站点的图标都由 markerIconKey 决定（站点固定为 bus）。
   const Icon = poi.entityType === "building"
     ? Building2
     : poi.entityType === "merchant"
       ? Store
-      : poi.entityType === "facility"
+      : poi.entityType === "facility" || poi.entityType === "transit_stop"
         ? facilityIconByKey(poi.markerIconKey)
         : MapPin;
   return (

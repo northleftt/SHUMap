@@ -293,7 +293,7 @@ function location(value: unknown, field: string): ReleaseLocation {
   }
   return {
     id: requiredString(row.id, `${field}.id`),
-    entityType: oneOf(row.entityType, `${field}.entityType`, ["place", "facility", "merchant_outlet"] as const),
+    entityType: oneOf(row.entityType, `${field}.entityType`, ["place", "facility", "merchant_outlet", "transit_stop"] as const),
     entityId: requiredString(row.entityId, `${field}.entityId`),
     role,
     isPrimary: integerFlag(row.isPrimary, `${field}.isPrimary`),

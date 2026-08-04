@@ -8,6 +8,7 @@ import type {
   ReleaseManifest,
   ReleaseMerchant,
   ReleasePlace,
+  TransitStop,
 } from "../api/types";
 import type {
   CampusConfig,
@@ -229,6 +230,18 @@ function merchantDetail(merchant: MerchantSummary): PoiDetailData {
   };
 }
 
+/**
+ * 校车站点没有修订，也没有 content_json，能展示的就是站点代码与上/下车点说明。
+ * 时刻表照旧走实时接口（GET /api/public/transit/journeys），不冻进快照。
+ */
+function transitStopDetail(stop: TransitStop, location: ReleaseLocation): PoiDetailData {
+  const facts = [
+    stop.code ? { label: "站点代码", value: stop.code } : null,
+    location.location_hint ? { label: "上车位置", value: location.location_hint } : null,
+  ].filter((fact): fact is { label: string; value: string } => fact !== null);
+  return { summary: "", description: "", media: [], facts };
+}
+
 interface NavPoint {
   longitude: number;
   latitude: number;
@@ -326,10 +339,14 @@ function primaryPointLocations(manifest: ReleaseManifest): Map<string, ReleaseLo
     list.push(location);
     candidates.set(key, list);
   }
+  // 校车站点的锚点只有上车 / 下车两种角色（LocationEditor 里就是这么限定的），
+  // 上车点优先：站牌图钉指的是候车的地方。
   const rolePriority = new Map([
     ["primary_display", 0],
     ["service_position", 1],
+    ["boarding_point", 1],
     ["centroid", 2],
+    ["alighting_point", 2],
     ["main_entrance", 3],
     ["other", 4],
   ]);
@@ -775,6 +792,51 @@ export function buildMapPointPois(
       filterGroups: directFilterGroups(manifest, { merchant: true }),
       detail: merchantDetail(normalized),
       navigationUrls: nav ? navigationUrls(navPoint(nav, merchant.displayName)) : null,
+      facilities: [],
+      merchants: [],
+      facilityOperationalStatus: null,
+      visibility: DEFAULT_POINT_VISIBILITY,
+    });
+  }
+
+  // 校车站点：标过上/下车点就自己出图钉，不必再依附一个地点。
+  //
+  // 这里刻意不像上面三种那样「绑到楼宇就跳过」。地点/设施/商户绑楼宇意味着它在
+  // 楼内，已经由楼宇详情呈现；而站点绑地点只是借用照片与联系方式，候车位置本身
+  // 仍是楼外一个独立的点。管理员既然在校区图上标了它，就是要这个图钉。
+  for (const stop of manifest.transit.stops) {
+    const location = points.get(`transit_stop:${stop.id}`);
+    if (!location) continue;
+    const campus = campusOfPoint(
+      location,
+      stop.campus_id ?? campusInPlaceChain(stop.place_id, placeById, entityLocations, campusIdByMapVersion),
+      campusById,
+      campusByMapVersion,
+      `transit stop ${stop.id}`,
+    );
+    const nav = navigation.get(`transit_stop:${stop.id}`);
+    result.push({
+      id: `transit_stop:${stop.id}`,
+      poiKey: `transit_stop:${stop.id}`,
+      // 站点不走修订流，没有修订号；供稿据此判空。
+      revisionId: null,
+      entityType: "transit_stop",
+      entityId: stop.id,
+      mapFeatureId: null,
+      mapVersionId: null,
+      sourceElementId: null,
+      markerPoint: pointOf(location),
+      markerIconKey: "bus",
+      name: stop.name,
+      campusKey: campus.key,
+      campusLabel: campus.label,
+      kindId: "transit_stop",
+      kindName: "校车站点",
+      // 站点归「交通站点」筛选组：0011 里 map_filter_transit 的成员就是
+      // place_kind = transit_stop，与地点侧同一个 chip。
+      filterGroups: directFilterGroups(manifest, { placeKindId: "transit_stop" }),
+      detail: transitStopDetail(stop, location),
+      navigationUrls: nav ? navigationUrls(navPoint(nav, stop.name)) : null,
       facilities: [],
       merchants: [],
       facilityOperationalStatus: null,

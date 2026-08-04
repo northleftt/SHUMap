@@ -120,7 +120,7 @@ type ReleaseMap = Omit<MapCandidate, "assetByteSize" | "assetSha256" | "assetSta
 
 interface LocationCandidate {
   id: string;
-  entityType: "place" | "facility" | "merchant_outlet";
+  entityType: "place" | "facility" | "merchant_outlet" | "transit_stop";
   entityId: string;
   role: string;
   isPrimary: number;
@@ -364,6 +364,11 @@ const DEFAULT_MAP_VERSION_QUERY = `select mv.*,ma.checksum,me.object_key as asse
                order by mv2.created_at desc,mv2.id desc limit 1)`;
 const MAX_RELEASE_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const MAX_MAP_ASSET_BYTES = 50 * 1024 * 1024;
+/**
+ * 校区图坐标系。客户端的 buildMapPointPois 只把这个坐标系、且不挂楼层的点渲染成
+ * 图钉，所以发布校验要按同一条件判断「这条位置会不会上图」。
+ */
+const CANVAS_CRS = "svg_viewbox";
 
 export class ReleaseCoordinator {
   constructor(private readonly state: DurableObjectState, private readonly env: Env) {}
@@ -526,6 +531,7 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
     place: new Set(places.map((row) => row.id)),
     facility: new Set(facilities.map((row) => row.id)),
     merchant_outlet: new Set(merchants.map((row) => row.id)),
+    transit_stop: new Set(stops.map((row) => row.id)),
   };
   const allLocations = await all<LocationCandidate>(
     env.DB,
@@ -536,10 +542,13 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
       where el.valid_to is null and (la.valid_to is null or la.valid_to>?)`,
     [isoNow()],
   );
+  // 站点锚点也进快照：站点由此能独立出图钉，不必再依附一个地点。绑定表里还有
+  // operational_event / campaign 两种实体，它们的位置走实时接口，继续挡在外面。
   const locations = allLocations.filter((location) => {
     if (location.entityType === "place") return candidateIds.place.has(location.entityId);
     if (location.entityType === "facility") return candidateIds.facility.has(location.entityId);
     if (location.entityType === "merchant_outlet") return candidateIds.merchant_outlet.has(location.entityId);
+    if (location.entityType === "transit_stop") return candidateIds.transit_stop.has(location.entityId);
     return false;
   });
 
@@ -734,9 +743,28 @@ function validateCandidate(
     if (count !== 1) errors.push(`Floor ${floorId} must have exactly one map version in this release`);
   }
   const placeIds = new Set(candidate.places.map((place) => place.id));
+  const placeCampusById = new Map(candidate.places.map((place) => [place.id, place.campusId]));
   for (const stop of candidate.manifest.transit.stops) {
     if (stop.place_id && !placeIds.has(stop.place_id)) {
       errors.push(`Transit stop ${stop.id} refers to an unpublished place`);
+    }
+    // 站点标了校区级点位就会在客户端出图钉，而 buildMapPointPois 解析不出校区时
+    // 直接抛 —— 那会让整张地图打不开。发布时先拦下来，别把它带到线上。
+    const pin = candidate.locations.find((location) =>
+      location.entityType === "transit_stop"
+      && location.entityId === stop.id
+      && location.geometry_type === "Point"
+      && location.crs === CANVAS_CRS
+      && location.floor_id === null
+      && location.indoor_space_id === null);
+    if (!pin) continue;
+    const campusId = pin.campus_id
+      ?? stop.campus_id
+      ?? (stop.place_id ? placeCampusById.get(stop.place_id) ?? null : null);
+    if (!campusId) {
+      errors.push(`Transit stop ${stop.id} has a campus map pin but no campus to place it on`);
+    } else if (!campusMapCount.has(campusId)) {
+      errors.push(`Transit stop ${stop.id} pin needs campus ${campusId} to have a campus map in this release`);
     }
   }
   for (const filter of candidate.mapFilters) {

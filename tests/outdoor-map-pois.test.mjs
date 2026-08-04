@@ -142,6 +142,22 @@ function manifest() {
       location("merchant_outlet", "merchant_free", "point_merchant_free", { geometry_json: '{"type":"Point","coordinates":[35,50]}' }),
       location("merchant_outlet", "merchant_bound", "point_merchant_bound", { building_place_id: "building_1" }),
     ],
+    // 站点默认留空，让上面三类的断言不受影响；站点自己的行为在下面单独建。
+    transit: { stops: [] },
+  };
+}
+
+function stop(overrides = {}) {
+  return {
+    id: "stop_gate",
+    place_id: null,
+    campus_id: "campus_1",
+    code: "N1",
+    name: "北门站",
+    status: "active",
+    created_at: "2026-08-01T00:00:00.000Z",
+    updated_at: "2026-08-01T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -288,4 +304,117 @@ test("floor ownership and a host place anchor both count as building bindings", 
   const pois = buildMapPointPois(value, [campus]);
   assert.equal(pois.some((poi) => poi.poiKey === "facility:facility_free"), false);
   assert.equal(pois.some((poi) => poi.poiKey === "merchant:merchant_free"), false);
+});
+
+test("a shuttle stop with its own anchor becomes an independent pin", () => {
+  const value = manifest();
+  value.transit.stops.push(stop());
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+    location_hint: "北门东侧",
+  }));
+
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.ok(poi, "站点标了上车点就应该出图钉");
+  assert.deepEqual(poi.markerPoint, { x: 60, y: 70 });
+  assert.equal(poi.entityType, "transit_stop");
+  assert.equal(poi.markerIconKey, "bus");
+  assert.equal(poi.name, "北门站");
+  assert.equal(poi.campusKey, "baoshan");
+  // 站点不走修订流，没有修订号；供稿页据此判空。
+  assert.equal(poi.revisionId, null);
+  assert.deepEqual(poi.detail.facts, [
+    { label: "站点代码", value: "N1" },
+    { label: "上车位置", value: "北门东侧" },
+  ]);
+});
+
+test("a stop without a marked anchor produces no pin", () => {
+  const value = manifest();
+  value.transit.stops.push(stop());
+
+  const pois = buildMapPointPois(value, [campus]);
+  assert.equal(pois.some((poi) => poi.entityType === "transit_stop"), false);
+});
+
+test("a stop bound to a building place still gets its own pin", () => {
+  // 站点绑地点只是借照片与联系方式，候车位置本身仍在楼外。这一点与地点/设施/商户
+  // 相反：那三类绑到楼宇就该收进楼宇详情，站点不该。
+  const value = manifest();
+  value.transit.stops.push(stop({ place_id: "building_1" }));
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.ok(poi, "绑了楼宇的站点也要有自己的图钉");
+  assert.deepEqual(poi.markerPoint, { x: 60, y: 70 });
+});
+
+test("a stop inherits its campus from the bound place when the row carries none", () => {
+  const value = manifest();
+  value.transit.stops.push(stop({ campus_id: null, place_id: "place_free" }));
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    campus_id: null,
+    map_version_id: null,
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.ok(poi);
+  assert.equal(poi.campusKey, "baoshan");
+});
+
+test("a stop with no resolvable campus fails the projection instead of drifting", () => {
+  const value = manifest();
+  value.transit.stops.push(stop({ campus_id: null, place_id: null }));
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    campus_id: null,
+    map_version_id: null,
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+
+  assert.throws(
+    () => buildMapPointPois(value, [campus]),
+    /transit stop stop_gate point .* does not identify a released campus map/,
+  );
+});
+
+test("the boarding point wins over the alighting point for the stop pin", () => {
+  const value = manifest();
+  value.transit.stops.push(stop());
+  // 先放下车点，让顺序不会替断言把活干了。
+  value.locations.push(location("transit_stop", "stop_gate", "anchor_alight", {
+    role: "alighting_point",
+    isPrimary: 0,
+    geometry_json: '{"type":"Point","coordinates":[10,10]}',
+  }));
+  value.locations.push(location("transit_stop", "stop_gate", "anchor_board", {
+    role: "boarding_point",
+    isPrimary: 0,
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.deepEqual(poi.markerPoint, { x: 60, y: 70 }, "站牌图钉指候车的地方");
+});
+
+test("stops join the same transit filter chip as transit_stop places", () => {
+  const value = manifest();
+  value.mapFilters.push({
+    id: "filter_transit", key: "transit", label: "交通", sortOrder: 4,
+    placeKindIds: ["transit_stop"], facilityTypeIds: [], includesMerchants: false,
+  });
+  value.transit.stops.push(stop());
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.deepEqual(poi.filterGroups, ["transit"]);
 });

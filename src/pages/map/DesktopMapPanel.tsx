@@ -77,11 +77,12 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
           <EmptyState title="没有匹配的地点" subtitle="换个关键词或筛选条件试试" />
         ) : (
           list.map((building) => {
+            // 设施与校车站点的图标都由 markerIconKey 决定（站点固定为 bus）。
             const Icon = building.entityType === "building"
               ? Building2
               : building.entityType === "merchant"
                 ? Store
-                : building.entityType === "facility"
+                : building.entityType === "facility" || building.entityType === "transit_stop"
                   ? facilityIconByKey(building.markerIconKey)
                   : MapPin;
             return (
