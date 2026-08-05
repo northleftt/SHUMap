@@ -5,6 +5,7 @@ import { FloorPlanCanvas, type FloorPlanAnchor } from "../../components/map/Floo
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { ImagePreview } from "../../components/ui/ImagePreview";
 import type { PublicPlaceFacility, PublicPlaceFloor, ReleaseManifest } from "../../lib/api/types";
 import { facilityDotColor, facilityIcon } from "../../lib/facilityIcons";
 import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
@@ -21,7 +22,7 @@ function locationDescription(facility: PublicPlaceFacility): string {
   return value.trim();
 }
 
-function facilityMedia(facility: PublicPlaceFacility): string[] {
+function facilityMedia(facility: PublicPlaceFacility): Array<{ url: string; alt: string }> {
   const value = facility.content.media;
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw new Error(`Facility ${facility.id} content.media must be an array`);
@@ -33,7 +34,11 @@ function facilityMedia(facility: PublicPlaceFacility): string[] {
     if (typeof url !== "string" || !url.trim()) {
       throw new Error(`Facility ${facility.id} content.media[${index}].url must be a non-empty string`);
     }
-    return url;
+    const alt = (raw as Record<string, unknown>).alt;
+    if (alt !== undefined && typeof alt !== "string") {
+      throw new Error(`Facility ${facility.id} content.media[${index}].alt must be a string`);
+    }
+    return { url, alt: typeof alt === "string" ? alt.trim() : "" };
   });
 }
 
@@ -223,6 +228,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
   const selectedFacilityStatusLabel = selectedFacility && facilityStatus.status === "ready"
     ? facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, selectedFacility.id))
     : null;
+  const selectedFacilityPhoto = selectedFacility ? facilityMedia(selectedFacility)[0] : null;
 
   function switchFloor(floorId: string) {
     setActiveFloorId(floorId);
@@ -314,9 +320,10 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           {effectiveMode === "list" && floorPhotos.length > 0 ? (
             <div className="scrollbar-hidden mt-3 flex gap-2 overflow-x-auto px-4">
               {floorPhotos.map((url, index) => (
-                <img
+                <ImagePreview
                   alt={`${selectedFloor ? floorLabel(selectedFloor) : ""} 实拍图 ${index + 1}`}
-                  className="h-28 w-40 shrink-0 rounded-xl object-cover"
+                  buttonClassName="h-28 w-40 shrink-0 rounded-xl"
+                  imageClassName="h-full w-full object-cover"
                   key={url}
                   loading={index === 0 ? "eager" : "lazy"}
                   src={url}
@@ -361,7 +368,14 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
               {/* 点徽章弹小卡 */}
               {selectedFacility ? (
                 <div className="absolute bottom-3 left-3 right-16 rounded-2xl bg-surface px-4 py-3 shadow-card">
-                  {facilityMedia(selectedFacility)[0] ? <img alt={selectedFacility.displayName || selectedFacility.typeName} className="mb-2 h-24 w-full rounded-xl object-cover" src={facilityMedia(selectedFacility)[0]} /> : null}
+                  {selectedFacilityPhoto ? (
+                    <ImagePreview
+                      alt={selectedFacilityPhoto.alt || selectedFacility.displayName || selectedFacility.typeName}
+                      buttonClassName="mb-2 h-24 w-full rounded-xl"
+                      imageClassName="h-full w-full object-cover"
+                      src={selectedFacilityPhoto.url}
+                    />
+                  ) : null}
                   <div className="flex items-center gap-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-container text-primary">
                       {SelectedIcon ? <SelectedIcon size={16} /> : null}
@@ -399,6 +413,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                 />
               ) : (
                 visibleFacilities.map((facility, index) => {
+                  const facilityPhoto = facilityMedia(facility)[0] ?? null;
                   const statusLabel = facilityStatus.status === "ready"
                     ? facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, facility.id))
                     : null;
@@ -413,7 +428,14 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                         className="h-2.5 w-2.5 shrink-0 rounded-full"
                         style={{ backgroundColor: facilityDotColor(index) }}
                       />
-                      {facilityMedia(facility)[0] ? <img alt="" className="h-10 w-14 shrink-0 rounded-lg object-cover" src={facilityMedia(facility)[0]} /> : null}
+                      {facilityPhoto ? (
+                        <ImagePreview
+                          alt={facilityPhoto.alt || facility.displayName || facility.typeName}
+                          buttonClassName="h-10 w-14 shrink-0 rounded-lg"
+                          imageClassName="h-full w-full object-cover"
+                          src={facilityPhoto.url}
+                        />
+                      ) : null}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate text-body font-semibold text-ink">

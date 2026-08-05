@@ -7,6 +7,7 @@ export const TAB_BAR_HEIGHT = 64;
 export function BottomTabBar() {
   return (
     <nav
+      data-bottom-tab-bar
       className="safe-bottom-padding absolute inset-x-0 bottom-0 z-40 border-t border-line bg-surface/96 backdrop-blur-xl"
       style={{ height: `calc(${TAB_BAR_HEIGHT}px + env(safe-area-inset-bottom))` }}
     >

@@ -785,7 +785,7 @@ export function MapCanvas({
         }`}
       >
         <button
-          aria-label="放大地图"
+          aria-label="地图放大"
           className="grid h-12 w-11 place-items-center text-sub transition-colors hover:bg-page"
           onClick={() => handleZoomButtonClick(ZOOM_BUTTON_SCALE_FACTOR)}
           type="button"
@@ -794,7 +794,7 @@ export function MapCanvas({
         </button>
         <div className="mx-2 h-px bg-line" />
         <button
-          aria-label="缩小地图"
+          aria-label="地图缩小"
           className="grid h-12 w-11 place-items-center text-sub transition-colors hover:bg-page"
           onClick={() => handleZoomButtonClick(1 / ZOOM_BUTTON_SCALE_FACTOR)}
           type="button"

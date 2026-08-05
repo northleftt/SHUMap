@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import * as admin from "../lib/api/admin";
+import { subscribeAdminDataChanged } from "../lib/api/client";
 import { useAuth } from "./AuthContext";
 
 // ---------------------------------------------------------------------------
@@ -30,6 +31,8 @@ export function PendingReleaseProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<admin.PendingReleaseChanges | null>(null);
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((value) => value + 1), []);
+
+  useEffect(() => subscribeAdminDataChanged(reload), [reload]);
 
   useEffect(() => {
     if (!canPublish) {

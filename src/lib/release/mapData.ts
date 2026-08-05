@@ -127,12 +127,16 @@ function detailOf(place: ReleasePlace): PoiDetailData {
     if (row.caption !== undefined && typeof row.caption !== "string") {
       throw contractError(`place ${place.id} detail.media[${index}].caption must be a string`);
     }
+    if (row.floorLevelCode !== undefined && typeof row.floorLevelCode !== "string") {
+      throw contractError(`place ${place.id} detail.media[${index}].floorLevelCode must be a string`);
+    }
     return {
       ...(row.id === undefined ? {} : { id: row.id }),
       role,
       url: row.url,
       ...(row.alt === undefined ? {} : { alt: row.alt }),
       ...(row.caption === undefined ? {} : { caption: row.caption }),
+      ...(row.floorLevelCode === undefined ? {} : { floorLevelCode: row.floorLevelCode }),
     };
   });
   if (!Array.isArray(detail.facts)) {
@@ -185,12 +189,14 @@ function mediaOf(value: unknown, field: string): PoiDetailData["media"] {
     const id = optionalText(row.id, `${field}[${index}].id`);
     const alt = optionalText(row.alt, `${field}[${index}].alt`);
     const caption = optionalText(row.caption, `${field}[${index}].caption`);
+    const floorLevelCode = optionalText(row.floorLevelCode, `${field}[${index}].floorLevelCode`);
     return {
       ...(id ? { id } : {}),
       role: row.role,
       url,
       ...(alt ? { alt } : {}),
       ...(caption ? { caption } : {}),
+      ...(floorLevelCode ? { floorLevelCode } : {}),
     };
   });
 }

@@ -4,7 +4,7 @@ import type { FilterKey } from "../../lib/types";
 
 /**
  * 图层浮卡（M8 扩展）：事件叠加开关 + 类别高亮。
- * 类别高亮与搜索抽屉的快速筛选共享 activeFilter——搜索里点 = 过滤列表+高亮，
+ * 类别高亮与搜索抽屉的快速筛选共享选中标签——搜索里点 = 过滤列表+高亮，
  * 这里点 = 只高亮，不弹抽屉。
  */
 export function LayerPanel({
@@ -14,7 +14,7 @@ export function LayerPanel({
   onRetryEvents,
   eventsOn,
   onToggleEvents,
-  activeFilter,
+  activeFilters,
   filters,
   onToggleFilter,
 }: {
@@ -24,7 +24,7 @@ export function LayerPanel({
   onRetryEvents: () => void;
   eventsOn: boolean;
   onToggleEvents: () => void;
-  activeFilter: FilterKey | null;
+  activeFilters: FilterKey[];
   filters: Array<{ key: FilterKey; label: string }>;
   onToggleFilter: (key: FilterKey) => void;
 }) {
@@ -66,7 +66,7 @@ export function LayerPanel({
           <p className="mt-3.5 text-label text-sub">高亮类别</p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {filters.map((filter) => (
-              <Chip key={filter.key} active={activeFilter === filter.key} onClick={() => onToggleFilter(filter.key)}>
+              <Chip key={filter.key} active={activeFilters.includes(filter.key)} onClick={() => onToggleFilter(filter.key)}>
                 {filter.label}
               </Chip>
             ))}

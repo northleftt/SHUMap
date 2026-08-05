@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError } from "../../lib/api/client";
+import { ApiError, subscribeAdminDataChanged } from "../../lib/api/client";
 
 // ---------------------------------------------------------------------------
 // 管理后台共享原语（v2 设计令牌版）。色调规范与移动端一致：
@@ -352,6 +352,7 @@ export function useAsyncData<T>(loader: (signal: AbortSignal) => Promise<T>, dep
   const [state, setState] = useState<AsyncDataState<T>>({ status: "loading" });
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
+  useEffect(() => subscribeAdminDataChanged(reload), [reload]);
   useEffect(() => {
     const controller = new AbortController();
     setState({ status: "loading" });

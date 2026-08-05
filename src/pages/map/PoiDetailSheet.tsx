@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { FacilityStatusResponse, OperationalEvent } from "../../lib/api/types";
 import { IconBadge } from "../../components/ui/IconBadge";
+import { ImagePreview } from "../../components/ui/ImagePreview";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SeverityBanner, severityOf } from "../../components/ui/SeverityBanner";
 import { facilityIcon } from "../../lib/facilityIcons";
@@ -74,7 +75,7 @@ export function PoiDetailSheet({
   const bannerEvent = activeEvents?.[0] ?? null;
 
   const facts = building.detail.facts;
-  const media = building.detail.media.filter((item) => item.url.trim());
+  const media = building.detail.media.filter((item) => item.url.trim() && !item.floorLevelCode);
   const independentFacilityStatus = building.entityType === "facility" && facilityStatus.status === "ready"
     ? resolveFacilityStatus(facilityStatus.statuses, building.entityId)
     : building.facilityOperationalStatus;
@@ -302,9 +303,10 @@ function PhotoCarousel({
         ref={trackRef}
       >
         {usable.map((item, index) => (
-          <img
+          <ImagePreview
             alt={item.alt?.trim() || `${alt} 实拍图 ${index + 1}`}
-            className="h-44 w-full shrink-0 snap-start rounded-xl object-cover"
+            buttonClassName="h-44 w-full shrink-0 snap-start rounded-xl"
+            imageClassName="h-full w-full object-cover"
             key={item.url}
             loading={index === 0 ? "eager" : "lazy"}
             onError={() => setBroken((cur) => new Set(cur).add(item.url))}

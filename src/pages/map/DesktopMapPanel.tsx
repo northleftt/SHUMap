@@ -38,7 +38,7 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
             {filters.map((filter) => (
               <Chip
                 key={filter.key}
-                active={state.activeFilter === filter.key}
+                active={state.activeFilters.includes(filter.key)}
                 onClick={() => state.handleFilterToggle(filter.key)}
               >
                 {filter.label}

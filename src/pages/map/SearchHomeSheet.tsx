@@ -1,4 +1,4 @@
-import { Building2, CircleAlert, MapPin, SearchX, Store } from "lucide-react";
+import { Building2, CircleAlert, MapPin, RotateCcw, SearchX, Store } from "lucide-react";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
@@ -28,7 +28,7 @@ function PlaceSquareIcon({ poi }: { poi: MapPoi }) {
 /** M1 搜索抽屉内容：搜索框 + 标签筛选 + 最近查看 / 搜索结果列表。 */
 export function SearchHomeSheet({
   query,
-  activeFilter,
+  activeFilters,
   searchActive,
   searchStatus,
   searchError,
@@ -40,10 +40,12 @@ export function SearchHomeSheet({
   onClearQuery,
   onRetrySearch,
   onFilterToggle,
+  onClearFilters,
+  onOpenAllFilters,
   onResultClick,
 }: {
   query: string;
-  activeFilter: FilterKey | null;
+  activeFilters: FilterKey[];
   searchActive: boolean;
   searchStatus: MapSearchStatus;
   searchError: string;
@@ -55,6 +57,8 @@ export function SearchHomeSheet({
   onClearQuery: () => void;
   onRetrySearch: () => void;
   onFilterToggle: (key: FilterKey) => void;
+  onClearFilters: () => void;
+  onOpenAllFilters: () => void;
   onResultClick: (poiKey: string) => void;
 }) {
   const { recents } = useRecents();
@@ -62,6 +66,10 @@ export function SearchHomeSheet({
     .map((view) => pois.find((poi) => poi.poiKey === view.placeId))
     .filter((poi): poi is MapPoi => Boolean(poi))
     .slice(0, 6);
+  const resetSearch = () => {
+    onClearQuery();
+    onClearFilters();
+  };
 
   return (
     <div className="flex h-full flex-col gap-3 px-4 pt-1 pb-3">
@@ -72,16 +80,22 @@ export function SearchHomeSheet({
           <SectionHeader
             title="标签筛选"
             action={
-              activeFilter ? (
-                <button type="button" className="text-primary" onClick={() => onFilterToggle(activeFilter)}>
+              <div className="flex items-center gap-3">
+                {activeFilters.length > 0 ? (
+                  <button type="button" className="flex items-center gap-1 text-sub" onClick={onClearFilters}>
+                    <RotateCcw size={13} />
+                    重置
+                  </button>
+                ) : null}
+                <button type="button" className="text-primary" onClick={onOpenAllFilters}>
                   全部 ›
                 </button>
-              ) : null
+              </div>
             }
           />
           <ChipRow className="mt-2.5">
             {filters.map((filter) => (
-              <Chip key={filter.key} active={activeFilter === filter.key} onClick={() => onFilterToggle(filter.key)}>
+              <Chip key={filter.key} active={activeFilters.includes(filter.key)} onClick={() => onFilterToggle(filter.key)}>
                 {filter.label}
               </Chip>
             ))}
@@ -109,7 +123,7 @@ export function SearchHomeSheet({
               icon={<SearchX size={24} />}
               title="没有相关搜索结果"
               action={
-                <button type="button" className="rounded-full bg-primary-container px-4 py-2 text-body text-primary" onClick={onClearQuery}>
+                <button type="button" className="rounded-full bg-primary-container px-4 py-2 text-body text-primary" onClick={resetSearch}>
                   清空搜索条件
                 </button>
               }

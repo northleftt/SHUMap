@@ -23,10 +23,11 @@ export function poiKeyForSearchResult(
 
 function filterMapPois(
   pois: MapPoi[],
-  activeFilter: FilterKey | null,
+  activeFilters: readonly FilterKey[],
   searchOrder: string[] | null,
 ): MapPoi[] {
-  const matchesFilter = (poi: MapPoi) => activeFilter ? poi.filterGroups.includes(activeFilter) : true;
+  const matchesFilter = (poi: MapPoi) =>
+    activeFilters.length === 0 || activeFilters.some((filter) => poi.filterGroups.includes(filter));
   if (searchOrder === null) return pois.filter(matchesFilter);
   const byKey = new Map(pois.map((poi) => [poi.poiKey, poi]));
   return searchOrder.flatMap((id) => {
@@ -39,14 +40,14 @@ export function shouldRenderPointPoi({
   poi,
   selectedPoiKey,
   queryActive,
-  activeFilter,
+  activeFilters,
   matched,
   facilityStatus,
 }: {
   poi: MapPoi;
   selectedPoiKey: string | null;
   queryActive: boolean;
-  activeFilter: FilterKey | null;
+  activeFilters: readonly FilterKey[];
   matched: boolean;
   facilityStatus: FacilityStatusState;
 }): boolean {
@@ -56,8 +57,11 @@ export function shouldRenderPointPoi({
     : poi.facilityOperationalStatus;
   if (operationalStatus === "unavailable" && !poi.visibility.whenUnavailable) return false;
   if (poi.poiKey === selectedPoiKey) return true;
+  if (queryActive && activeFilters.length > 0) {
+    return poi.visibility.searchable && poi.visibility.search && poi.visibility.filterable && poi.visibility.filter && matched;
+  }
   if (queryActive) return poi.visibility.searchable && poi.visibility.search && matched;
-  if (activeFilter) return poi.visibility.filterable && poi.visibility.filter && matched;
+  if (activeFilters.length > 0) return poi.visibility.filterable && poi.visibility.filter && matched;
   return poi.visibility.default;
 }
 
@@ -69,7 +73,7 @@ export function useMapPageState() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedCampus, setSelectedCampus] = useState<CampusKey | null>(null);
   const [query, setQuery] = useState("");
-  const [activeFilter, setActiveFilter] = useState<FilterKey | null>(null);
+  const [activeFilters, setActiveFilters] = useState<FilterKey[]>([]);
   const [sheetMode, setSheetMode] = useState<MapSheetMode>("home");
   const [previousSheetMode, setPreviousSheetMode] = useState<Exclude<MapSheetMode, "poi">>("home");
   const [selectedPoiKey, setSelectedPoiKey] = useState<string | null>(null);
@@ -165,10 +169,10 @@ export function useMapPageState() {
 
   const filteredResults = useMemo(() => {
     if (!campusPois) return null;
-    return filterMapPois(campusPois, activeFilter, searchOrder).filter((poi) =>
-      !activeFilter || poi.entityType !== "facility" || poi.visibility.filterable,
+    return filterMapPois(campusPois, activeFilters, searchOrder).filter((poi) =>
+      activeFilters.length === 0 || poi.entityType !== "facility" || poi.visibility.filterable,
     );
-  }, [activeFilter, campusPois, searchOrder]);
+  }, [activeFilters, campusPois, searchOrder]);
 
   const selectedPoi = selectedPoiKey ? poiByKey.get(selectedPoiKey) ?? null : null;
 
@@ -217,7 +221,7 @@ export function useMapPageState() {
     setSearchError("");
     setSelectedPoiKey(null);
     setSelectedMerchantId(null);
-    setSheetMode(next.trim() ? "results" : "home");
+    setSheetMode(next.trim() || activeFilters.length > 0 ? "results" : "home");
   };
 
   const handleQueryFocus = () => setSheetMode("results");
@@ -228,7 +232,7 @@ export function useMapPageState() {
     setMerchantHitByPlace({});
     setSearchStatus("idle");
     setSearchError("");
-    setSheetMode("home");
+    setSheetMode(activeFilters.length > 0 ? "results" : "home");
   };
 
   const retrySearch = () => {
@@ -241,15 +245,24 @@ export function useMapPageState() {
   };
 
   const handleFilterToggle = (filterKey: FilterKey) => {
-    const next = activeFilter === filterKey ? null : filterKey;
-    setActiveFilter(next);
-    if (next || query.trim()) setSheetMode("results");
-    else setSheetMode("home");
+    setActiveFilters((current) => {
+      const next = current.includes(filterKey)
+        ? current.filter((filter) => filter !== filterKey)
+        : [...current, filterKey];
+      setSheetMode(next.length > 0 || query.trim() ? "results" : "home");
+      return next;
+    });
   };
 
-  // 图层浮卡入口：只切地图高亮，不动搜索抽屉（与搜索 chips 共享 activeFilter）
   const handleFilterHighlight = (filterKey: FilterKey) => {
-    setActiveFilter((cur) => (cur === filterKey ? null : filterKey));
+    setActiveFilters((current) => current.includes(filterKey)
+      ? current.filter((filter) => filter !== filterKey)
+      : [...current, filterKey]);
+  };
+
+  const clearFilters = () => {
+    setActiveFilters([]);
+    setSheetMode(query.trim() ? "results" : "home");
   };
 
   const resetForCampus = (nextCampus: CampusKey) => {
@@ -259,7 +272,7 @@ export function useMapPageState() {
     setMerchantHitByPlace({});
     setSearchStatus("idle");
     setSearchError("");
-    setActiveFilter(null);
+    setActiveFilters([]);
     setSelectedPoiKey(null);
     setSelectedMerchantId(null);
     setSheetMode("home");
@@ -286,7 +299,7 @@ export function useMapPageState() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pois, poiByKey, searchParams, setSearchParams]);
 
-  const searchActive = Boolean(query.trim()) || Boolean(activeFilter);
+  const searchActive = Boolean(query.trim()) || activeFilters.length > 0;
 
   const matchedFeatureIds = useMemo(() => {
     if (!filteredResults || sheetMode === "poi" || !searchActive) return [];
@@ -300,15 +313,15 @@ export function useMapPageState() {
       poi,
       selectedPoiKey: selectedPoi?.poiKey ?? null,
       queryActive: Boolean(query.trim()),
-      activeFilter,
+      activeFilters,
       matched: matched.has(poi.poiKey),
       facilityStatus,
     }));
-  }, [activeFilter, campusPois, facilityStatus, filteredResults, query, selectedPoi?.poiKey]);
+  }, [activeFilters, campusPois, facilityStatus, filteredResults, query, selectedPoi?.poiKey]);
 
   const sharedState = {
     query,
-    activeFilter,
+    activeFilters,
     sheetMode,
     setSheetMode,
     selectedPoi,
@@ -328,6 +341,7 @@ export function useMapPageState() {
     retrySearch,
     handleFilterToggle,
     handleFilterHighlight,
+    clearFilters,
     resetForCampus,
   };
 

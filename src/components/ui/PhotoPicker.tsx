@@ -1,6 +1,7 @@
 import { Camera, Plus, RotateCcw, X } from "lucide-react";
 import { useRef } from "react";
 import type { PhotoUpload } from "../../lib/photos/usePhotoUploads";
+import { ImagePreview } from "./ImagePreview";
 
 /**
  * 照片槽位：真实 file input + 缩略图预览 + 删除 / 重试。
@@ -32,7 +33,12 @@ export function PhotoPicker({
     <div className="flex flex-wrap gap-3">
       {photos.map((photo) => (
         <div key={photo.key} className={`relative ${box} overflow-hidden rounded-2xl bg-line/70`}>
-          <img alt="已选照片" className="h-full w-full object-cover" src={photo.previewUrl} />
+          <ImagePreview
+            alt="已选照片"
+            buttonClassName="h-full w-full"
+            imageClassName="h-full w-full object-cover"
+            src={photo.previewUrl}
+          />
           {photo.status !== "done" ? (
             <div className="absolute inset-0 grid place-items-center bg-black/45 text-center text-[11px] leading-tight text-white">
               {photo.status === "uploading" ? (

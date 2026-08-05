@@ -63,11 +63,13 @@ function media(merchantId: string, value: unknown): MerchantSummary["media"] {
     if (!url) throw contractError(merchantId, `content.media[${index}].url`, "must be non-empty");
     const alt = optionalString(merchantId, `content.media[${index}].alt`, item.alt);
     const caption = optionalString(merchantId, `content.media[${index}].caption`, item.caption);
+    const floorLevelCode = optionalString(merchantId, `content.media[${index}].floorLevelCode`, item.floorLevelCode);
     return {
       role: item.role,
       url,
       ...(alt ? { alt } : {}),
       ...(caption ? { caption } : {}),
+      ...(floorLevelCode ? { floorLevelCode } : {}),
     };
   });
 }

@@ -48,6 +48,29 @@ interface RequestOptions {
   headers?: Record<string, string>;
 }
 
+const ADMIN_DATA_CHANGED_EVENT = "shumap:admin-data-changed";
+let pendingAdminChange = false;
+const ADMIN_REFRESH_EXCLUSIONS = [
+  /^\/api\/admin\/media(?:\/|$)/,
+  /^\/api\/admin\/maps\/upload-intents(?:\/|$)/,
+  /^\/api\/admin\/maps\/import-jobs(?:\/|$)/,
+];
+
+export function notifyAdminDataChanged(): void {
+  if (typeof window === "undefined" || pendingAdminChange) return;
+  pendingAdminChange = true;
+  window.setTimeout(() => {
+    pendingAdminChange = false;
+    window.dispatchEvent(new Event(ADMIN_DATA_CHANGED_EVENT));
+  }, 0);
+}
+
+export function subscribeAdminDataChanged(listener: () => void): () => void {
+  if (typeof window === "undefined") return () => undefined;
+  window.addEventListener(ADMIN_DATA_CHANGED_EVENT, listener);
+  return () => window.removeEventListener(ADMIN_DATA_CHANGED_EVENT, listener);
+}
+
 function buildUrl(path: string, query?: RequestOptions["query"]): string {
   if (!query) return path;
   const params = new URLSearchParams();
@@ -104,8 +127,18 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   if (!response.ok) throw await toApiError(response);
 
-  if (response.status === 204) return undefined as T;
+  const method = (options.method ?? "GET").toUpperCase();
+  const shouldNotifyAdminChange = path.startsWith("/api/admin/")
+    && method !== "GET"
+    && method !== "HEAD"
+    && !ADMIN_REFRESH_EXCLUSIONS.some((pattern) => pattern.test(path));
+
+  if (response.status === 204) {
+    if (shouldNotifyAdminChange) notifyAdminDataChanged();
+    return undefined as T;
+  }
   const text = await response.text();
-  if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  const result = text ? JSON.parse(text) as T : undefined as T;
+  if (shouldNotifyAdminChange) notifyAdminDataChanged();
+  return result;
 }

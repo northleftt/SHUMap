@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { subscribeAdminDataChanged } from "../api/client";
 
 export type AsyncState<T> =
   | { status: "loading" }
@@ -10,6 +11,7 @@ export function useAsyncData<T>(loader: (signal: AbortSignal) => Promise<T>, dep
   const [state, setState] = useState<AsyncState<T>>({ status: "loading" });
   const [nonce, setNonce] = useState(0);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
+  useEffect(() => subscribeAdminDataChanged(reload), [reload]);
   useEffect(() => {
     const controller = new AbortController();
     setState({ status: "loading" });

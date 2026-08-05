@@ -1,6 +1,6 @@
 import { MapPin, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import {
   arrayValue,
@@ -116,6 +116,9 @@ export function FacilityEditorPage() {
   const { id = "" } = useParams();
   const isNew = id === "new";
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialBuildingPlaceId = isNew ? searchParams.get("buildingPlaceId") ?? "" : "";
+  const initialFloorId = isNew ? searchParams.get("floorId") ?? "" : "";
 
   const { state } = useAsyncData(async (signal) => {
     const [ref, spaces, places, detail, maps] = await Promise.all([
@@ -154,7 +157,15 @@ export function FacilityEditorPage() {
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>([]);
 
   useEffect(() => {
-    if (state.status !== "ready" || isNew) return;
+    if (state.status !== "ready") return;
+    if (isNew) {
+      const floor = state.data.spaces.floors.find((candidate) => candidate.id === initialFloorId);
+      if (initialFloorId && floor && floor.buildingPlaceId === initialBuildingPlaceId) {
+        setHostPlaceId(initialBuildingPlaceId);
+        setFloorId(initialFloorId);
+      }
+      return;
+    }
     const editor = state.data!.editor;
     if (!editor) throw new Error("Facility detail is missing");
     setName(editor.displayName);
@@ -172,7 +183,7 @@ export function FacilityEditorPage() {
     setNote(editor.note);
     setSourceId(editor.sourceId);
     setLocationDrafts(editor.locations);
-  }, [state, id, isNew]);
+  }, [state, id, initialBuildingPlaceId, initialFloorId, isNew]);
 
   if (state.status === "loading") return <LoadingState label="加载设施…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;

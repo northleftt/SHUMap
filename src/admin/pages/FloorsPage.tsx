@@ -21,19 +21,6 @@ import {
   useAsyncData,
 } from "../components/primitives";
 
-// ---------------------------------------------------------------------------
-// 楼层与楼层平面图管理。
-//
-// 与设施 / 商户的关系是**同一份数据的两个视角**，不是两份需要对齐的副本：
-// 设施与商户各自记着 floor_id，这里按 floor_id 反查出来。所以在设施编辑器里改了
-// 楼层归属，这一页刷新即变；反过来这里上传的平面图一旦就绪，设施编辑器的「服务
-// 位置」面板立刻能在图上点选落点（它按 floorId + svg_viewbox + ready/published 找图）。
-//
-// 因此这一页不提供「把设施挪到别层」的按钮——那属于设施的内容修订，要走审核流。
-// 这里只做楼层自身（增 / 改名 / 可见性 / 删）与楼层图（上传 / 就绪 / 归档），
-// 并把该层的内容列成清单 + 直达编辑器的入口。
-// ---------------------------------------------------------------------------
-
 const PLAN_STATUS_META: Record<string, { label: string; tone: "ok" | "info" | "warning" | "neutral" }> = {
   published: { label: "已发布", tone: "ok" },
   ready: { label: "就绪", tone: "info" },
@@ -124,16 +111,7 @@ export function FloorsPage() {
         />
       </Panel>
 
-      {buildingPlaceId ? (
-        <BuildingFloors buildingPlaceId={buildingPlaceId} />
-      ) : (
-        <Panel>
-          <InfoNote>
-            先选一栋楼。楼层图上传后，设施编辑器就能在该层平面图上点选服务位置；
-            这一页列出的设施与商户都是按楼层反查的，与内容管理里是同一份数据。
-          </InfoNote>
-        </Panel>
-      )}
+      {buildingPlaceId ? <BuildingFloors buildingPlaceId={buildingPlaceId} /> : null}
     </div>
   );
 }
@@ -242,9 +220,6 @@ function BuildingFloors({ buildingPlaceId }: { buildingPlaceId: string }) {
                   value={displayName}
                 />
               </div>
-              <p className="text-label text-sub">
-                编号统一为 F&lt;数字&gt; / B&lt;数字&gt;，与采集流建出的楼层保持一致；顺序按编号自动推导。
-              </p>
               <PrimaryButton disabled={busy} onClick={addFloor}>
                 {busy ? "处理中…" : "添加"}
               </PrimaryButton>
@@ -346,11 +321,6 @@ function FloorDetail({
   const { floor, plans, facilities, merchants, spaces, anchors, usage } = state.data;
 
   const positionedCount = facilities.filter((facility) => facility.positionedCount > 0).length;
-  const hasUsablePlan = plans.some(
-    (plan) =>
-      (plan.lifecycleStatus === "ready" || plan.lifecycleStatus === "published")
-      && plan.coordinateSpaceType === "svg_viewbox",
-  );
 
   return (
     <div className="space-y-4">
@@ -377,22 +347,12 @@ function FloorDetail({
             ))}
           </div>
           {usageTotal(usage) > 0 ? (
-            <InfoNote>
-              这层还有内容，因此不能删除。想暂时不对用户显示，用「对外隐藏」——楼层与其内容都保留。
-            </InfoNote>
+            <InfoNote>该楼层仍有关联内容，无法删除。</InfoNote>
           ) : null}
           {facilities.length > 0 ? (
-            hasUsablePlan ? (
-              <InfoNote tone={positionedCount === facilities.length ? "info" : "warning"}>
-                {positionedCount} / {facilities.length} 个设施已在平面图上标出位置。
-                未标注的可在设施编辑器的「服务位置」面板点选落点。
-              </InfoNote>
-            ) : (
-              <InfoNote tone="warning">
-                这层还没有可用于坐标绑定的平面图（需要 SVG 且状态为就绪 / 已发布），
-                所以设施暂时只能填文字位置引导。上传后即可在图上点选。
-              </InfoNote>
-            )
+            <InfoNote tone={positionedCount === facilities.length ? "info" : "warning"}>
+              已标注 {positionedCount} / {facilities.length}
+            </InfoNote>
           ) : null}
           <ErrorBanner message={error} />
         </div>
@@ -416,7 +376,18 @@ function FloorDetail({
       ) : null}
 
       {tab === "facilities" ? (
-        <Panel padded={false} title="该层设施">
+        <Panel
+          padded={false}
+          title="该层设施"
+          action={
+            <GhostButton
+              onClick={() => navigate(`/admin/content/facilities/new?buildingPlaceId=${encodeURIComponent(floor.buildingPlaceId)}&floorId=${encodeURIComponent(floor.id)}`)}
+            >
+              <Plus size={14} />
+              新增设施
+            </GhostButton>
+          }
+        >
           <div className="divide-y divide-line">
             {facilities.map((facility) => (
               <div key={facility.id} className="flex items-center gap-3 px-5 py-3.5">
@@ -443,7 +414,7 @@ function FloorDetail({
               </div>
             ))}
             {facilities.length === 0 ? (
-              <div className="p-5"><EmptyState label="这层还没有设施。设施在内容管理里创建，选定楼层后会出现在这里" /></div>
+              <div className="p-5"><EmptyState label="暂无设施" /></div>
             ) : null}
           </div>
         </Panel>
@@ -471,7 +442,7 @@ function FloorDetail({
               </div>
             ))}
             {merchants.length === 0 ? (
-              <div className="p-5"><EmptyState label="这层还没有商户。商户在内容管理里创建，选定楼层后会出现在这里" /></div>
+              <div className="p-5"><EmptyState label="暂无商户" /></div>
             ) : null}
           </div>
         </Panel>
@@ -639,14 +610,9 @@ function FloorPlansPanel({
           {progress ? <InfoNote tone="info">{progress}</InfoNote> : null}
           {anchorCount > 0 ? (
             <InfoNote tone="warning">
-              这层已有 {anchorCount} 个位置锚点绑定在现有图纸上。换新图纸后，
-              旧锚点的坐标仍指向旧版本，需要在设施编辑器里重新点选。
+              当前图纸关联 {anchorCount} 个位置锚点
             </InfoNote>
-          ) : (
-            <InfoNote>
-              导入完成后状态变为就绪，设施编辑器即可在这张图上点选服务位置。
-            </InfoNote>
-          )}
+          ) : null}
         </div>
       </Panel>
     </div>

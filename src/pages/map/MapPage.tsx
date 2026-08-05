@@ -31,6 +31,7 @@ export function MapPage() {
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerHeight, setContainerHeight] = useState(760);
+  const [mobileTabBarHeight, setMobileTabBarHeight] = useState(TAB_BAR_PX);
   const [viewResetNonce, setViewResetNonce] = useState(0);
 
   // D1 桌面端详情面板（移动端走底部抽屉）
@@ -72,11 +73,22 @@ export function MapPage() {
     return () => observer.disconnect();
   }, []);
 
-  const tabBar = isMobile ? TAB_BAR_PX : 0;
+  useEffect(() => {
+    if (!isMobile) return;
+    const tabBarElement = document.querySelector<HTMLElement>("[data-bottom-tab-bar]");
+    if (!tabBarElement) return;
+    const updateHeight = () => setMobileTabBarHeight(tabBarElement.getBoundingClientRect().height || TAB_BAR_PX);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(tabBarElement);
+    return () => observer.disconnect();
+  }, [isMobile]);
+
+  const tabBar = isMobile ? mobileTabBarHeight : 0;
   const visibleHeights: Record<MapSheetMode, number> = {
     collapsed: 78,
     home: Math.min(containerHeight * 0.52, 480),
-    results: containerHeight - tabBar - 96,
+    results: containerHeight - tabBar - 56,
     poi: Math.min(containerHeight * 0.74, 620),
   };
   const topForMode = (mode: MapSheetMode) => containerHeight - tabBar - visibleHeights[mode];
@@ -86,7 +98,6 @@ export function MapPage() {
     topForMode,
     allowedModes: (mode) => {
       if (mode === "poi") return ["poi"];
-      if (state.searchActive) return ["results"];
       return ["collapsed", "home", "results"];
     },
     onModeChange: (mode) => state.setSheetMode(mode),
@@ -104,7 +115,7 @@ export function MapPage() {
       : state.sheetMode === "collapsed"
         ? { collapsed: true, target: restoreMode, label: "恢复卡片" }
         : { collapsed: false, target: "collapsed" as MapSheetMode, label: "全屏地图" };
-  // 贴在卡片上缘之上。results 档卡片顶边很高（96px），此时上方只剩右侧控件列的空间，
+  // 贴在卡片上缘之上。results 档卡片顶边很高，此时上方只剩右侧控件列的空间，
   // 于是横向左移一格避让回中/图层，而不是压到卡片里挡住搜索框。
   const sheetToggleTop = Math.max(16, sheetTop - 56);
   const sheetToggleRight = sheetToggleTop < 120 ? 68 : 16;
@@ -241,7 +252,7 @@ export function MapPage() {
                 setLayerOn((on) => !on);
                 setSelectedEventId(null);
               }}
-              activeFilter={state.activeFilter}
+              activeFilters={state.activeFilters}
               filters={state.releaseData.filters}
               onToggleFilter={state.handleFilterHighlight}
             />
@@ -382,7 +393,7 @@ export function MapPage() {
                 <div className="h-full pt-2">
                   <SearchHomeSheet
                     query={state.query}
-                    activeFilter={state.activeFilter}
+                    activeFilters={state.activeFilters}
                     searchActive={state.searchActive}
                     searchStatus={state.searchStatus}
                     searchError={state.searchError}
@@ -394,6 +405,8 @@ export function MapPage() {
                     onClearQuery={state.clearQuery}
                     onRetrySearch={state.retrySearch}
                     onFilterToggle={state.handleFilterToggle}
+                    onClearFilters={state.clearFilters}
+                    onOpenAllFilters={() => setLayerPanelOpen(true)}
                     onResultClick={(poiKey) => state.openPoi(poiKey, "search_result")}
                   />
                 </div>

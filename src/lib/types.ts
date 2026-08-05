@@ -20,6 +20,7 @@ export interface PoiDetailData {
     url: string;
     alt?: string;
     caption?: string;
+    floorLevelCode?: string;
   }>;
   facts: Array<{
     id?: string;

@@ -41,7 +41,7 @@ function decision(poi, overrides = {}) {
     poi,
     selectedPoiKey: null,
     queryActive: false,
-    activeFilter: null,
+    activeFilters: [],
     matched: false,
     facilityStatus: { status: "loading" },
     ...overrides,
@@ -74,7 +74,18 @@ test("search and filter marker switches apply independently", () => {
     visibility: { ...facilityPoi().visibility, search: false, filter: true },
   });
   assert.equal(decision(poi, { queryActive: true, matched: true }), false);
-  assert.equal(decision(poi, { activeFilter: "charging", matched: true }), true);
+  assert.equal(decision(poi, { activeFilters: ["charging"], matched: true }), true);
+});
+
+test("combined search and filters require both visibility switches", () => {
+  const poi = facilityPoi({
+    visibility: { ...facilityPoi().visibility, search: true, filter: false },
+  });
+  assert.equal(decision(poi, {
+    queryActive: true,
+    activeFilters: ["charging"],
+    matched: true,
+  }), false);
 });
 
 test("a non-building place search hit folds into its resolved building", () => {
