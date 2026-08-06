@@ -573,6 +573,27 @@ export function createImportJob(body: {
   return apiFetch<{ id: string; status: string }>("/api/admin/maps/import-jobs", { method: "POST", body });
 }
 
+export interface MapImportJobRow {
+  id: string;
+  jobType: "map_import" | "floor_import";
+  status: string;
+  attemptCount: number;
+  errorMessage: string | null;
+  versionLabel: string | null;
+  campusId: string | null;
+  floorId: string | null;
+  mediaAssetId: string | null;
+  fileName: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** GET /api/admin/maps/import-jobs — 最近 20 条底图/楼层导入任务（payload 解析失败字段为 null）。 */
+export function listMapImportJobs(signal?: AbortSignal): Promise<ListResponse<MapImportJobRow>> {
+  return apiFetch<ListResponse<MapImportJobRow>>("/api/admin/maps/import-jobs", { signal });
+}
+
 // ---------------------------------------------------------------------------
 // Operations + campaigns (admin views)
 // ---------------------------------------------------------------------------

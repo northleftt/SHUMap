@@ -1,5 +1,6 @@
 import { Map as MapIcon, Upload } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { parseSvgFeatures } from "../../../shared/svg-geometry.mjs";
 import * as admin from "../../lib/api/admin";
 import type { Floor, MapLifecycleStatus, MapVersion, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
@@ -35,14 +36,42 @@ const LIFECYCLE_META: Record<MapLifecycleStatus, { label: string; tone: "ok" | "
   rejected: { label: "已拒绝", tone: "neutral" },
 };
 
+const JOB_STATUS_META: Record<string, { label: string; tone: "ok" | "info" | "warning" | "error" | "neutral" }> = {
+  queued: { label: "排队中", tone: "warning" },
+  running: { label: "处理中", tone: "info" },
+  succeeded: { label: "成功", tone: "ok" },
+  failed: { label: "失败", tone: "error" },
+  cancelled: { label: "已取消", tone: "neutral" },
+};
+
+// 处于这两个状态的任务需要轮询跟进
+const ACTIVE_JOB_STATUSES = new Set(["queued", "running"]);
+
+type DiffPreview =
+  | { kind: "first-version"; addedCount: number }
+  | {
+      kind: "ready";
+      versionLabel: string;
+      added: Array<{ id: string; label: string | null }>;
+      removed: Array<{ id: string; label: string | null; footprintPlaceId: string | null }>;
+      keptCount: number;
+    };
+
+/** 超过 8 个折叠为「等 N 个」，避免预览撑爆上传面板。 */
+function summarizeElements(items: Array<{ id: string; label: string | null }>): string {
+  const names = items.slice(0, 8).map((item) => (item.label ? `${item.id}（${item.label}）` : item.id));
+  return items.length > 8 ? `${names.join("、")} 等 ${items.length} 个` : names.join("、");
+}
+
 export function MapsPage() {
   const { state, reload } = useAsyncData(async (signal) => {
-    const [maps, spaces, ref] = await Promise.all([
+    const [maps, spaces, ref, jobs] = await Promise.all([
       admin.listMapVersions(signal),
       admin.listSpaces<SpacesResponse>(signal),
       admin.listReferenceData<ReferenceDataResponse>(signal),
+      admin.listMapImportJobs(signal),
     ]);
-    return { maps: maps.items, spaces, ref };
+    return { maps: maps.items, spaces, ref, jobs: jobs.items };
   }, []);
 
   const [campusFilter, setCampusFilter] = useState("all");
@@ -56,10 +85,90 @@ export function MapsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
+  // 导入任务在轮询期间本地更新，避免整页 reload 的闪烁
+  const [liveJobs, setLiveJobs] = useState<admin.MapImportJobRow[] | null>(null);
+  const jobsRef = useRef<admin.MapImportJobRow[]>([]);
+  const [diff, setDiff] = useState<DiffPreview | null>(null);
+
+  const loadedJobs = state.status === "ready" ? state.data.jobs : null;
+  useEffect(() => {
+    if (loadedJobs) setLiveJobs(loadedJobs);
+  }, [loadedJobs]);
+
+  useEffect(() => {
+    jobsRef.current = liveJobs ?? [];
+  }, [liveJobs]);
+
+  const hasActiveJobs = (liveJobs ?? []).some((job) => ACTIVE_JOB_STATUSES.has(job.status));
+  useEffect(() => {
+    if (!hasActiveJobs) return;
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const response = await admin.listMapImportJobs();
+          const previous = new Map(jobsRef.current.map((job) => [job.id, job.status]));
+          setLiveJobs(response.items);
+          // 任务进入终态时刷新版本列表，让新就绪的版本立刻出现
+          if (response.items.some((job) => ACTIVE_JOB_STATUSES.has(previous.get(job.id) ?? job.status) && !ACTIVE_JOB_STATUSES.has(job.status))) {
+            reload();
+          }
+        } catch {
+          // 轮询失败静默忽略，等下一个周期
+        }
+      })();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [hasActiveJobs, reload]);
+
+  // 文件与目标都选定后，与当前 published 版本做 diff 预览
+  useEffect(() => {
+    const maps = state.status === "ready" ? state.data.maps : null;
+    const targetCampusId = targetKind === "campus" && campusId ? campusId : null;
+    const targetFloorId = targetKind === "floor" && floorId ? floorId : null;
+    setDiff(null);
+    if (!file || !maps || (!targetCampusId && !targetFloorId)) return;
+    let stale = false;
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const text = await file.text();
+        // 与 worker 导入共用同一解析器，保证预览的图形集合就是实际导入的集合
+        const features = parseSvgFeatures(text);
+        const published = maps.find(
+          (version) =>
+            version.lifecycleStatus === "published" &&
+            (targetCampusId ? version.campusId === targetCampusId : version.floorId === targetFloorId),
+        );
+        if (!published) {
+          if (!stale) setDiff({ kind: "first-version", addedCount: features.length });
+          return;
+        }
+        const current = await admin.listMapFeatures(published.id, controller.signal);
+        if (stale) return;
+        const currentIds = new Set(current.items.map((f) => f.sourceElementId).filter((id): id is string => id !== null));
+        const importedIds = new Set(features.map((f) => f.sourceElementId));
+        const added = features
+          .filter((f) => !currentIds.has(f.sourceElementId))
+          .map((f) => ({ id: f.sourceElementId, label: f.label }));
+        const removed = current.items
+          .filter((f) => f.sourceElementId !== null && !importedIds.has(f.sourceElementId))
+          .map((f) => ({ id: f.sourceElementId as string, label: f.label, footprintPlaceId: f.footprintPlaceId }));
+        setDiff({ kind: "ready", versionLabel: published.versionLabel, added, removed, keptCount: features.length - added.length });
+      } catch {
+        // 非 SVG 或请求被中止：交给 startImport 的校验报错，预览直接收起
+        if (!stale && !controller.signal.aborted) setDiff(null);
+      }
+    })();
+    return () => {
+      stale = true;
+      controller.abort();
+    };
+  }, [file, targetKind, campusId, floorId, state]);
 
   if (state.status === "loading") return <LoadingState label="加载底图版本…" />;
   if (state.status === "error") return <ErrorBanner message={state.message} />;
   const data = state.data;
+  const jobs = liveJobs ?? data.jobs;
   const campuses = data.spaces.campuses;
   const buildings = data.spaces.buildings;
   const floors = data.spaces.floors;
@@ -98,7 +207,25 @@ export function MapsPage() {
     return `${building.displayName} · ${floor.displayName}`;
   }
 
+  /** 任务目标展示：versionTarget 的容错版，解析不了就回退原始 id，不让坏数据拖垮列表。 */
+  function jobTarget(job: admin.MapImportJobRow): string {
+    try {
+      if (job.campusId) return campusName(job.campusId);
+      if (job.floorId) {
+        const floor = floorById.get(job.floorId);
+        const building = floor ? buildingByPlaceId.get(floor.buildingPlaceId) : undefined;
+        if (floor && building) return `${building.displayName ?? building.placeId} · ${floor.displayName}`;
+        return job.floorId;
+      }
+      return "未知目标";
+    } catch {
+      return job.campusId ?? job.floorId ?? "未知目标";
+    }
+  }
+
   const visible = data.maps.filter((m) => campusFilter === "all" || versionCampusId(m) === campusFilter);
+  // 移除项里绑定了楼宇 footprint 的元素：缺失会让导入直接失败，必须提前警告
+  const footprintRemovals = diff?.kind === "ready" ? diff.removed.filter((item) => item.footprintPlaceId) : [];
 
   async function startImport() {
     if (!file) { setError("请先选择 SVG 文件"); return; }
@@ -138,6 +265,7 @@ export function MapsPage() {
       setProgress("已提交导入，正在后台处理，完成后版本会显示为就绪。");
       setFile(null);
       setVersionLabel("");
+      setDiff(null);
       reload();
     } catch (err) {
       setError(errorMessage(err, "上传失败"));
@@ -253,6 +381,23 @@ export function MapsPage() {
               placeholder="不指定"
               value={sourceId}
             />
+            {diff?.kind === "first-version" ? (
+              <InfoNote tone="info">该目标暂无已发布版本，导入后将成为首个版本（共 {diff.addedCount} 个图形）。</InfoNote>
+            ) : null}
+            {diff?.kind === "ready" ? (
+              <div className="space-y-1.5 rounded-lg bg-page px-4 py-3 text-aux leading-relaxed text-sub">
+                <p>
+                  与当前版本「{diff.versionLabel}」对比：新增 {diff.added.length} · 移除 {diff.removed.length} · 保留 {diff.keptCount}
+                </p>
+                {diff.added.length ? <p>新增：{summarizeElements(diff.added)}</p> : null}
+                {diff.removed.length ? <p>移除：{summarizeElements(diff.removed)}</p> : null}
+                {footprintRemovals.length ? (
+                  <p className="font-medium text-error">
+                    以下元素绑定了楼宇 footprint，缺失会导致导入失败：{summarizeElements(footprintRemovals)}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <PrimaryButton className="w-full" disabled={busy} onClick={startImport}>
               {busy ? "处理中…" : "开始导入"}
             </PrimaryButton>
@@ -261,6 +406,34 @@ export function MapsPage() {
           </div>
         </Panel>
       </div>
+
+      {/* 导入任务：队列异步执行，有进行中任务时每 3 秒轮询一次 */}
+      <Panel title="导入任务" padded={false}>
+        <div className="divide-y divide-line">
+          {jobs.map((job) => {
+            const meta = JOB_STATUS_META[job.status] ?? { label: job.status, tone: "neutral" as const };
+            return (
+              <div key={job.id} className="flex items-center gap-3 px-5 py-3.5">
+                <Pill tone={meta.tone}>{meta.label}</Pill>
+                <div className="min-w-0 flex-1">
+                  <p className="text-body font-medium text-ink">
+                    {job.fileName ?? "未知文件"}
+                    {job.versionLabel ? <span className="font-normal text-sub"> · {job.versionLabel}</span> : null}
+                  </p>
+                  <p className="mt-0.5 text-aux text-sub">
+                    {jobTarget(job)} · 提交于 {fmtDateTime(job.createdAt)}
+                    {job.finishedAt ? ` · 完成于 ${fmtDateTime(job.finishedAt)}` : ""}
+                  </p>
+                  {job.status === "failed" && job.errorMessage ? (
+                    <p className="mt-1 text-aux font-medium text-error">{job.errorMessage}</p>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+          {jobs.length === 0 ? <div className="p-5"><EmptyState label="暂无导入任务" /></div> : null}
+        </div>
+      </Panel>
     </div>
   );
 }

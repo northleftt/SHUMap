@@ -147,6 +147,88 @@ export async function listMapFeatures(request: Request, env: Env): Promise<Respo
   return json({ items });
 }
 
+interface MapImportJobRow {
+  id: string;
+  jobType: string;
+  status: string;
+  attemptCount: number;
+  errorMessage: string | null;
+  payloadJson: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+interface MapImportJobPayload {
+  versionLabel: string | null;
+  campusId: string | null;
+  floorId: string | null;
+  mediaAssetId: string | null;
+}
+
+// 列表是只读视图：payload 缺字段或不是对象时降级为 null，不能让一条脏数据拖垮整个接口。
+function parseJobPayload(raw: string | null): MapImportJobPayload {
+  const empty: MapImportJobPayload = { versionLabel: null, campusId: null, floorId: null, mediaAssetId: null };
+  if (!raw) return empty;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return empty;
+    const record = value as Record<string, unknown>;
+    const text = (field: unknown): string | null => (typeof field === "string" && field.trim() ? field.trim() : null);
+    return {
+      versionLabel: text(record.versionLabel),
+      campusId: text(record.campusId),
+      floorId: text(record.floorId),
+      mediaAssetId: text(record.mediaAssetId),
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * GET /api/admin/maps/import-jobs — 最近的底图/楼层导入任务，管理端轮询用。
+ * payload 在 TS 侧解析（而非 SQL json_extract），保证脏数据容错。
+ */
+export async function listMapImportJobs(env: Env): Promise<Response> {
+  const rows = await all<MapImportJobRow>(
+    env.DB,
+    `select id,job_type as jobType,status,attempt_count as attemptCount,error_message as errorMessage,
+            payload_json as payloadJson,created_at as createdAt,started_at as startedAt,finished_at as finishedAt
+       from jobs where job_type in ('map_import','floor_import')
+      order by created_at desc,id desc limit 20`,
+  );
+  const mediaAssetIds = [...new Set(rows.map((row) => parseJobPayload(row.payloadJson).mediaAssetId).filter((id): id is string => id !== null))];
+  const fileNames = new Map<string, string>();
+  if (mediaAssetIds.length) {
+    const media = await all<{ id: string; originalName: string }>(
+      env.DB,
+      `select id,original_name as originalName from media_assets where id in (${mediaAssetIds.map(() => "?").join(",")})`,
+      mediaAssetIds,
+    );
+    for (const row of media) fileNames.set(row.id, row.originalName);
+  }
+  const items = rows.map((row) => {
+    const payload = parseJobPayload(row.payloadJson);
+    return {
+      id: row.id,
+      jobType: row.jobType,
+      status: row.status,
+      attemptCount: row.attemptCount,
+      errorMessage: row.errorMessage,
+      versionLabel: payload.versionLabel,
+      campusId: payload.campusId,
+      floorId: payload.floorId,
+      mediaAssetId: payload.mediaAssetId,
+      fileName: payload.mediaAssetId ? fileNames.get(payload.mediaAssetId) ?? null : null,
+      createdAt: row.createdAt,
+      startedAt: row.startedAt,
+      finishedAt: row.finishedAt,
+    };
+  });
+  return json({ items });
+}
+
 export async function listMapVersions(env: Env): Promise<Response> {
   const items = await all(
     env.DB,

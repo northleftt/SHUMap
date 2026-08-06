@@ -7,8 +7,24 @@ import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCol
 import { createFacilityHandler, createFacilityRevisionHandler, deleteFacility, getFacility, listFacilities, publicFacilityStatus, updateFacilityLifecycle } from "./modules/facilities";
 import { createFacilityType, deleteFacilityType, listFacilityTypes, listPublicFacilityTypes, updateFacilityType } from "./modules/facility-types";
 import { processQueue } from "./modules/jobs";
-import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapVersions, uploadMapContent } from "./modules/maps";
+import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapImportJobs, listMapVersions, uploadMapContent } from "./modules/maps";
 import { createAdminMediaUpload, createPublicMediaUpload, getAdminMediaContent, getPublicMedia } from "./modules/media";
+import {
+  createGuideDocument,
+  deleteGuideAsset,
+  getGuideDocument,
+  getGuideRevision,
+  getPublicGuide,
+  getPublicGuideAsset,
+  listGuideAssets,
+  listGuideDocuments,
+  publishGuideRevision,
+  reviewGuideRevision,
+  saveGuideRevision,
+  submitGuideRevision,
+  unpublishGuideDocument,
+  uploadGuideAsset,
+} from "./modules/guide";
 import { createMerchant, createMerchantRevision, getMerchant, listMerchants, updateMerchantLifecycle } from "./modules/merchants";
 import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, deletePlace, getPlace, listPlaces, updatePlaceLifecycle } from "./modules/places";
@@ -145,6 +161,13 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "GET" && media) return getPublicMedia(env, media.id);
   const mapAsset = match(path, "/api/public/maps/:mapVersionId/asset");
   if (method === "GET" && mapAsset) return getPublicMapAsset(env, mapAsset.mapVersionId);
+
+  // 返校指南：独立模块，只读已发布版本。图示素材按 asset_key 取，
+  // 键名就是内容里 card.figure 引用的那个值。
+  const publicGuide = match(path, "/api/public/guide/:slug");
+  if (method === "GET" && publicGuide) return getPublicGuide(request, env, publicGuide.slug);
+  const publicGuideAsset = match(path, "/api/public/guide-assets/:key");
+  if (method === "GET" && publicGuideAsset) return getPublicGuideAsset(request, env, publicGuideAsset.key);
 
   if (path.startsWith("/api/admin/")) {
     return routeAdmin(request, env, requestId, path, method);
@@ -338,6 +361,10 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "GET" && path === "/api/admin/maps") {
     await requireSession(request, env, "read:admin");
     return listMapVersions(env);
+  }
+  if (method === "GET" && path === "/api/admin/maps/import-jobs") {
+    await requireSession(request, env, "read:admin");
+    return listMapImportJobs(env);
   }
   const adminMapAsset = match(path, "/api/admin/maps/:mapVersionId/asset");
   if (method === "GET" && adminMapAsset) {
@@ -566,6 +593,74 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && releaseRollback) {
     principal = await requireSession(request, env, "rollback:release");
     return coordinatorRequest(request, env, `/rollback/${encodeURIComponent(releaseRollback.id)}`, principal, requestId);
+  }
+
+  // ── 返校指南 ─────────────────────────────────────────────────────
+  // 独立模块：不进 release_items，按自己的 current_revision_id 发布。
+  // 权限沿用现有三个 —— 撰写 write:content、审核 review:content、
+  // 发布 publish:release。不新增权限，管理员名单因此与 SHUMap 其余部分同步。
+  if (method === "GET" && path === "/api/admin/guide/documents") {
+    await requireSession(request, env, "read:admin");
+    return listGuideDocuments(env);
+  }
+  if (method === "POST" && path === "/api/admin/guide/documents") {
+    principal = await requireSession(request, env, "write:content");
+    return createGuideDocument(request, env, principal, requestId);
+  }
+  if (method === "GET" && path === "/api/admin/guide/assets") {
+    await requireSession(request, env, "read:admin");
+    return listGuideAssets(env);
+  }
+  // 素材按 asset_key 寻址（内容里 card.figure 引用的就是这个键），所以用
+  // PUT /assets/:key 而不是 POST /assets —— 同一个键重复上传即替换，
+  // 换图后引用它的卡片自动跟着换，不必改内容。
+  const guideAsset = match(path, "/api/admin/guide/assets/:key");
+  if (method === "PUT" && guideAsset) {
+    principal = await requireSession(request, env, "write:content");
+    return uploadGuideAsset(request, env, principal, guideAsset.key, requestId);
+  }
+  if (method === "DELETE" && guideAsset) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteGuideAsset(env, principal, guideAsset.key, requestId);
+  }
+  // 具体路径必须排在 /:id 之前，否则 "revisions" 会被当成文档 id 吃掉。
+  const guideRevisionSubmit = match(path, "/api/admin/guide/revisions/:id/submit");
+  if (method === "POST" && guideRevisionSubmit) {
+    principal = await requireSession(request, env, "write:content");
+    return submitGuideRevision(request, env, principal, guideRevisionSubmit.id, requestId);
+  }
+  const guideRevisionReview = match(path, "/api/admin/guide/revisions/:id/review");
+  if (method === "POST" && guideRevisionReview) {
+    principal = await requireSession(request, env, "review:content");
+    return reviewGuideRevision(request, env, principal, guideRevisionReview.id, requestId);
+  }
+  const guideRevision = match(path, "/api/admin/guide/revisions/:id");
+  if (method === "GET" && guideRevision) {
+    await requireSession(request, env, "read:admin");
+    return getGuideRevision(env, guideRevision.id);
+  }
+  // 发布 / 回滚是同一个动作：把文档的 current_revision_id 指到某个 approved 版本。
+  // 所以它挂在文档上、revisionId 走 body，而不是挂在某一版的路径上 —— 回滚时
+  // 「要退到哪一版」是参数，不是资源本身。
+  const guidePublish = match(path, "/api/admin/guide/documents/:id/publish");
+  if (method === "POST" && guidePublish) {
+    principal = await requireSession(request, env, "publish:release");
+    return publishGuideRevision(request, env, principal, guidePublish.id, requestId);
+  }
+  const guideUnpublish = match(path, "/api/admin/guide/documents/:id/unpublish");
+  if (method === "POST" && guideUnpublish) {
+    principal = await requireSession(request, env, "publish:release");
+    return unpublishGuideDocument(env, principal, guideUnpublish.id, requestId);
+  }
+  const guideDocRevisions = match(path, "/api/admin/guide/documents/:id/revisions");
+  if (method === "POST" && guideDocRevisions) {
+    principal = await requireSession(request, env, "write:content");
+    return saveGuideRevision(request, env, principal, guideDocRevisions.id, requestId);
+  }
+  const guideDocument = match(path, "/api/admin/guide/documents/:id");
+  if (method === "GET" && guideDocument) {
+    await requireSession(request, env, "read:admin");
+    return getGuideDocument(env, guideDocument.id);
   }
 
   throw new HttpError(404, "not_found", "Admin API route does not exist");
