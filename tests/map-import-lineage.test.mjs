@@ -343,12 +343,12 @@ test("map import rejects R2 size and raw-byte checksum mismatches before writing
       "select status,attempt_count as attemptCount,error_message as errorMessage from jobs where id='job_import'",
     ).get();
     assert.deepEqual({ ...job }, {
-      status: "queued",
+      status: "failed",
       attemptCount: 1,
       errorMessage: fixture.expectedError,
     }, fixture.label);
-    assert.equal(item.acknowledged, false, fixture.label);
-    assert.equal(item.retried, true, fixture.label);
+    assert.equal(item.acknowledged, true, fixture.label);
+    assert.equal(item.retried, false, fixture.label);
     assert.equal(database.prepare("select count(*) as count from map_assets where id<>'asset_previous' and id not like 'map_asset_campus_%'").get().count, 0);
     assert.equal(database.prepare("select count(*) as count from map_feature_mappings").get().count, 0);
     database.close();
@@ -362,10 +362,10 @@ test("map import rejects stored media sizes above the 50 MiB contract before rea
   const item = await runImport(database, bucket, { silenceExpectedFailure: true });
   const job = database.prepare("select status,error_message as errorMessage from jobs where id='job_import'").get();
 
-  assert.equal(job.status, "queued");
+  assert.equal(job.status, "failed");
   assert.equal(job.errorMessage, `Import media has invalid stored byte size ${50 * 1024 * 1024 + 1}`);
   assert.deepEqual(bucket.gets, []);
-  assert.equal(item.retried, true);
+  assert.equal(item.retried, false);
   database.close();
 });
 
@@ -376,10 +376,10 @@ test("map import rejects invalid UTF-8 before writing lineage", async () => {
   const item = await runImport(database, new R2Bucket(new StoredObject(invalidUtf8)), { silenceExpectedFailure: true });
   const job = database.prepare("select status,error_message as errorMessage from jobs where id='job_import'").get();
 
-  assert.equal(job.status, "queued");
+  assert.equal(job.status, "failed");
   assert.equal(job.errorMessage, "Import SVG is not valid UTF-8");
-  assert.equal(item.acknowledged, false);
-  assert.equal(item.retried, true);
+  assert.equal(item.acknowledged, true);
+  assert.equal(item.retried, false);
   assert.equal(database.prepare("select count(*) as count from map_assets where id<>'asset_previous' and id not like 'map_asset_campus_%'").get().count, 0);
   assert.equal(database.prepare("select count(*) as count from map_feature_mappings").get().count, 0);
   database.close();
@@ -396,13 +396,33 @@ test("map import rejects removal of an active building footprint element", async
   const item = await runImport(database, new R2Bucket(new StoredObject(missingFootprintSvg)), { silenceExpectedFailure: true });
   const job = database.prepare("select status,error_message as errorMessage from jobs where id='job_import'").get();
 
-  assert.equal(job.status, "queued");
+  assert.equal(job.status, "failed");
   assert.equal(job.errorMessage, "Map SVG is missing active building footprint elements: building");
-  assert.equal(item.acknowledged, false);
-  assert.equal(item.retried, true);
+  assert.equal(item.acknowledged, true);
+  assert.equal(item.retried, false);
   assert.equal(database.prepare("select valid_to as validTo from location_anchors where id='anchor_previous'").get().validTo, null);
   assert.equal(database.prepare("select valid_to as validTo from entity_locations where id='binding_previous'").get().validTo, null);
   assert.equal(database.prepare("select count(*) as count from map_assets where id<>'asset_previous' and id not like 'map_asset_campus_%'").get().count, 0);
   assert.equal(database.prepare("select count(*) as count from map_feature_mappings").get().count, 0);
+  database.close();
+});
+
+test("map import retries transient infrastructure errors instead of failing fast", async () => {
+  const database = freshDatabase();
+  seedImport(database, importedSvg);
+  const failingBucket = {
+    gets: 0,
+    async get() {
+      this.gets += 1;
+      throw new Error("R2 temporarily unavailable");
+    },
+  };
+  const item = await runImport(database, failingBucket, { silenceExpectedFailure: true });
+  const job = database.prepare("select status,error_message as errorMessage from jobs where id='job_import'").get();
+
+  assert.equal(job.status, "queued");
+  assert.equal(job.errorMessage, "R2 temporarily unavailable");
+  assert.equal(item.acknowledged, false);
+  assert.equal(item.retried, true);
   database.close();
 });

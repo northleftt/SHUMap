@@ -4,6 +4,13 @@ import type { Env, MessageBatch } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { isoNow, jsonString, makeId, sha256 } from "../lib/values";
 
+/**
+ * 导入数据本身的确定性问题（缺图形、几何类型不对、校验和不符等）：重试不会自愈，
+ * 首次失败即终态——否则任务在队列里反复空转，管理端看到的永远是「排队中」。
+ * 非预期异常（D1/R2 故障等）仍是普通 Error，走原有重试。
+ */
+export class ImportValidationError extends Error {}
+
 interface JobRow {
   id: string;
   job_type: QueueJobMessage["jobType"];
@@ -44,7 +51,7 @@ const IMPORT_PAYLOAD_KEYS = new Set(["mediaAssetId", "campusId", "floorId", "ver
 const MAX_MAP_ASSET_BYTES = 50 * 1024 * 1024;
 
 function requiredJobString(value: unknown, field: string): string {
-  if (typeof value !== "string" || !value.trim()) throw new Error(`Map import ${field} must be a non-empty string`);
+  if (typeof value !== "string" || !value.trim()) throw new ImportValidationError(`Map import ${field} must be a non-empty string`);
   return value.trim();
 }
 
@@ -58,14 +65,14 @@ function parseImportPayload(job: JobRow): ImportPayload {
   try {
     value = JSON.parse(job.payload_json) as unknown;
   } catch {
-    throw new Error("Map import payload is not valid JSON");
+    throw new ImportValidationError("Map import payload is not valid JSON");
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Map import payload must be an object");
+    throw new ImportValidationError("Map import payload must be an object");
   }
   const record = value as Record<string, unknown>;
   for (const key of Object.keys(record)) {
-    if (!IMPORT_PAYLOAD_KEYS.has(key)) throw new Error(`Map import payload contains unsupported field ${key}`);
+    if (!IMPORT_PAYLOAD_KEYS.has(key)) throw new ImportValidationError(`Map import payload contains unsupported field ${key}`);
   }
   const payload = {
     mediaAssetId: requiredJobString(record.mediaAssetId, "mediaAssetId"),
@@ -74,13 +81,13 @@ function parseImportPayload(job: JobRow): ImportPayload {
     versionLabel: requiredJobString(record.versionLabel, "versionLabel"),
   };
   if (Number(payload.campusId !== null) + Number(payload.floorId !== null) !== 1) {
-    throw new Error("Map import payload must identify exactly one campus or floor");
+    throw new ImportValidationError("Map import payload must identify exactly one campus or floor");
   }
   if (job.job_type === "map_import" && payload.campusId === null) {
-    throw new Error("Campus map import payload has no campusId");
+    throw new ImportValidationError("Campus map import payload has no campusId");
   }
   if (job.job_type === "floor_import" && payload.floorId === null) {
-    throw new Error("Floor map import payload has no floorId");
+    throw new ImportValidationError("Floor map import payload has no floorId");
   }
   return payload;
 }
@@ -94,7 +101,8 @@ export async function processQueue(batch: MessageBatch<QueueJobMessage>, env: En
       console.error("Queue job failed", message.body.jobId, error);
       const job = await first<JobRow>(env.DB, "select * from jobs where id=?", [message.body.jobId]);
       const attempts = job?.attempt_count ?? 0;
-      const failed = attempts >= 5;
+      // 确定性校验错误直接终态；其余错误重试，超过 5 次放弃。
+      const failed = error instanceof ImportValidationError || attempts >= 5;
       await env.DB.prepare(
         "update jobs set status=?,error_message=?,finished_at=? where id=?",
       ).bind(
@@ -132,7 +140,7 @@ function footprintBindings(rows: FootprintBindingRow[]): Map<string, FootprintBi
   const result = new Map<string, FootprintBindingRow>();
   for (const row of rows) {
     if (result.has(row.sourceElementId)) {
-      throw new Error(`Map feature ${row.sourceElementId} has multiple active building footprint bindings`);
+      throw new ImportValidationError(`Map feature ${row.sourceElementId} has multiple active building footprint bindings`);
     }
     result.set(row.sourceElementId, row);
   }
@@ -173,33 +181,33 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
     "select id,object_key,content_type,byte_size,sha256,status,source_id from media_assets where id=?",
     [payload.mediaAssetId],
   );
-  if (!media || media.status !== "approved") throw new Error("Import media is unavailable");
-  if (media.content_type !== "image/svg+xml") throw new Error("Map import requires an SVG media asset");
+  if (!media || media.status !== "approved") throw new ImportValidationError("Import media is unavailable");
+  if (media.content_type !== "image/svg+xml") throw new ImportValidationError("Map import requires an SVG media asset");
   if (!Number.isSafeInteger(media.byte_size) || media.byte_size <= 0 || media.byte_size > MAX_MAP_ASSET_BYTES) {
-    throw new Error(`Import media has invalid stored byte size ${media.byte_size}`);
+    throw new ImportValidationError(`Import media has invalid stored byte size ${media.byte_size}`);
   }
   const object = await env.SHUMAP_BUCKET.get(media.object_key);
-  if (!object) throw new Error("Import object is missing from R2");
+  if (!object) throw new ImportValidationError("Import object is missing from R2");
   if (object.size !== media.byte_size) {
-    throw new Error(`Import object size ${object.size} does not match stored byte size ${media.byte_size}`);
+    throw new ImportValidationError(`Import object size ${object.size} does not match stored byte size ${media.byte_size}`);
   }
   const bytes = await object.arrayBuffer();
   if (bytes.byteLength !== media.byte_size) {
-    throw new Error(`Import object body size ${bytes.byteLength} does not match stored byte size ${media.byte_size}`);
+    throw new ImportValidationError(`Import object body size ${bytes.byteLength} does not match stored byte size ${media.byte_size}`);
   }
-  if (await sha256(bytes) !== media.sha256) throw new Error("Import object checksum mismatch");
+  if (await sha256(bytes) !== media.sha256) throw new ImportValidationError("Import object checksum mismatch");
   let content: string;
   try {
     content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    throw new Error("Import SVG is not valid UTF-8");
+    throw new ImportValidationError("Import SVG is not valid UTF-8");
   }
 
   const mapAssetId = makeId("mapasset");
   const mapVersionId = makeId("mapver");
   const now = isoNow();
   const features = await importedFeatures(content, mapVersionId);
-  if (!features.length) throw new Error("Map SVG contains no addressable features");
+  if (!features.length) throw new ImportValidationError("Map SVG contains no addressable features");
   const coordinateSpace = parseSvgViewBox(content);
   const previousVersion = await first<{ id: string }>(
     env.DB,
@@ -240,7 +248,7 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
     .map((footprint) => footprint.sourceElementId)
     .sort();
   if (missingFootprints.length) {
-    throw new Error(`Map SVG is missing active building footprint elements: ${missingFootprints.join(", ")}`);
+    throw new ImportValidationError(`Map SVG is missing active building footprint elements: ${missingFootprints.join(", ")}`);
   }
 
   const statements = [
@@ -257,13 +265,13 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
     const footprint = footprintBySourceId.get(feature.sourceElementId);
     const geometryType = feature.geometry?.type;
     if (typeof geometryType !== "string") {
-      if (footprint) throw new Error(`Building footprint ${feature.sourceElementId} has no geometry type`);
+      if (footprint) throw new ImportValidationError(`Building footprint ${feature.sourceElementId} has no geometry type`);
     }
     if (footprint && geometryType !== "Polygon" && geometryType !== "MultiPolygon") {
-      throw new Error(`Building footprint ${feature.sourceElementId} must resolve to Polygon or MultiPolygon geometry`);
+      throw new ImportValidationError(`Building footprint ${feature.sourceElementId} must resolve to Polygon or MultiPolygon geometry`);
     }
     if (footprint && footprint.campusId !== payload.campusId) {
-      throw new Error(`Building footprint ${feature.sourceElementId} belongs to another campus`);
+      throw new ImportValidationError(`Building footprint ${feature.sourceElementId} belongs to another campus`);
     }
     statements.push(env.DB.prepare(
       `insert into map_features(id,map_version_id,stable_feature_key,source_element_id,feature_kind,geometry_json,bbox_json,shape_hash,label,metadata_json)
