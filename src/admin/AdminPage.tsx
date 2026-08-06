@@ -1,4 +1,5 @@
 import {
+  BookOpenText,
   Building2,
   Bus,
   FileText,
@@ -52,6 +53,17 @@ const NAV_GROUPS = [
       { to: "/admin/floors", end: false, label: "楼层与楼层图", icon: Layers, permission: "write:maps" },
       { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
       { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
+      // 返校指南是独立模块：自己的页面、自己的编辑器、自己的发布。
+      // external 让侧栏用 <a> 而不是 NavLink —— 它不是 React 路由，
+      // 交给 router 会变成前端跳转然后 404。
+      {
+        to: "/guide/editor",
+        end: false,
+        label: "返校指南",
+        icon: BookOpenText,
+        permission: "write:content",
+        external: true,
+      },
       { to: "/admin/releases", end: false, label: "发布中心", icon: Rocket, permission: "publish:release" },
     ],
   },
@@ -176,7 +188,20 @@ function Sidebar({ displayName, email }: { displayName: string; email: string })
         {groups.map((group) => (
           <div className="space-y-1" key={group.label}>
             <p className="px-3 pb-1 text-label font-semibold tracking-wide text-white/45">{group.label}</p>
-            {group.items.map((item) => (
+            {group.items.map((item) =>
+              "external" in item && item.external ? (
+                /* 静态页用 <a> 整页跳转。指南有自己的样式与脚本，
+                   不共享 SPA 的运行时，前端路由接管只会得到 404。 */
+                <a
+                  key={item.to}
+                  href={item.to}
+                  className="flex h-9.5 items-center gap-2.5 rounded-lg px-3 text-body font-medium text-white/70 no-underline transition-colors hover:bg-white/8 hover:text-white"
+                >
+                  <item.icon size={16} />
+                  {item.label}
+                  <span className="ml-auto text-[10px] text-white/40">↗</span>
+                </a>
+              ) : (
               <NavLink
                 key={item.to}
                 end={item.end}
@@ -200,7 +225,8 @@ function Sidebar({ displayName, email }: { displayName: string; email: string })
                   </span>
                 ) : null}
               </NavLink>
-            ))}
+              )
+            )}
           </div>
         ))}
       </nav>

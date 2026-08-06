@@ -1,0 +1,1839 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>返校指南 · 卡片编辑器</title>
+<script src="assets/guide-styles.js"></script>
+<script src="data/guide-icons.js"></script>
+<!-- 离线兜底种子：管理端 API 不可用（未登录 / 离线）时才用它，正式内容来自 D1 -->
+<script src="data/guide-seed.js"></script>
+<script src="assets/guide-render.js"></script>
+<script src="assets/guide-versions.js"></script>
+<style>
+  /* 编辑器外壳：只在编辑器里用，打印时由 guide-styles.js 的 @media print 隐藏 */
+  html,body{height:100%}
+  body{overflow:hidden}
+  .ge{display:grid;grid-template-columns:400px minmax(0,1fr);
+    grid-template-rows:auto auto minmax(0,1fr);height:100vh}
+  .ge-top{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line);z-index:20}
+  .ge-panel{grid-row:3;overflow-y:auto;background:var(--surface);
+    border-right:1px solid var(--line);padding:16px 16px 96px}
+  .ge-canvas{grid-row:3;overflow-y:auto;background:var(--page)}
+  .ge-hint{font-size:12px;line-height:17px;color:#5b6573;letter-spacing:.02em;
+    background:var(--chip);border-radius:var(--r-md);padding:9px 11px;margin-bottom:14px}
+
+  .ge-sec{border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:10px;
+    overflow:hidden}
+  .ge-sec__h{display:flex;align-items:center;gap:8px;width:100%;border:0;background:#fbfcfd;
+    font:inherit;font-size:13px;font-weight:600;color:var(--ink);padding:11px 12px;
+    cursor:pointer;text-align:left;min-height:44px}
+  .ge-sec__h:hover{background:var(--primary-container)}
+  .ge-sec[data-sel="1"] .ge-sec__h{background:var(--primary-container);
+    box-shadow:inset 3px 0 0 var(--primary)}
+  .ge-sec__chev{margin-left:auto;color:var(--sub);font-size:11px;transition:transform .16s}
+  .ge-sec[data-open="1"] .ge-sec__chev{transform:rotate(90deg)}
+  .ge-sec__b{padding:12px;border-top:1px solid var(--line);background:var(--surface)}
+  .ge-sec__tag{font-size:11px;font-weight:600;letter-spacing:.04em;padding:2px 7px;
+    border-radius:999px;background:var(--chip);color:#5b6573;white-space:nowrap}
+
+  .ge-f{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+  .ge-f__l{font-size:11px;font-weight:600;letter-spacing:.04em;color:#5b6573}
+  .ge-f input,.ge-f select,.ge-f textarea{font:inherit;font-size:13px;color:var(--ink);
+    border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;
+    background:var(--surface);min-height:38px;width:100%}
+  .ge-f textarea{min-height:62px;resize:vertical;line-height:19px}
+  .ge-f input:focus,.ge-f select:focus,.ge-f textarea:focus{outline:2px solid var(--primary);
+    outline-offset:-1px;border-color:var(--primary)}
+  .ge-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .ge-row--3{grid-template-columns:1fr 1fr 1fr}
+  .ge-row--4{grid-template-columns:1fr 1fr 1fr 1fr}
+
+  .ge-item{border:1px solid var(--line);border-radius:var(--r-md);padding:10px;
+    margin-bottom:8px;background:#fcfdfe}
+  .ge-item[data-sel="1"]{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-container)}
+  .ge-item__h{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  .ge-item__n{font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.04em;
+    font-variant-numeric:tabular-nums;white-space:nowrap}
+  .ge-mini{border:1px solid var(--line);background:var(--surface);font:inherit;font-size:12px;
+    font-weight:600;color:#4d5865;border-radius:var(--r-sm);padding:5px 9px;cursor:pointer;
+    min-height:30px;min-width:30px;line-height:1;white-space:nowrap}
+  .ge-mini:hover{border-color:var(--primary);color:var(--primary)}
+  .ge-mini--danger:hover{border-color:var(--error);color:var(--error)}
+  .ge-mini[disabled]{opacity:.35;cursor:not-allowed}
+  .ge-adds{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+
+  /* 图标库与素材区的完整样式在下方「图标库」一节（.ge-icons / .ge-ico），
+     这里曾经是两份重复定义，迁移时弄丢了选择器，只剩悬空的声明块，已清理。 */
+
+  .ge-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
+    color:var(--warning);letter-spacing:.02em;white-space:nowrap}
+  .ge-state__d{width:7px;height:7px;border-radius:50%;background:var(--warning)}
+  .ge-state--ok{color:var(--success)}
+  .ge-state--ok .ge-state__d{background:var(--success)}
+  .ge-state--err{color:var(--error)}
+  .ge-state--err .ge-state__d{background:var(--error)}
+
+  /* 顶栏按用途分组：状态区 / 视图 / 数据 / 导出 / 版本。
+     组间用竖线分隔，比一排九个相同按钮更容易找到要点的那个。 */
+  .ge-sep{width:1px;align-self:stretch;margin:4px 2px;background:var(--line);flex:none}
+  .ge-doc{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;
+    color:#4d5865;letter-spacing:.02em;white-space:nowrap}
+  .ge-doc__badge{font-size:10px;font-weight:600;letter-spacing:.04em;padding:2px 7px;
+    border-radius:999px;background:var(--chip);color:#5b6573;white-space:nowrap}
+  .ge-doc__badge[data-tone="draft"]{background:#fef3c7;color:#92400e}
+  .ge-doc__badge[data-tone="review"]{background:#dbe7f8;color:#1d4ed8}
+  .ge-doc__badge[data-tone="ok"]{background:#dcfce7;color:#14803c}
+  .ge-doc__badge[data-tone="warn"]{background:#fee2e2;color:#b91c1c}
+
+  /* 登录门：整页遮罩。静态页任何人都能打开 URL，没登录就给一条去后台登录的路，
+     而不是放人进来点一堆全报错的按钮。真正的强制在服务端。 */
+  .ge-gate{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;
+    background:var(--page);padding:24px}
+  .ge-gate__card{max-width:420px;background:var(--surface);border:1px solid var(--line);
+    border-radius:var(--r-lg);padding:28px 26px;box-shadow:var(--shadow-lift);text-align:center}
+  .ge-gate__t{font-size:17px;font-weight:600;line-height:24px;margin-bottom:8px}
+  .ge-gate__d{font-size:13px;line-height:20px;color:#4d5865;margin-bottom:18px}
+  .ge-gate__acts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+
+  /* 送审冻结条：in_review 期间服务端拒绝写入，先把原因摆在顶上，
+     免得改了半天保存时才发现存不进去。 */
+  .ge-lock{grid-column:1/-1;grid-row:2;background:#dbe7f8;color:#1e40af;font-size:12px;font-weight:600;
+    line-height:18px;padding:8px 16px;letter-spacing:.02em;display:flex;gap:8px;align-items:center}
+  .ge-lock[hidden],.ge-doc[hidden]{display:none}
+
+  /* 画布里的选中态与拖拽把手 */
+  .ge-canvas .gc-card,.ge-canvas .gc-figcard{outline:2px solid transparent;outline-offset:3px;
+    transition:outline-color .14s}
+  .ge-canvas .gc-card:hover,.ge-canvas .gc-figcard:hover{outline-color:#cfe0ee}
+  .ge-canvas [data-sel="1"].gc-card,.ge-canvas [data-sel="1"].gc-figcard{
+    outline-color:var(--primary)}
+  .ge-canvas .gc-hot{cursor:grab}
+  .ge-canvas .gc-hot:active{cursor:grabbing}
+  .ge-canvas .gc-hot[data-sel="1"]::after{opacity:1;border-width:3px}
+  .ge-canvas .gc-acts{opacity:1}
+
+  /* 图标库：类名与 iconLibEditor() 里的 DOM 保持一致 */
+  .ge-icons{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
+  .ge-ico{border:1px solid var(--line);border-radius:var(--r-md);padding:9px 8px;
+    background:#fcfdfe;display:flex;flex-direction:column;gap:3px;min-width:0}
+  .ge-ico__prev{height:38px;display:flex;align-items:center;justify-content:center;
+    background:var(--surface);border-radius:var(--r-sm);border:1px solid var(--line)}
+  .ge-ico__name{font-size:12px;font-weight:600;line-height:16px;color:#2b3440;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ge-ico__id{font-size:10px;line-height:14px;color:var(--sub);font-family:var(--font-mono);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ge-ico__use{font-size:10px;line-height:14px;color:var(--sub);letter-spacing:.02em}
+  .ge-ico__edit{display:flex;flex-direction:column;gap:6px;margin-top:4px;
+    padding-top:6px;border-top:1px dashed var(--line)}
+  .ge-ico__edit .ge-f__l{font-size:10px}
+  .ge-ico__edit input,.ge-ico__edit select{font-size:12px;min-height:30px;padding:5px 7px}
+  .ge-ico__inline{flex:none;width:28px;height:28px;border:1px solid var(--line);
+    border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;
+    background:var(--surface)}
+  .ge-ico__inline .gc-ico{height:17px!important;width:auto!important;max-width:24px}
+
+  /* —— 版本管理抽屉 —— */
+  .ge-vwrap{position:fixed;inset:0;z-index:75;display:none}
+  .ge-vwrap[data-open="1"]{display:block}
+  .ge-vwrap__veil{position:absolute;inset:0;background:rgba(15,23,42,.34)}
+  .ge-vpanel{position:absolute;top:0;bottom:0;right:0;width:min(430px,92vw);
+    background:var(--surface);box-shadow:var(--shadow-lift);
+    display:flex;flex-direction:column;overflow:hidden}
+  .ge-vpanel__h{display:flex;align-items:center;gap:8px;padding:14px 16px;
+    border-bottom:1px solid var(--line)}
+  .ge-vpanel__t{font-size:15px;font-weight:600;letter-spacing:-.01em}
+  .ge-vpanel__b{flex:1;overflow-y:auto;padding:14px 16px 40px}
+  .ge-vpanel__f{border-top:1px solid var(--line);padding:12px 16px;
+    display:flex;gap:8px;flex-wrap:wrap}
+
+  .ge-vnew{border:1px solid var(--line);border-radius:var(--r-lg);padding:12px;
+    margin-bottom:14px;background:#fbfcfd}
+  .ge-vlist{display:flex;flex-direction:column;gap:8px}
+  .ge-v{border:1px solid var(--line);border-radius:var(--r-lg);padding:11px 12px;
+    background:var(--surface)}
+  .ge-v[data-current="1"]{border-color:var(--primary);
+    box-shadow:0 0 0 3px var(--primary-container)}
+  .ge-v__h{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}
+  .ge-v__n{font-size:13px;font-weight:600;line-height:19px;min-width:0;
+    overflow-wrap:anywhere}
+  .ge-v__badge{font-size:10px;font-weight:600;line-height:14px;letter-spacing:.04em;
+    color:var(--primary-pressed);background:var(--primary-container);
+    padding:2px 7px;border-radius:999px;white-space:nowrap}
+  .ge-v__meta{font-size:11px;line-height:16px;color:var(--sub);letter-spacing:.02em;
+    margin-top:3px;font-variant-numeric:tabular-nums}
+  .ge-v__note{font-size:11px;line-height:16px;color:#5b6573;margin-top:4px}
+  .ge-v__hash{font-family:var(--font-mono);font-size:10px;color:#9aa2ac}
+  .ge-v__acts{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+  .ge-v__diff{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);
+    font-size:11px;line-height:17px;color:#4d5865}
+  .ge-v__diff b{font-weight:600;color:#20293a}
+  .ge-v__diff ul{margin:4px 0 0;padding-left:16px;display:flex;
+    flex-direction:column;gap:2px}
+  /* 对比明细：新增 / 删除 / 变动 三段，各自一个色标。
+     复核时要一眼看出「这一版动了什么」，所以三类不共用一种颜色。 */
+  .ge-v__diffh{font-size:11px;font-weight:600;line-height:16px;letter-spacing:.02em;
+    margin-bottom:2px}
+  .ge-v__diffseg{margin-top:7px;padding-left:8px;
+    border-left:2px solid var(--line)}
+  .ge-v__diffseg[data-kind="added"]{border-left-color:var(--success)}
+  .ge-v__diffseg[data-kind="added"] .ge-v__diffh{color:#14803c}
+  .ge-v__diffseg[data-kind="removed"]{border-left-color:var(--error)}
+  .ge-v__diffseg[data-kind="removed"] .ge-v__diffh{color:#b91c1c}
+  .ge-v__diffseg[data-kind="changed"]{border-left-color:var(--warning)}
+  .ge-v__diffseg[data-kind="changed"] .ge-v__diffh{color:#92400e}
+  .ge-v__diffb{font-size:11px;line-height:17px;color:#4d5865;
+    overflow-wrap:anywhere}
+  .ge-v__diffb code{font-family:var(--font-mono);font-size:10px;color:#5b6573}
+  .ge-vempty{text-align:center;padding:34px 14px;font-size:12px;line-height:18px;
+    color:var(--sub);border:1px dashed var(--line);border-radius:var(--r-lg)}
+</style>
+</head>
+<body>
+<div class="ge">
+  <div class="ge-top">
+    <span class="gc-brand">返校指南 · 编辑器</span>
+    <span class="ge-doc" id="ge-doc" hidden>
+      <span id="ge-doc-slug"></span>
+      <span class="ge-doc__badge" id="ge-doc-badge"></span>
+    </span>
+    <span id="ge-state" class="ge-state ge-state--ok"><span class="ge-state__d"></span>已同步</span>
+    <span class="gc-spacer"></span>
+    <button type="button" class="gc-btn" id="ge-reveal" aria-pressed="true">显示热区</button>
+    <span class="ge-sep"></span>
+    <button type="button" class="gc-btn" id="ge-json">导出 JSON</button>
+    <button type="button" class="gc-btn" id="ge-load">导入 JSON</button>
+    <span class="ge-sep"></span>
+    <button type="button" class="gc-btn" id="ge-pngall">批量存图</button>
+    <button type="button" class="gc-btn gc-btn--primary" id="ge-pdf">打印 / PDF</button>
+    <span class="ge-sep"></span>
+    <button type="button" class="gc-btn" id="ge-versions" aria-expanded="false"
+            aria-controls="ge-vwrap">版本 / 发布</button>
+    <button type="button" class="gc-btn" id="ge-reset">还原原稿</button>
+    <a class="gc-btn" href="index.html">查看前台</a>
+    <input type="file" id="ge-file" accept=".json,application/json" hidden />
+    <input type="file" id="ge-vfile" accept=".json,application/json" hidden />
+    <input type="file" id="ge-icofile" accept=".svg,.png,image/svg+xml,image/png" multiple hidden />
+    <input type="file" id="ge-figfile" accept=".svg,image/svg+xml" hidden />
+  </div>
+  <div class="ge-lock" id="ge-lock" hidden></div>
+
+  <aside class="ge-panel" id="ge-panel" aria-label="内容检查器"></aside>
+  <main class="ge-canvas" id="ge-canvas"></main>
+</div>
+
+<!-- 版本抽屉：存版 / 对比 / 回滚 / 导入导出 -->
+<div class="ge-vwrap" id="ge-vwrap" data-open="0">
+  <div class="ge-vwrap__veil" id="ge-vveil"></div>
+  <aside class="ge-vpanel" role="dialog" aria-modal="true" aria-label="版本管理">
+    <div class="ge-vpanel__h">
+      <span class="ge-vpanel__t">版本管理</span>
+      <span class="gc-spacer" style="flex:1"></span>
+      <button type="button" class="ge-mini" id="ge-vimport">导入版本</button>
+      <button type="button" class="ge-mini" id="ge-vclose" aria-label="关闭">✕</button>
+    </div>
+    <div class="ge-vpanel__b" id="ge-vbody"></div>
+  </aside>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var R = window.GuideRender, h = R.h;
+  var STORE = "shu-guide-draft-v2";
+  var ORIGINAL = JSON.parse(JSON.stringify(window.GUIDE_DATA || {}));
+  var SLUG = (function () {
+    var m = /[?&]slug=([a-z0-9-]{3,64})/.exec(location.search);
+    return m ? m[1] : "freshman-transit";
+  })();
+
+  /* 与服务端的连接状态。online=false 时是「离线模式」（未登录 / 接口不可达）：
+     行为退回接入 D1 之前 —— 读写 localStorage，顶栏标出来，免得改了半天
+     以为已经存进数据库。 */
+  var server = {
+    online: false,
+    docId: null,
+    docTitle: "",
+    revisions: [],          // getGuideDocument 的修订列表（不含正文）
+    currentRevisionId: null,
+    workingId: null,
+    workingNo: 0,
+    workingStatus: "",      // draft / in_review / approved
+    assets: [],             // listGuideAssets 的图示素材（figure_svg）
+    readOnly: false,        // in_review 冻结：服务端会拒绝写入，先把原因摆出来
+  };
+  var STATUS_LABEL = {
+    draft: "草稿", in_review: "送审中", approved: "已通过",
+    rejected: "已退回", superseded: "旧版",
+  };
+
+  var data = loadLocal();
+  var view = { sel: null, selHot: null, open: {}, reveal: true };
+
+  function loadLocal() {
+    try {
+      var raw = localStorage.getItem(STORE);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.cards && parsed.cover) return parsed;
+      }
+    } catch (e) {}
+    return JSON.parse(JSON.stringify(ORIGINAL));
+  }
+
+  /* 管理端 API 的薄封装：同源带 cookie，非 2xx 统一抛带 status/code 的 Error */
+  function api(path, opts) {
+    opts = opts || {};
+    opts.credentials = "same-origin";
+    if (opts.json !== undefined) {
+      opts.method = opts.method || "POST";
+      opts.headers = { "content-type": "application/json" };
+      opts.body = JSON.stringify(opts.json);
+      delete opts.json;
+    }
+    return fetch(path, opts).then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          var err = new Error(body.message || ("HTTP " + res.status));
+          err.status = res.status;
+          err.code = body.error || "";
+          throw err;
+        });
+      }
+      return res.status === 204 ? null : res.json();
+    });
+  }
+
+  var saveTimer = null;
+  function markState(state, text) {
+    var el = document.getElementById("ge-state");
+    el.className = "ge-state" +
+      (state === "ok" ? " ge-state--ok" : state === "err" ? " ge-state--err" : "");
+    el.lastChild.textContent = text;
+  }
+  function persist() {
+    markState("dirty", server.online ? "改动待保存…" : "改动待保存（本地）");
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () { saveNow(); }, 360);
+  }
+  /* 立即保存。本地始终留一份作离线兜底与意外关页面的保险；
+     在线时写服务器 —— 服务端语义是「保存草稿」：有 draft 原地更新，
+     同内容直接返回 unchanged，所以 360ms 防抖连发不会堆版本。 */
+  function saveNow() {
+    try { localStorage.setItem(STORE, JSON.stringify(data)); } catch (e) {}
+    if (!server.online) { markState("ok", "已保存到本地（离线）"); return Promise.resolve(); }
+    if (server.readOnly) { markState("err", "送审中，内容已冻结"); return Promise.resolve(); }
+    return api("/api/admin/guide/documents/" + server.docId + "/revisions", {
+      json: {
+        title: (data.meta && data.meta.title) || server.docTitle || "返校指南",
+        edition: (data.meta && data.meta.edition) || null,
+        note: null,
+        content: data,
+      },
+    }).then(function (res) {
+      if (res && res.id) {
+        server.workingId = res.id;
+        server.workingNo = res.revisionNo;
+        /* 保存可能新开了一版 draft（原 working 是已发布版），状态要跟着换，
+           否则徽章会继续显示「已通过」直到下次刷新 */
+        if (res.editorialStatus) server.workingStatus = res.editorialStatus;
+      }
+      markState("ok", "已保存到服务器");
+      syncDocBadge();
+    }).catch(function (err) {
+      if (err.code === "invalid_state") {
+        setLocked("第 " + server.workingNo + " 版正在送审，内容已冻结。等复核出结果后才能继续编辑。");
+        markState("err", "送审中，内容已冻结");
+        return;
+      }
+      markState("err", "服务器保存失败，已留存本地");
+      R.toast("保存失败：" + err.message + "（改动已保存在本地）");
+    });
+  }
+
+  /* ── 路径读写：把表单控件和数据结构绑起来 ───────────────────── */
+  function getPath(path) {
+    return path.split(".").reduce(function (o, k) {
+      if (o === null || o === undefined) return undefined;
+      return o[/^\d+$/.test(k) ? Number(k) : k];
+    }, data);
+  }
+  function setPath(path, value) {
+    var keys = path.split(".");
+    var last = keys.pop();
+    var host = keys.reduce(function (o, k) { return o[/^\d+$/.test(k) ? Number(k) : k]; }, data);
+    host[/^\d+$/.test(last) ? Number(last) : last] = value;
+  }
+  function cardIndex(id) {
+    return (data.cards || []).findIndex(function (c) { return c.id === id; });
+  }
+  function cardById(id) {
+    return (data.cards || []).find(function (c) { return c.id === id; });
+  }
+
+  /* ══════════════ 卡片增删改序 ══════════════ */
+
+  function uniqueId(base) {
+    var id = base, n = 2;
+    while (cardById(id)) { id = base + "-" + n; n++; }
+    return id;
+  }
+
+  function duplicateCard(id) {
+    var i = cardIndex(id);
+    if (i < 0) return;
+    var copy = JSON.parse(JSON.stringify(data.cards[i]));
+    copy.id = uniqueId(id + "-copy");
+    /* 图示卡片的热区 id 也要错开，否则选中态会串 */
+    (copy.hotspots || []).forEach(function (hs, k) { hs.id = copy.id + "-h" + (k + 1); });
+    data.cards.splice(i + 1, 0, copy);
+    view.sel = copy.id;
+    view.selHot = null;
+    view.open["card:" + copy.id] = true;
+    persist();
+    refresh();
+    R.toast("已复制卡片 → " + copy.id);
+  }
+
+  function moveCard(id, dir) {
+    var i = cardIndex(id);
+    var t = i + dir;
+    if (i < 0 || t < 0 || t >= data.cards.length) return;
+    var tmp = data.cards[i];
+    data.cards[i] = data.cards[t];
+    data.cards[t] = tmp;
+    persist();
+    refresh();
+  }
+
+  function deleteCard(id) {
+    var i = cardIndex(id);
+    if (i < 0) return;
+    if (!window.confirm("删除卡片「" + id + "」？")) return;
+    data.cards.splice(i, 1);
+    if (view.sel === id) { view.sel = null; view.selHot = null; }
+    persist();
+    refresh();
+  }
+
+  function currentGroupId() {
+    var c = view.sel && cardById(view.sel);
+    if (c && c.group) return c.group;
+    return (data.groups && data.groups[0] && data.groups[0].id) || "";
+  }
+
+  function addRouteCard() {
+    var g = currentGroupId();
+    var proto = (data.cards || []).filter(function (c) {
+      return c.kind === "route" && c.group === g;
+    })[0];
+    var card = {
+      id: uniqueId("card-route"),
+      kind: "route",
+      group: g,
+      hub: { name: (proto && proto.hub && proto.hub.name) || "新枢纽", note: "" },
+      toward: (proto && proto.toward) || "去往 某校区",
+      mode: "metro",
+      modeLabel: "地铁",
+      durationMin: 60,
+      fareYuan: 8,
+      flags: [],
+      legs: [
+        { type: "stop", name: "起点站", marker: "dot", rails: ["neutral"] },
+        { type: "ride", rails: ["neutral"], lines: [{ kind: "metro", no: "1", color: "l1", suffix: "号线", toward: "" }] },
+        { type: "stop", name: "终点站", marker: "dot", terminal: true },
+      ],
+    };
+    data.cards.push(card);
+    view.sel = card.id;
+    view.open["card:" + card.id] = true;
+    persist();
+    refresh();
+  }
+
+  function addFigureCard() {
+    var keys = figureKeys();
+    var card = {
+      id: uniqueId("card-figure"),
+      kind: "figure",
+      group: currentGroupId(),
+      figure: keys[0] || "",
+      title: "示意图",
+      caption: "",
+      hotspots: [],
+    };
+    data.cards.push(card);
+    view.sel = card.id;
+    view.open["card:" + card.id] = true;
+    persist();
+    refresh();
+  }
+
+  /* ══════════════ 预览 ══════════════ */
+
+  var opts = {
+    onPickCard: function (id) { select(id, null); },
+    onPickHot: function (cardId, hotId) { select(cardId, hotId); },
+    onDuplicate: duplicateCard,
+    onMove: moveCard,
+    onDelete: deleteCard,
+    onNavigate: function (groupId) {
+      var el = document.getElementById("group-" + groupId);
+      if (el) document.getElementById("ge-canvas").scrollTop = el.offsetTop - 12;
+    },
+    onInternalLink: function (href) { R.toast("前台会跳转到：" + href); },
+  };
+
+  function renderPreview() {
+    var canvas = document.getElementById("ge-canvas");
+    var keepScroll = canvas.scrollTop;
+    canvas.textContent = "";
+    canvas.appendChild(R.renderFlow(data, opts));
+    canvas.querySelectorAll("[data-reveal]").forEach(function (n) {
+      n.dataset.reveal = view.reveal ? "1" : "0";
+    });
+    paintSelection(canvas);
+    attachHotDrag(canvas);
+    canvas.scrollTop = keepScroll;
+  }
+
+  function paintSelection(root) {
+    root.querySelectorAll("[data-card-id]").forEach(function (el) {
+      el.dataset.sel = el.dataset.cardId === view.sel ? "1" : "0";
+    });
+    root.querySelectorAll(".gc-hot").forEach(function (el) {
+      el.dataset.sel = el.dataset.hotId === view.selHot ? "1" : "0";
+    });
+  }
+
+  function select(cardId, hotId) {
+    view.sel = cardId;
+    view.selHot = hotId || null;
+    if (cardId) view.open["card:" + cardId] = true;
+    refresh();
+    var node = document.querySelector('.ge-item[data-sel="1"]') ||
+               document.querySelector('.ge-sec[data-sel="1"]');
+    if (node) {
+      var panel = document.getElementById("ge-panel");
+      panel.scrollTop = node.offsetTop - 60;
+    }
+  }
+
+  /* 热区拖拽：直接在真图上拖，坐标按百分比写回数据 */
+  function attachHotDrag(root) {
+    root.querySelectorAll(".gc-figwrap").forEach(function (wrap) {
+      var cardEl = wrap.closest("[data-card-id]");
+      if (!cardEl) return;
+      var ci = cardIndex(cardEl.dataset.cardId);
+      if (ci < 0) return;
+      wrap.querySelectorAll(".gc-hot").forEach(function (btn) {
+        var card = data.cards[ci];
+        var hi = (card.hotspots || []).findIndex(function (x) { return x.id === btn.dataset.hotId; });
+        if (hi < 0) return;
+        btn.addEventListener("pointerdown", function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          select(card.id, card.hotspots[hi].id);
+          var moved = false;
+          btn.setPointerCapture(ev.pointerId);
+          var move = function (e) {
+            var r = wrap.getBoundingClientRect();
+            if (!r.width || !r.height) return;
+            moved = true;
+            var x = Math.max(0, Math.min(100, ((e.clientX - r.left) / r.width) * 100));
+            var y = Math.max(0, Math.min(100, ((e.clientY - r.top) / r.height) * 100));
+            setPath("cards." + ci + ".hotspots." + hi + ".x", Math.round(x * 10) / 10);
+            setPath("cards." + ci + ".hotspots." + hi + ".y", Math.round(y * 10) / 10);
+            btn.style.left = x + "%";
+            btn.style.top = y + "%";
+          };
+          var up = function () {
+            btn.removeEventListener("pointermove", move);
+            btn.removeEventListener("pointerup", up);
+            if (moved) { persist(); refresh(); }
+          };
+          btn.addEventListener("pointermove", move);
+          btn.addEventListener("pointerup", up);
+        });
+      });
+    });
+  }
+
+  /* ══════════════ 检查器 ══════════════ */
+
+  function field(label, path, o) {
+    o = o || {};
+    var val = getPath(path);
+    var input;
+    if (o.type === "textarea") {
+      input = h("textarea", { rows: o.rows || 3 });
+      input.value = val === undefined || val === null ? "" : val;
+    } else if (o.type === "select") {
+      input = h("select", null, (o.options || []).map(function (op) {
+        return h("option", { value: op.value, text: op.label });
+      }));
+      input.value = val === undefined || val === null ? "" : val;
+    } else {
+      input = h("input", { type: o.type || "text", min: o.min, step: o.step });
+      input.value = val === undefined || val === null ? "" : val;
+    }
+    input.addEventListener("input", function () {
+      var v = input.value;
+      if (o.type === "number") v = v === "" ? null : Number(v);
+      if (o.nullable && v === "") v = null;
+      setPath(path, v);
+      persist();
+      renderPreview();
+    });
+    input.addEventListener("change", function () { refresh(); });
+    return h("label", { class: "ge-f" }, h("span", { class: "ge-f__l", text: label }), input);
+  }
+
+  function section(key, title, tag, selected, bodyFn) {
+    var open = !!view.open[key];
+    var sec = h("div", {
+      class: "ge-sec",
+      dataset: { open: open ? "1" : "0", key: key, sel: selected ? "1" : "0" },
+    });
+    var head = h("button", { class: "ge-sec__h", type: "button" },
+      h("span", { text: title }),
+      tag ? h("span", { class: "ge-sec__tag", text: tag }) : null,
+      h("span", { class: "ge-sec__chev", text: "▶" })
+    );
+    head.addEventListener("click", function () {
+      view.open[key] = !view.open[key];
+      refresh();
+    });
+    sec.appendChild(head);
+    if (open) sec.appendChild(h("div", { class: "ge-sec__b" }, bodyFn()));
+    return sec;
+  }
+
+  /* ══════════════ 图标库 ══════════════
+   * 图标不再写死在渲染层里，而是存进 data.icons，按 id 引用。
+   * 上传的文件用 FileReader 转成 data URI（SVG 直接存标记文本），
+   * 因为单卡片导出 PNG 走 <foreignObject>，其中加载不了相对路径的外部文件。
+   * data.icons 随 JSON 导出／导入一起走，所以图标库跟着文档走，不依赖本机。
+   */
+  var ICON_GROUPS = [
+    { value: "transit", label: "交通标识" },
+    { value: "brand", label: "校方 / 社团" },
+    { value: "misc", label: "其它" },
+  ];
+
+  function ensureIcons() {
+    if (!Array.isArray(data.icons)) {
+      /* 首次进入：把出厂种子实体化进 data，之后用户改的就是自己的副本 */
+      data.icons = JSON.parse(JSON.stringify(window.GUIDE_ICON_SEED || []));
+    }
+    return data.icons;
+  }
+
+  function iconIdTaken(id, exceptIdx) {
+    var list = ensureIcons();
+    for (var i = 0; i < list.length; i++)
+      if (i !== exceptIdx && list[i].id === id) return true;
+    return false;
+  }
+
+  function slugify(name, fallback) {
+    var s2 = String(name || "").toLowerCase()
+      .replace(/\.(svg|png|jpe?g)$/i, "")
+      .replace(/[^a-z0-9一-龥]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    /* 中文名转不出 ascii slug 时给个稳定兜底，避免 id 为空 */
+    if (!/[a-z0-9]/.test(s2)) s2 = fallback || ("icon-" + Date.now().toString(36));
+    return s2;
+  }
+
+  function uniqueIconId(base) {
+    var id = base, n = 2;
+    while (iconIdTaken(id, -1)) { id = base + "-" + n; n++; }
+    return id;
+  }
+
+  /* 上传：SVG 存标记文本（可继承 currentColor、体积小），位图存 data URI */
+  function readIconFile(file) {
+    return new Promise(function (resolve, reject) {
+      var isSvg = /svg/i.test(file.type) || /\.svg$/i.test(file.name);
+      var fr = new FileReader();
+      fr.onerror = function () { reject(new Error("读取失败")); };
+      fr.onload = function () {
+        var base = slugify(file.name);
+        var ic = { id: uniqueIconId(base), name: file.name.replace(/\.[^.]+$/, ""), group: "transit" };
+        if (isSvg) {
+          var txt = String(fr.result);
+          /* 只取 <svg> 本体，剥掉 XML 声明与注释，避免内联进 DOM 时报错 */
+          var m = txt.match(/<svg[\s\S]*<\/svg>/i);
+          if (!m) return reject(new Error("不是有效的 SVG"));
+          ic.svg = m[0];
+          var vb = ic.svg.match(/viewBox="([\d.\-\s]+)"/i);
+          if (vb) {
+            var n4 = vb[1].trim().split(/\s+/).map(Number);
+            if (n4.length === 4 && n4[3]) ic.ratio = +(n4[2] / n4[3]).toFixed(4);
+          }
+        } else {
+          ic.uri = String(fr.result);
+        }
+        resolve(ic);
+      };
+      if (isSvg) fr.readAsText(file);
+      else fr.readAsDataURL(file);
+    });
+  }
+
+  function addIconFiles(files) {
+    var arr = Array.prototype.slice.call(files || []);
+    if (!arr.length) return;
+    ensureIcons();
+    Promise.all(arr.map(function (f) {
+      return readIconFile(f).catch(function (err) {
+        R.toast(f.name + "：" + err.message);
+        return null;
+      });
+    })).then(function (list) {
+      var ok = list.filter(Boolean);
+      if (!ok.length) return;
+      /* 新图标排在最前，方便刚上传就看到 */
+      data.icons = ok.concat(data.icons);
+      view.open["iconlib"] = true;
+      persist(); refresh();
+      R.toast("已加入 " + ok.length + " 个图标");
+    });
+  }
+
+  /* 统计某个图标被引用了多少次 —— 删除前要让用户知道会影响什么 */
+  function iconUsage(id) {
+    var n = 0;
+    if (data.meta && data.meta.markIcon === id) n++;
+    (data.cards || []).forEach(function (c) {
+      (c.legs || []).forEach(function (leg) {
+        (leg.lines || []).forEach(function (ln) { if (ln.icon === id) n++; });
+      });
+    });
+    return n;
+  }
+
+  function iconLibEditor() {
+    var list = ensureIcons();
+    return section("iconlib", "图标库", list.length + " 个", false, function () {
+      var w = h("div", null,
+        h("div", { class: "ge-hint",
+          text: "上传 SVG 或 PNG 后，任意线路都能在「图标」下拉里选用同一个图标。图标随 JSON 一起导出，换机器也不会丢。" })
+      );
+
+      w.appendChild(h("div", { class: "ge-adds", style: "margin:0 0 10px" },
+        h("button", {
+          class: "gc-btn", type: "button", text: "上传图标",
+          onclick: function () { document.getElementById("ge-icofile").click(); },
+        }),
+        h("button", {
+          class: "ge-mini", type: "button", text: "品牌标：" +
+            ((data.meta && data.meta.markIcon) || "brand-shutf"),
+          title: "卡片右上角显示的标识，点此在下方选择",
+          onclick: function () { view.open["iconlib:mark"] = !view.open["iconlib:mark"]; refresh(); },
+        })
+      ));
+
+      if (view.open["iconlib:mark"]) {
+        var markSel = h("select", null, list.map(function (ic) {
+          return h("option", { value: ic.id, text: (ic.name || ic.id) + "（" + ic.id + "）" });
+        }));
+        markSel.value = (data.meta && data.meta.markIcon) || "brand-shutf";
+        markSel.addEventListener("change", function () {
+          data.meta.markIcon = markSel.value;
+          persist(); refresh();
+        });
+        w.appendChild(h("label", { class: "ge-f" },
+          h("span", { class: "ge-f__l", text: "卡片右上角的品牌标" }), markSel));
+      }
+
+      var grid = h("div", { class: "ge-icons" });
+      list.forEach(function (ic, ii) {
+        var used = iconUsage(ic.id);
+        var cell = h("div", { class: "ge-ico", dataset: { iconId: ic.id } });
+        var prev = h("div", { class: "ge-ico__prev" });
+        var node = R.renderIcon(data, ic.id, { size: 34, label: ic.name });
+        if (node) { node.setAttribute("style", "height:34px;width:auto;max-width:100%"); prev.appendChild(node); }
+        cell.appendChild(prev);
+
+        cell.appendChild(h("div", { class: "ge-ico__name", text: ic.name || ic.id }));
+        cell.appendChild(h("div", { class: "ge-ico__id", text: ic.id }));
+        cell.appendChild(h("div", { class: "ge-ico__use", text: used ? "已用 " + used + " 处" : "未使用" }));
+
+        var nameIn = h("input", { type: "text", value: ic.name || "" });
+        nameIn.addEventListener("input", function () {
+          data.icons[ii].name = nameIn.value;
+          persist(); renderPreview();
+        });
+        nameIn.addEventListener("change", refresh);
+
+        var grpSel = h("select", null, ICON_GROUPS.map(function (g) {
+          return h("option", { value: g.value, text: g.label });
+        }));
+        grpSel.value = ic.group || "misc";
+        grpSel.addEventListener("change", function () {
+          data.icons[ii].group = grpSel.value;
+          persist(); refresh();
+        });
+
+        cell.appendChild(h("div", { class: "ge-ico__edit" },
+          h("label", { class: "ge-f", style: "margin:0" },
+            h("span", { class: "ge-f__l", text: "名称" }), nameIn),
+          h("label", { class: "ge-f", style: "margin:0" },
+            h("span", { class: "ge-f__l", text: "分组" }), grpSel),
+          h("div", { class: "ge-adds", style: "margin:0" },
+            h("button", {
+              class: "ge-mini", type: "button", text: "替换",
+              title: "用新文件替换这个图标，引用它的地方会一起更新",
+              onclick: function () {
+                var fi = document.getElementById("ge-icofile");
+                fi.dataset.replaceIdx = String(ii);
+                fi.click();
+              },
+            }),
+            h("button", {
+              class: "ge-mini ge-mini--danger", type: "button", text: "删除",
+              onclick: function () {
+                var msg = used
+                  ? "这个图标已被引用 " + used + " 处，删除后那些地方会不显示图标。仍要删除？"
+                  : "删除图标「" + (ic.name || ic.id) + "」？";
+                if (!window.confirm(msg)) return;
+                data.icons.splice(ii, 1);
+                persist(); refresh();
+              },
+            })
+          )
+        ));
+
+        grid.appendChild(cell);
+      });
+      w.appendChild(grid);
+      return w;
+    });
+  }
+
+  /* ══════════════ 图示素材 ══════════════
+   * 图示（线路图、枢纽图）体积大，不随内容 JSON 走：单独存素材库，
+   * 卡片里只存 asset_key 引用。上传走指南专用的 SVG 通道（服务端有消毒，
+   * 与 SHUMap 的 media 通道互不复用）。离线模式只能看，不能传。 */
+  function figureKeys() {
+    var keys = server.assets.map(function (a) { return a.assetKey; });
+    Object.keys(window.GUIDE_FIGURE_DATA || {}).forEach(function (k) {
+      if (keys.indexOf(k) < 0) keys.push(k);
+    });
+    return keys;
+  }
+
+  function figureUsage(key) {
+    var n = 0;
+    (data.cards || []).forEach(function (c) { if (c.figure === key) n++; });
+    return n;
+  }
+
+  /* asset_key 会进 URL，服务端限定 3-64 位小写字母/数字/连字符 */
+  function assetKeyFromName(name) {
+    var s = String(name || "").toLowerCase().replace(/\.[^.]+$/, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!/^[a-z0-9]/.test(s)) s = "figure-" + s;
+    if (s.length < 3) s = (s + "-fig").slice(0, 64);
+    return s.slice(0, 62).replace(/-+$/, "") || "figure-new";
+  }
+
+  function loadAssets() {
+    if (!server.online) return Promise.resolve();
+    return api("/api/admin/guide/assets").then(function (res) {
+      server.assets = ((res && res.items) || []).filter(function (a) {
+        return a.assetKind === "figure_svg";
+      });
+      refresh();
+    }).catch(function () { /* 素材清单取不到不阻塞编辑 */ });
+  }
+
+  function assetEditor() {
+    return section("assets", "图示素材", server.online ? server.assets.length + " 张" : "离线", false, function () {
+      var w = h("div", null,
+        h("div", { class: "ge-hint",
+          text: "图示（线路图、枢纽图）存在素材库里，图示卡片按名称引用。只收 SVG —— 矢量放大不糊；服务端会做安全校验，含脚本的导出件会被拒。" })
+      );
+      if (!server.online) {
+        w.appendChild(h("div", { class: "ge-hint",
+          text: "离线模式下不能管理素材。登录后这里可以上传、替换、删除图示。" }));
+        return w;
+      }
+      w.appendChild(h("div", { class: "ge-adds", style: "margin:0 0 10px" },
+        h("button", {
+          class: "gc-btn", type: "button", text: "上传图示",
+          onclick: function () { document.getElementById("ge-figfile").click(); },
+        })
+      ));
+      if (!server.assets.length) {
+        w.appendChild(h("div", { class: "ge-vempty",
+          text: "素材库为空。上传第一张图示后，图示卡片就能按名称引用它。" }));
+        return w;
+      }
+      var grid = h("div", { class: "ge-icons" });
+      server.assets.forEach(function (a) {
+        var used = figureUsage(a.assetKey);
+        var cell = h("div", { class: "ge-ico" });
+        var prev = h("div", { class: "ge-ico__prev" });
+        prev.appendChild(h("img", {
+          src: "/api/public/guide-assets/" + encodeURIComponent(a.assetKey),
+          alt: a.assetKey,
+          style: "max-height:34px;max-width:100%",
+        }));
+        cell.appendChild(prev);
+        cell.appendChild(h("div", { class: "ge-ico__id", text: a.assetKey }));
+        cell.appendChild(h("div", { class: "ge-ico__use",
+          text: (used ? "已用 " + used + " 处 · " : "未使用 · ") +
+                Math.max(1, Math.round((a.byteSize || 0) / 1024)) + " KB" }));
+        cell.appendChild(h("div", { class: "ge-adds", style: "margin:0" },
+          h("button", {
+            class: "ge-mini", type: "button", text: "替换",
+            title: "用新文件替换这张图，引用它的卡片会一起更新",
+            onclick: function () {
+              var fi = document.getElementById("ge-figfile");
+              fi.dataset.replaceKey = a.assetKey;
+              fi.click();
+            },
+          }),
+          h("button", {
+            class: "ge-mini ge-mini--danger", type: "button", text: "删除",
+            onclick: function () {
+              var msg = used
+                ? "这张图被当前草稿引用 " + used + " 处。已发布内容仍引用时服务端会拒绝删除。仍要删除？"
+                : "删除图示「" + a.assetKey + "」？";
+              if (!window.confirm(msg)) return;
+              api("/api/admin/guide/assets/" + encodeURIComponent(a.assetKey), { method: "DELETE" })
+                .then(function () { R.toast("已删除「" + a.assetKey + "」"); loadAssets(); })
+                .catch(function (err) { R.toast("删除失败：" + err.message); });
+            },
+          })
+        ));
+        grid.appendChild(cell);
+      });
+      w.appendChild(grid);
+      return w;
+    });
+  }
+
+  /* 线路里的图标选择器：空值＝按类型用默认图标 */
+  function iconPicker(label, path) {
+    var list = ensureIcons();
+    var cur = getPath(path) || "";
+    var sel = h("select", null,
+      [h("option", { value: "", text: "（按类型自动）" })].concat(
+        list.map(function (ic) {
+          return h("option", { value: ic.id, text: (ic.name || ic.id) });
+        })
+      )
+    );
+    sel.value = cur;
+    sel.addEventListener("change", function () {
+      setPath(path, sel.value || null);
+      persist(); refresh();
+    });
+    var prev = h("span", { class: "ge-ico__inline" });
+    var node = cur ? R.renderIcon(data, cur, { size: 16 }) : null;
+    if (node) prev.appendChild(node);
+    return h("label", { class: "ge-f" },
+      h("span", { class: "ge-f__l", text: label }),
+      h("span", { style: "display:flex;align-items:center;gap:7px" }, sel, prev)
+    );
+  }
+
+  var LEG_TYPES = [
+    { value: "stop", label: "站点 / 地点" },
+    { value: "ride", label: "乘车段" },
+    { value: "walk", label: "步行段" },
+  ];
+  var RAIL_KEYS = ["l1","l2","l3","l4","l7","l9","l10","l11","l17","bus","walk","neutral"];
+  var MODES = [
+    { value: "metro", label: "地铁" },
+    { value: "bus", label: "公交" },
+    { value: "rail", label: "铁路" },
+    { value: "mixed", label: "混合" },
+  ];
+
+  function legEditor(ci, leg, li, total) {
+    var base = "cards." + ci + ".legs." + li;
+    var box = h("div", { class: "ge-item" });
+
+    var typeSel = h("select", null, LEG_TYPES.map(function (t) {
+      return h("option", { value: t.value, text: t.label });
+    }));
+    typeSel.value = leg.type;
+    typeSel.addEventListener("change", function () {
+      var next = { type: typeSel.value, rails: leg.rails || ["neutral"] };
+      if (next.type === "stop") { next.name = leg.name || "新站点"; next.marker = "dot"; }
+      if (next.type === "walk") next.meters = leg.meters || 100;
+      if (next.type === "ride")
+        next.lines = leg.lines || [{ kind: "metro", no: "1", color: "l1", suffix: "号线", toward: "" }];
+      setPath(base, next);
+      persist(); refresh();
+    });
+
+    var mv = function (dir) {
+      return function () {
+        var legs = getPath("cards." + ci + ".legs");
+        var t = li + dir;
+        if (t < 0 || t >= legs.length) return;
+        var tmp = legs[li]; legs[li] = legs[t]; legs[t] = tmp;
+        persist(); refresh();
+      };
+    };
+
+    box.appendChild(h("div", { class: "ge-item__h" },
+      h("span", { class: "ge-item__n", text: String(li + 1).padStart(2, "0") }),
+      typeSel,
+      h("button", { class: "ge-mini", type: "button", title: "上移", text: "↑",
+        disabled: li === 0 ? "disabled" : null, onclick: mv(-1) }),
+      h("button", { class: "ge-mini", type: "button", title: "下移", text: "↓",
+        disabled: li === total - 1 ? "disabled" : null, onclick: mv(1) }),
+      h("button", { class: "ge-mini ge-mini--danger", type: "button", title: "删除", text: "✕",
+        onclick: function () {
+          getPath("cards." + ci + ".legs").splice(li, 1);
+          persist(); refresh();
+        } })
+    ));
+
+    if (leg.type === "stop") {
+      box.appendChild(field("站名", base + ".name"));
+      box.appendChild(h("div", { class: "ge-row" },
+        field("出站口备注", base + ".exit", { nullable: true }),
+        field("图标", base + ".marker", {
+          type: "select",
+          options: [
+            { value: "dot", label: "实心圆点" },
+            { value: "transfer", label: "换乘胶囊" },
+            { value: "hollow", label: "空心圆" },
+          ],
+        })
+      ));
+    } else if (leg.type === "walk") {
+      box.appendChild(field("步行距离（米）", base + ".meters", { type: "number", min: 0 }));
+    } else {
+      (leg.lines || []).forEach(function (ln, lj) {
+        var lb = base + ".lines." + lj;
+        box.appendChild(h("div", { style: "border-top:1px dashed var(--line);margin-top:8px;padding-top:8px" },
+          h("div", { class: "ge-row" },
+            field("类型", lb + ".kind", {
+              type: "select",
+              options: [{ value: "metro", label: "地铁" }, { value: "bus", label: "公交" }],
+            }),
+            field("线路号", lb + ".no")
+          ),
+          h("div", { class: "ge-row" },
+            field("线路配色", lb + ".color", {
+              type: "select",
+              options: RAIL_KEYS.map(function (k) { return { value: k, label: k }; }),
+            }),
+            field("后缀", lb + ".suffix", { nullable: true })
+          ),
+          iconPicker("图标", lb + ".icon"),
+          field("方向", lb + ".toward", { nullable: true }),
+          field("小字提示", lb + ".note", { nullable: true })
+        ));
+      });
+    }
+
+    var railInput = h("input", { type: "text" });
+    railInput.value = (leg.rails || []).join(", ");
+    railInput.addEventListener("input", function () {
+      setPath(base + ".rails", railInput.value.split(/[,，\s]+/).filter(Boolean));
+      persist(); renderPreview();
+    });
+    box.appendChild(h("label", { class: "ge-f" },
+      h("span", { class: "ge-f__l", text: "并行轨道（逗号分隔，如 l10, l2）" }), railInput));
+
+    return box;
+  }
+
+  function routeCardEditor(ci, card) {
+    var base = "cards." + ci;
+    var wrap = h("div", null,
+      h("div", { class: "ge-row" },
+        field("卡片 id", base + ".id"),
+        field("所属分组", base + ".group", {
+          type: "select",
+          options: (data.groups || []).map(function (g) { return { value: g.id, label: g.title }; }),
+        })
+      ),
+      h("div", { class: "ge-row" },
+        field("枢纽名称", base + ".hub.name"),
+        field("括注副标题", base + ".hub.note", { nullable: true })
+      ),
+      field("去往标签", base + ".toward", { nullable: true }),
+      h("div", { class: "ge-row--4 ge-row" },
+        field("方式类型", base + ".mode", { type: "select", options: MODES }),
+        field("方式标签", base + ".modeLabel", { nullable: true }),
+        field("耗时(分)", base + ".durationMin", { type: "number", min: 0 }),
+        field("票价(元)", base + ".fareYuan", { type: "number", min: 0 })
+      )
+    );
+
+    var flagInput = h("input", { type: "text" });
+    flagInput.value = (card.flags || []).join(" / ");
+    flagInput.addEventListener("input", function () {
+      setPath(base + ".flags", flagInput.value.split(/\s*\/\s*/).filter(Boolean));
+      persist(); renderPreview();
+    });
+    wrap.appendChild(h("label", { class: "ge-f" },
+      h("span", { class: "ge-f__l", text: "标签（用 / 分隔，如 需提前购票 / 班次少）" }), flagInput));
+
+    (card.legs || []).forEach(function (leg, li) {
+      wrap.appendChild(legEditor(ci, leg, li, card.legs.length));
+    });
+
+    var add = function (type) {
+      return function () {
+        var legs = getPath(base + ".legs");
+        var tail = legs[legs.length - 1];
+        var rails = (tail && tail.rails) || ["neutral"];
+        if (type === "stop") legs.push({ type: "stop", name: "新站点", marker: "dot", rails: rails });
+        if (type === "walk") legs.push({ type: "walk", meters: 100, rails: ["walk"] });
+        if (type === "ride") legs.push({
+          type: "ride", rails: rails,
+          lines: [{ kind: "metro", no: "1", color: "l1", suffix: "号线", toward: "" }],
+        });
+        persist(); refresh();
+      };
+    };
+    wrap.appendChild(h("div", { class: "ge-adds" },
+      h("button", { class: "ge-mini", type: "button", text: "+ 站点", onclick: add("stop") }),
+      h("button", { class: "ge-mini", type: "button", text: "+ 乘车段", onclick: add("ride") }),
+      h("button", { class: "ge-mini", type: "button", text: "+ 步行段", onclick: add("walk") })
+    ));
+    return wrap;
+  }
+
+  function figureCardEditor(ci, card) {
+    var base = "cards." + ci;
+    var figKeys = figureKeys();
+    var wrap = h("div", null,
+      h("div", { class: "ge-hint", text: "热区可以直接在右侧真图上拖动，坐标按百分比写回数据，缩放不失准。" }),
+      h("div", { class: "ge-row" },
+        field("卡片 id", base + ".id"),
+        field("所属分组", base + ".group", {
+          type: "select",
+          options: (data.groups || []).map(function (g) { return { value: g.id, label: g.title }; }),
+        })
+      ),
+      h("div", { class: "ge-row" },
+        field("图题", base + ".title"),
+        field("图片素材", base + ".figure", {
+          type: "select",
+          options: figKeys.map(function (k) { return { value: k, label: k }; }),
+        })
+      ),
+      field("图注", base + ".caption", { type: "textarea", rows: 2, nullable: true })
+    );
+
+    (card.hotspots || []).forEach(function (hs, hi) {
+      var hb = base + ".hotspots." + hi;
+      var box = h("div", {
+        class: "ge-item",
+        dataset: { sel: view.selHot === hs.id ? "1" : "0" },
+      });
+      box.appendChild(h("div", { class: "ge-item__h" },
+        h("span", { class: "ge-item__n", text: "热区 " + (hi + 1) }),
+        h("span", { class: "gc-spacer", style: "flex:1" }),
+        h("button", { class: "ge-mini", type: "button", text: "定位",
+          onclick: function () { select(card.id, hs.id); } }),
+        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕",
+          onclick: function () {
+            getPath(base + ".hotspots").splice(hi, 1);
+            if (view.selHot === hs.id) view.selHot = null;
+            persist(); refresh();
+          } })
+      ));
+      box.appendChild(field("标题", hb + ".title"));
+      box.appendChild(field("说明", hb + ".body", { type: "textarea" }));
+      box.appendChild(h("div", { class: "ge-row--4 ge-row" },
+        field("x %", hb + ".x", { type: "number", step: "0.5" }),
+        field("y %", hb + ".y", { type: "number", step: "0.5" }),
+        field("宽 px", hb + ".w", { type: "number", step: "2" }),
+        field("高 px", hb + ".h", { type: "number", step: "2" })
+      ));
+      (hs.links || []).forEach(function (l, lj) {
+        box.appendChild(h("div", { class: "ge-row" },
+          field("链接文字", hb + ".links." + lj + ".label"),
+          field("链接地址", hb + ".links." + lj + ".href")
+        ));
+      });
+      box.appendChild(h("div", { class: "ge-adds" },
+        h("button", { class: "ge-mini", type: "button", text: "+ 链接",
+          onclick: function () {
+            var links = getPath(hb + ".links");
+            if (!links) { setPath(hb + ".links", []); links = getPath(hb + ".links"); }
+            links.push({ label: "查看详情", href: "#" });
+            persist(); refresh();
+          } })
+      ));
+      wrap.appendChild(box);
+    });
+
+    wrap.appendChild(h("div", { class: "ge-adds" },
+      h("button", { class: "ge-mini", type: "button", text: "+ 热区",
+        onclick: function () {
+          var list = getPath(base + ".hotspots");
+          if (!list) { setPath(base + ".hotspots", []); list = getPath(base + ".hotspots"); }
+          var id = card.id + "-h" + (list.length + 1);
+          list.push({ id: id, x: 50, y: 50, w: 60, h: 40, title: "新热区", body: "", links: [] });
+          view.selHot = id;
+          persist(); refresh();
+        } })
+    ));
+    return wrap;
+  }
+
+  function coverEditor() {
+    var out = h("div", null,
+      section("cover:meta", "文档信息与目录", null, false, function () {
+        var w = h("div", null,
+          field("主标题", "meta.title"),
+          field("副标题", "meta.subtitle"),
+          h("div", { class: "ge-row" },
+            field("版次", "meta.edition"),
+            field("引导语", "cover.lead")
+          ),
+          field("页脚注释", "meta.footnote")
+        );
+        (data.cover.hubs || []).forEach(function (hub, hi) {
+          var box = h("div", { class: "ge-item" });
+          box.appendChild(h("div", { class: "ge-item__h" },
+            h("span", { class: "ge-item__n", text: hub.name })
+          ));
+          box.appendChild(h("div", { class: "ge-row" },
+            field("枢纽名称", "cover.hubs." + hi + ".name"),
+            field("色标", "cover.hubs." + hi + ".color", { type: "color" })
+          ));
+          box.appendChild(field("括注", "cover.hubs." + hi + ".note", { nullable: true }));
+          (hub.entries || []).forEach(function (en, ei) {
+            var eb = "cover.hubs." + hi + ".entries." + ei;
+            box.appendChild(h("div", { class: "ge-row--3 ge-row" },
+              field("条目", eb + ".label"),
+              field("页码", eb + ".page", { type: "number", min: 1 }),
+              field("关联分组", eb + ".groupId", {
+                type: "select", nullable: true,
+                options: [{ value: "", label: "（未录入）" }].concat(
+                  (data.groups || []).map(function (g) { return { value: g.id, label: g.title }; })
+                ),
+              })
+            ));
+          });
+          w.appendChild(box);
+        });
+        return w;
+      })
+    );
+
+    (data.groups || []).forEach(function (g, gi) {
+      out.appendChild(section("group:" + g.id, "分组：" + g.title,
+        (data.cards || []).filter(function (c) { return c.group === g.id; }).length + " 张卡片",
+        false, function () {
+          return h("div", null,
+            field("分组 id", "groups." + gi + ".id"),
+            field("分组标题", "groups." + gi + ".title"),
+            field("分组备注", "groups." + gi + ".note", { nullable: true })
+          );
+        }));
+    });
+    return out;
+  }
+
+  function renderPanel() {
+    var panel = document.getElementById("ge-panel");
+    panel.textContent = "";
+    panel.appendChild(h("div", { class: "ge-hint",
+      text: "点右侧任意卡片可定位到它的字段。卡片右上角有存图、复制、上下移、删除；改动自动保存" +
+            (server.online ? "到服务器草稿。" : "到本地（离线模式）。") }));
+    panel.appendChild(coverEditor());
+    panel.appendChild(iconLibEditor());
+    panel.appendChild(assetEditor());
+
+    (data.cards || []).forEach(function (card, ci) {
+      var label = card.kind === "figure"
+        ? "图示：" + (card.title || card.id)
+        : (card.hub && card.hub.name ? card.hub.name : card.id) + " · " + (card.modeLabel || card.mode || "");
+      var tag = card.kind === "figure"
+        ? (card.hotspots || []).length + " 热区"
+        : card.durationMin + "分钟";
+      panel.appendChild(section("card:" + card.id, label, tag, view.sel === card.id, function () {
+        return card.kind === "figure" ? figureCardEditor(ci, card) : routeCardEditor(ci, card);
+      }));
+    });
+
+    panel.appendChild(h("div", { class: "ge-adds", style: "margin-top:14px" },
+      h("button", { class: "gc-btn", type: "button", text: "+ 新建路线卡片", onclick: addRouteCard }),
+      h("button", { class: "gc-btn", type: "button", text: "+ 新建图示卡片", onclick: addFigureCard })
+    ));
+  }
+
+  function refresh() {
+    renderPanel();
+    renderPreview();
+  }
+
+  /* ══════════════ 顶栏动作 ══════════════ */
+
+  document.getElementById("ge-reveal").addEventListener("click", function () {
+    view.reveal = !view.reveal;
+    this.setAttribute("aria-pressed", String(view.reveal));
+    this.textContent = view.reveal ? "显示热区" : "隐藏热区";
+    renderPreview();
+  });
+
+  document.getElementById("ge-json").addEventListener("click", function () {
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "guide-data.json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    R.toast("已导出 guide-data.json，可替换 data/ 里的数据源");
+  });
+
+  document.getElementById("ge-load").addEventListener("click", function () {
+    document.getElementById("ge-file").click();
+  });
+  /* 图标上传。dataset.replaceIdx 有值时是「替换」而非新增：
+     沿用原 id，引用它的线路/品牌标就会自动跟着换图。 */
+  document.getElementById("ge-icofile").addEventListener("change", function (e) {
+    var fi = e.target;
+    var files = fi.files;
+    var idxRaw = fi.dataset.replaceIdx;
+    delete fi.dataset.replaceIdx;
+    if (!files || !files.length) { fi.value = ""; return; }
+
+    if (idxRaw !== undefined && idxRaw !== "") {
+      var idx = Number(idxRaw);
+      readIconFile(files[0]).then(function (ic) {
+        var list = ensureIcons();
+        var keep = list[idx];
+        if (!keep) throw new Error("图标已不存在");
+        /* 只换图形，保留 id / 名称 / 分组，避免引用断掉 */
+        delete keep.svg; delete keep.uri; delete keep.ratio;
+        if (ic.svg) keep.svg = ic.svg;
+        if (ic.uri) keep.uri = ic.uri;
+        if (ic.ratio) keep.ratio = ic.ratio;
+        persist(); refresh();
+        R.toast("已替换「" + (keep.name || keep.id) + "」");
+      }).catch(function (err) { R.toast("替换失败：" + err.message); });
+    } else {
+      addIconFiles(files);
+    }
+    fi.value = "";
+  });
+
+  document.getElementById("ge-file").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var fr = new FileReader();
+    fr.onload = function () {
+      try {
+        var next = JSON.parse(fr.result);
+        if (!next.cards || !next.cover) throw new Error("缺少 cover / cards 字段");
+        data = next;
+        view.sel = null; view.selHot = null;
+        persist(); refresh();
+        R.toast("已载入 " + f.name);
+      } catch (err) { R.toast("载入失败：" + err.message); }
+    };
+    fr.readAsText(f);
+    e.target.value = "";
+  });
+
+  document.getElementById("ge-pngall").addEventListener("click", function () {
+    var cards = Array.prototype.slice.call(
+      document.querySelectorAll("#ge-canvas [data-card-id]"));
+    if (!cards.length) return;
+    var i = 0, ok = 0;
+    (function step() {
+      if (i >= cards.length) {
+        R.toast("批量导出完成：" + ok + "/" + cards.length + " 张");
+        return;
+      }
+      var el = cards[i++];
+      R.exportCardPng(el, "shu-guide-" + el.dataset.cardId, 2)
+        .then(function () { ok++; })
+        .catch(function () {})
+        .then(function () { setTimeout(step, 320); });
+    })();
+  });
+
+  document.getElementById("ge-pdf").addEventListener("click", function () {
+    R.toast("打印对话框里选「另存为 PDF」，卡片不会被切断");
+    setTimeout(function () { window.print(); }, 320);
+  });
+
+  document.getElementById("ge-reset").addEventListener("click", function () {
+    if (!window.confirm("还原为出厂稿数据？当前未存版的改动会被覆盖（已存进服务器的版本历史不受影响）。")) return;
+    data = JSON.parse(JSON.stringify(ORIGINAL));
+    view.sel = null; view.selHot = null;
+    persist();
+    refresh();
+    R.toast("已还原出厂稿数据");
+  });
+
+  /* 图示上传。dataset.replaceKey 有值时是「替换」而非新增：
+     同 key 重传就是替换，引用它的卡片自动跟着换图。 */
+  document.getElementById("ge-figfile").addEventListener("change", function (e) {
+    var fi = e.target;
+    var f = fi.files && fi.files[0];
+    var replaceKey = fi.dataset.replaceKey || "";
+    delete fi.dataset.replaceKey;
+    fi.value = "";
+    if (!f) return;
+    if (!server.online) return R.toast("离线模式下不能上传素材");
+    var key = replaceKey;
+    if (!key) {
+      key = window.prompt("素材名称（小写字母 / 数字 / 连字符，卡片按它引用这张图）",
+        assetKeyFromName(f.name));
+      if (key === null) return;
+      key = key.trim();
+    }
+    if (!/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(key)) {
+      return R.toast("名称不合规：3-64 位小写字母、数字或连字符");
+    }
+    var fr = new FileReader();
+    fr.onerror = function () { R.toast("读取文件失败"); };
+    fr.onload = function () {
+      fetch("/api/admin/guide/assets/" + encodeURIComponent(key) + "?kind=figure_svg", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "image/svg+xml" },
+        body: fr.result,
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
+          R.toast("已上传「" + key + "」");
+          loadAssets();
+        });
+      }).catch(function (err) { R.toast("上传失败：" + err.message); });
+    };
+    fr.readAsText(f);
+  });
+
+  /* ══════════════ 版本管理 ══════════════
+   * 版本历史在服务器上（guide_revisions），这里做四件事：
+   *   对比 = 取某一版正文和当前编辑内容做结构化 diff（diff 是纯函数，本地算）；
+   *   回滚 = 把某一版写回编辑区并保存（服务端会把它存成新的草稿）；
+   *   送审 = draft → in_review，内容冻结，由 review:content 权限的账号复核；
+   *   发布 = 把 current_revision_id 指向某个 approved 版，前台立即生效。
+   * 指向更早的 approved 版就是「回滚上线」，和发布是同一个动作。 */
+  var V = window.GuideVersions;
+  var vwrap = document.getElementById("ge-vwrap");
+  var vbody = document.getElementById("ge-vbody");
+  var vbtn = document.getElementById("ge-versions");
+  /* 记住每一版展开了哪块 diff，重绘时不要把用户翻开的清单又合上 */
+  var vopen = {};
+
+  function openVersions() {
+    vwrap.dataset.open = "1";
+    vbtn.setAttribute("aria-expanded", "true");
+    renderVersions();
+    refreshRevisions().then(renderVersions);
+  }
+  function closeVersions() {
+    vwrap.dataset.open = "0";
+    vbtn.setAttribute("aria-expanded", "false");
+  }
+  vbtn.addEventListener("click", function () {
+    vwrap.dataset.open === "1" ? closeVersions() : openVersions();
+  });
+  document.getElementById("ge-vveil").addEventListener("click", closeVersions);
+  document.getElementById("ge-vclose").addEventListener("click", closeVersions);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && vwrap.dataset.open === "1") closeVersions();
+  });
+
+  function statLine(s) {
+    var kinds = Object.keys(s.byKind || {}).map(function (k) {
+      return k + " " + s.byKind[k];
+    }).join(" / ");
+    return s.groups + " 组 · " + s.cards + " 卡" + (kinds ? "（" + kinds + "）" : "");
+  }
+
+  function stamp(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    var pad = function (n) { return String(n).padStart(2, "0"); };
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+           " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  /* 把一份 diff 结果画成可读清单。只画有内容的段，避免一屏「无变化」。 */
+  function diffView(d) {
+    var box = h("div", { class: "ge-v__diff" });
+    var seg = function (label, x) {
+      if (!x.added.length && !x.removed.length && !x.changed.length) return;
+      var lines = [];
+      x.added.forEach(function (i) { lines.push("＋ 新增　" + (i.label || i.id)); });
+      x.removed.forEach(function (i) { lines.push("－ 删除　" + (i.label || i.id)); });
+      x.changed.forEach(function (i) {
+        lines.push("～ 变动　" + (i.label || i.id));
+        (i.fields || []).forEach(function (f) { lines.push("　　　　" + f); });
+      });
+      box.appendChild(h("div", { class: "ge-v__diffseg" },
+        h("div", { class: "ge-v__diffh", text: label }),
+        h("pre", { class: "ge-v__diffb", text: lines.join("\n") })
+      ));
+    };
+    seg("卡片", d.cards);
+    seg("分组", d.groups);
+    if (d.meta && d.meta.length)
+      box.appendChild(h("div", { class: "ge-v__diffseg" },
+        h("div", { class: "ge-v__diffh", text: "文档信息" }),
+        h("pre", { class: "ge-v__diffb", text: d.meta.join("\n") })
+      ));
+    if (d.cover)
+      box.appendChild(h("div", { class: "ge-v__diffseg" },
+        h("div", { class: "ge-v__diffh", text: "目录" }),
+        h("pre", { class: "ge-v__diffb", text: d.cover })
+      ));
+    if (!box.childNodes.length)
+      box.appendChild(h("div", { class: "ge-v__diffseg" },
+        h("pre", { class: "ge-v__diffb", text: "与当前草稿内容一致。" })));
+    return box;
+  }
+
+  /* 版本正文缓存：点「查看差异 / 回滚 / 导出」时按需取，取过就不再重复请求 */
+  var vcache = {};
+
+  function fetchRevisionContent(id) {
+    if (vcache[id]) return Promise.resolve(vcache[id]);
+    return api("/api/admin/guide/revisions/" + id).then(function (res) {
+      var content = res && res.revision && res.revision.content;
+      if (!content) throw new Error("版本内容为空");
+      vcache[id] = content;
+      return content;
+    });
+  }
+
+  function refreshRevisions() {
+    if (!server.online) return Promise.resolve();
+    return api("/api/admin/guide/documents/" + server.docId).then(function (detail) {
+      server.revisions = (detail && detail.revisions) || [];
+      var w = detail && detail.working;
+      if (w) {
+        server.workingId = w.id;
+        server.workingNo = w.revisionNo;
+        server.workingStatus = w.editorialStatus;
+      }
+      server.currentRevisionId = detail.document && detail.document.currentRevisionId;
+      syncDocBadge();
+    }).catch(function () { /* 列表刷新失败不打断抽屉 */ });
+  }
+
+  function renderVersions() {
+    vbody.textContent = "";
+
+    if (!server.online) {
+      vbody.appendChild(h("div", { class: "ge-hint",
+        text: "离线模式下没有版本历史。登录后这里列出服务器上的每一版：对比差异、回滚、送审、发布都在这里。" }));
+      return;
+    }
+
+    /* —— 正在编辑的那一版 —— */
+    var curActs = h("div", { class: "ge-adds" },
+      h("button", {
+        class: "gc-btn gc-btn--primary", type: "button", text: "立即保存",
+        onclick: function () {
+          clearTimeout(saveTimer);
+          saveNow().then(function () { refreshRevisions().then(renderVersions); });
+        },
+      })
+    );
+    if (server.workingStatus === "draft") {
+      curActs.appendChild(h("button", {
+        class: "gc-btn", type: "button", text: "送审这一版",
+        title: "送审后内容冻结，由有 review:content 权限的账号复核",
+        onclick: function () {
+          var note = window.prompt("写给复核人的说明：这一版改了什么（可留空）", "");
+          if (note === null) return;
+          clearTimeout(saveTimer);
+          saveNow().then(function () {
+            return api("/api/admin/guide/revisions/" + server.workingId + "/submit",
+              { json: { note: note || null } });
+          }).then(function () {
+            R.toast("已送审，等待复核");
+            server.workingStatus = "in_review";
+            setLocked("第 " + server.workingNo + " 版正在送审，内容已冻结。等复核出结果后才能继续编辑。");
+            refreshRevisions().then(renderVersions);
+          }).catch(function (err) { R.toast("送审失败：" + err.message); });
+        },
+      }));
+    }
+
+    vbody.appendChild(h("div", { class: "ge-vnew" },
+      h("div", { class: "ge-v__h" },
+        h("span", { class: "ge-v__n",
+          text: "正在编辑：第 " + (server.workingNo || "?") + " 版" }),
+        h("span", { class: "ge-v__badge",
+          text: STATUS_LABEL[server.workingStatus] || server.workingStatus || "草稿" }),
+        h("span", { class: "gc-spacer", style: "flex:1" }),
+        h("span", { class: "ge-v__hash", text: V.fingerprint(data) })
+      ),
+      h("div", { class: "ge-v__meta", text: statLine(V.statsOf(data)) }),
+      curActs
+    ));
+
+    /* —— 服务器上的版本历史 —— */
+    var items = server.revisions;
+    if (!items.length) {
+      vbody.appendChild(h("div", { class: "ge-vempty", text: "服务器上还没有任何版本。" }));
+      return;
+    }
+
+    var listBox = h("div", { class: "ge-vlist" });
+    items.forEach(function (m) {
+      var isLive = m.id === server.currentRevisionId;
+      var row = h("div", { class: "ge-v", dataset: { current: isLive ? "1" : "0" } });
+
+      row.appendChild(h("div", { class: "ge-v__h" },
+        h("span", { class: "ge-v__n",
+          text: "第 " + m.revisionNo + " 版 · " + (m.title || "未命名") }),
+        isLive ? h("span", { class: "ge-v__badge", text: "线上" }) : null,
+        h("span", { class: "gc-spacer", style: "flex:1" }),
+        h("span", { class: "ge-v__hash", text: (m.contentHash || "").slice(0, 10) })
+      ));
+      row.appendChild(h("div", { class: "ge-v__meta",
+        text: (STATUS_LABEL[m.editorialStatus] || m.editorialStatus) + " · " +
+              stamp(m.createdAt) + (m.authorName ? " · " + m.authorName : "") +
+              (m.contentBytes ? " · " + Math.max(1, Math.round(m.contentBytes / 1024)) + " KB" : "") }));
+      if (m.note) row.appendChild(h("div", { class: "ge-v__note", text: m.note }));
+      if (m.reviewNote) row.appendChild(h("div", { class: "ge-v__note",
+        text: "复核意见" + (m.reviewerName ? "（" + m.reviewerName + "）" : "") + "：" + m.reviewNote }));
+
+      var acts = h("div", { class: "ge-v__acts" });
+      acts.appendChild(h("button", {
+        class: "ge-mini", type: "button",
+        text: vopen[m.id] ? "收起差异" : "查看差异",
+        onclick: function () {
+          if (vopen[m.id]) { vopen[m.id] = false; renderVersions(); return; }
+          fetchRevisionContent(m.id).then(function () {
+            vopen[m.id] = true;
+            renderVersions();
+          }).catch(function (err) { R.toast("取版本内容失败：" + err.message); });
+        },
+      }));
+      acts.appendChild(h("button", {
+        class: "ge-mini", type: "button", text: "回滚到此版",
+        title: "把编辑区的内容换成这一版（会先保存当前内容，再覆盖）",
+        onclick: function () {
+          if (!window.confirm("把编辑内容换成第 " + m.revisionNo + " 版？\n当前内容会先保存，然后被这一版覆盖。")) return;
+          fetchRevisionContent(m.id).then(function (content) {
+            data = JSON.parse(JSON.stringify(content));
+            view.sel = null; view.selHot = null;
+            clearTimeout(saveTimer);
+            return saveNow();
+          }).then(function () {
+            refresh();
+            refreshRevisions().then(renderVersions);
+            R.toast("已回滚到第 " + m.revisionNo + " 版");
+          }).catch(function (err) { R.toast("回滚失败：" + err.message); });
+        },
+      }));
+      if (m.editorialStatus === "approved" && !isLive) {
+        acts.appendChild(h("button", {
+          class: "ge-mini", type: "button", text: "发布上线",
+          title: "把线上内容换成这一版，前台立即生效；指向更早的版就是回滚上线",
+          onclick: function () {
+            if (!window.confirm("把第 " + m.revisionNo + " 版发布上线？前台会立即换成这一版。")) return;
+            api("/api/admin/guide/documents/" + server.docId + "/publish",
+              { json: { revisionId: m.id } })
+              .then(function () {
+                R.toast("已发布第 " + m.revisionNo + " 版");
+                refreshRevisions().then(renderVersions);
+              })
+              .catch(function (err) { R.toast("发布失败：" + err.message); });
+          },
+        }));
+      }
+      acts.appendChild(h("button", {
+        class: "ge-mini", type: "button", text: "导出",
+        onclick: function () {
+          fetchRevisionContent(m.id).then(function (content) {
+            var blob = new Blob([JSON.stringify(content, null, 2)], { type: "application/json" });
+            var a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "guide-rev" + m.revisionNo + ".json";
+            a.click();
+            URL.revokeObjectURL(a.href);
+          }).catch(function (err) { R.toast("导出失败：" + err.message); });
+        },
+      }));
+      row.appendChild(acts);
+
+      if (vopen[m.id] && vcache[m.id]) {
+        var d = V.diff(vcache[m.id], data);
+        row.appendChild(h("div", { class: "ge-v__meta",
+          text: "对比当前草稿：" + V.summarize(d) }));
+        row.appendChild(diffView(d));
+      }
+      listBox.appendChild(row);
+    });
+    vbody.appendChild(listBox);
+    vbody.appendChild(h("div", { class: "ge-vpanel__f",
+      text: "共 " + items.length + " 版 · 发布 / 回滚上线都要求该版已通过复核" }));
+  }
+
+  /* 导入版本文件：兼容旧版导出信封（{meta, data}）与内容本体（{cards, cover}）。
+     导入 = 把文件内容写进当前编辑区，随后照常走保存（在线写服务器，离线写本地）。 */
+  document.getElementById("ge-vimport").addEventListener("click", function () {
+    document.getElementById("ge-vfile").click();
+  });
+  document.getElementById("ge-vfile").addEventListener("change", function (e) {
+    var f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    var fr = new FileReader();
+    fr.onload = function () {
+      try {
+        var parsed = JSON.parse(fr.result);
+        var next = (parsed && parsed.data && parsed.data.cards) ? parsed.data : parsed;
+        if (!next || !next.cards || !next.cover) throw new Error("缺少 cover / cards 字段");
+        data = next;
+        view.sel = null; view.selHot = null;
+        persist(); refresh();
+        if (vwrap.dataset.open === "1") renderVersions();
+        R.toast("已导入 " + f.name + "，内容已写入编辑区");
+      } catch (err) { R.toast("导入失败：" + err.message); }
+    };
+    fr.readAsText(f);
+  });
+
+  /* ══════════════ 启动 ══════════════
+   * 顺序：先用本地数据画出界面 → 查登录态 → 在线则从 D1 取文档与素材覆盖。
+   * 任何一步失败都退回离线模式 —— 编辑器始终可用，只是不写服务器，
+   * 顶栏徽章会把当前模式标出来。 */
+  function gate(title, desc, acts) {
+    closeGate();
+    var card = h("div", { class: "ge-gate__card" },
+      h("div", { class: "ge-gate__t", text: title }),
+      h("div", { class: "ge-gate__d", text: desc }));
+    var row = h("div", { class: "ge-gate__acts" });
+    (acts || []).forEach(function (a) { row.appendChild(a); });
+    card.appendChild(row);
+    document.body.appendChild(h("div", { class: "ge-gate" }, card));
+  }
+  function closeGate() {
+    var g = document.querySelector(".ge-gate");
+    if (g) g.remove();
+  }
+
+  function setLocked(text) {
+    server.readOnly = !!text;
+    var el = document.getElementById("ge-lock");
+    el.hidden = !text;
+    el.textContent = text || "";
+  }
+
+  function syncDocBadge() {
+    var doc = document.getElementById("ge-doc");
+    doc.hidden = false;
+    var slugEl = document.getElementById("ge-doc-slug");
+    var badge = document.getElementById("ge-doc-badge");
+    if (!server.online) {
+      slugEl.textContent = "离线模式";
+      badge.textContent = "改动只存本机";
+      badge.dataset.tone = "warn";
+      return;
+    }
+    slugEl.textContent = SLUG + " · 第 " + (server.workingNo || "?") + " 版";
+    var st = server.workingStatus;
+    badge.textContent = STATUS_LABEL[st] || st || "草稿";
+    badge.dataset.tone = st === "in_review" ? "review" : st === "approved" ? "ok" : "draft";
+  }
+
+  function loadFromServer() {
+    return api("/api/admin/guide/documents").then(function (res) {
+      var items = (res && res.items) || [];
+      var docRow = items.filter(function (d) { return d.slug === SLUG; })[0];
+      if (!docRow) {
+        gate("还没有指南文档",
+          "数据库里还没有 slug 为「" + SLUG + "」的指南。可以用随页面打包的出厂稿创建一份，之后改的就是线上数据。",
+          [h("button", {
+            class: "gc-btn gc-btn--primary", type: "button", text: "用出厂稿创建",
+            onclick: function () {
+              api("/api/admin/guide/documents", {
+                json: {
+                  slug: SLUG,
+                  title: (ORIGINAL.meta && ORIGINAL.meta.title) || "返校指南",
+                  edition: (ORIGINAL.meta && ORIGINAL.meta.edition) || null,
+                  content: ORIGINAL,
+                },
+              }).then(function () { closeGate(); loadFromServer(); })
+                .catch(function (err) { R.toast("创建失败：" + err.message); });
+            },
+          })]
+        );
+        return;
+      }
+      server.docId = docRow.id;
+      server.docTitle = docRow.title;
+      server.currentRevisionId = docRow.currentRevisionId;
+      return api("/api/admin/guide/documents/" + docRow.id).then(function (detail) {
+        server.online = true;
+        server.revisions = (detail && detail.revisions) || [];
+        var w = detail && detail.working;
+        if (w && w.content && w.content.cards) {
+          server.workingId = w.id;
+          server.workingNo = w.revisionNo;
+          server.workingStatus = w.editorialStatus;
+          data = w.content;
+          try { localStorage.setItem(STORE, JSON.stringify(data)); } catch (e) {}
+        }
+        if (server.workingStatus === "in_review") {
+          setLocked("第 " + server.workingNo + " 版正在送审，内容已冻结。等复核出结果后才能继续编辑。");
+        } else {
+          setLocked("");
+        }
+        view.sel = null; view.selHot = null;
+        syncDocBadge();
+        markState("ok", "已连接服务器");
+        refresh();
+        loadAssets();
+      });
+    }).catch(function (err) {
+      syncDocBadge();
+      R.toast("连接服务器失败，进入离线模式：" + err.message);
+    });
+  }
+
+  view.open["cover:meta"] = false;
+  refresh();
+  syncDocBadge();
+
+  /* 登录门只是化妆：静态页任何人都能打开 URL，真正的强制在服务端
+     每个写操作的 requireSession。这里做的是别让没登录的人面对一堆
+     点了才报错的按钮。 */
+  api("/api/auth/session").then(function (sess) {
+    var perms = (sess && sess.permissions) || [];
+    if (perms.indexOf("write:content") < 0 && perms.indexOf("*") < 0) {
+      gate("没有编辑权限",
+        "当前账号没有 write:content 权限，改动无法写入服务器。可以离线编辑，再导出 JSON 交给有权限的人导入。",
+        [h("button", { class: "gc-btn", type: "button", text: "知道了，离线继续", onclick: closeGate })]);
+      return;
+    }
+    loadFromServer();
+  }).catch(function (err) {
+    if (err.status === 401) {
+      gate("需要先登录",
+        "编辑器的改动会直接写入线上数据库，请先用管理账号登录。也可以先离线编辑，登录后再保存。",
+        [
+          h("a", { class: "gc-btn gc-btn--primary", href: "/admin", text: "去后台登录" }),
+          h("button", { class: "gc-btn", type: "button", text: "离线继续", onclick: closeGate }),
+        ]);
+      return;
+    }
+    /* 接口本身不可达：静默进离线模式，徽章已标出 */
+    syncDocBadge();
+  });
+})();
+</script>
+</body>
+</html>

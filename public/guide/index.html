@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>上海大学新生入校交通指南 · 电子版</title>
+<script src="assets/guide-styles.js"></script>
+<script src="data/guide-icons.js"></script>
+<!-- 离线兜底种子：接口不可用时才用它，正式内容来自 D1 -->
+<script src="data/guide-seed.js"></script>
+<script src="assets/guide-render.js"></script>
+</head>
+<body>
+
+<div class="gc-chrome gc-noprint" data-od-id="viewer-chrome">
+  <div class="gc-chrome__row">
+    <button type="button" class="gc-btn gc-btn--icon" id="btn-toc" aria-expanded="false"
+            aria-controls="tocwrap" title="打开目录">☰ 目录</button>
+    <div class="gc-brand">返校指南 <span id="edition"></span></div>
+    <span class="gc-srcbadge" id="src-badge" hidden></span>
+    <span class="gc-spacer"></span>
+    <!-- 手机上次级操作收进 ⚙，桌面展开在顶栏里（见 guide-styles.js 的 .gc-chrome__tools） -->
+    <button type="button" class="gc-btn gc-btn--icon gc-btn--tools" id="btn-tools"
+            aria-expanded="false" aria-controls="chrome-tools" title="筛选与工具">⚙</button>
+    <div class="gc-chrome__tools" id="chrome-tools">
+      <div class="gc-seg" role="group" aria-label="出行方式筛选" id="filter-seg"></div>
+      <button type="button" class="gc-btn" id="btn-cols" aria-pressed="false">单列</button>
+      <button type="button" class="gc-btn" id="btn-reveal" aria-pressed="false">显示可点位置</button>
+      <button type="button" class="gc-btn" id="btn-png">批量存图</button>
+      <button type="button" class="gc-btn gc-btn--primary" id="btn-pdf">导出 PDF</button>
+      <a class="gc-btn" href="editor.html">打开编辑器</a>
+    </div>
+  </div>
+
+  <!-- 二维 Tab：第一排选出发枢纽，第二排选到达校区。
+       两排是「与」关系，交集为空时卡片流会给出空态提示。 -->
+  <div class="gc-dims" id="dims">
+    <div class="gc-dim">
+      <span class="gc-dim__l">出发</span>
+      <div class="gc-dim__row" role="tablist" aria-label="出发枢纽" id="dim-hub"></div>
+    </div>
+    <div class="gc-dim">
+      <span class="gc-dim__l">到达</span>
+      <div class="gc-dim__row" role="tablist" aria-label="到达校区" id="dim-campus"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 目录抽屉 -->
+<div class="gc-tocwrap gc-noprint" id="tocwrap" data-open="0">
+  <div class="gc-tocwrap__veil" id="toc-veil"></div>
+  <aside class="gc-tocpanel" role="dialog" aria-modal="true" aria-label="指南目录">
+    <div class="gc-tocpanel__h">
+      <span class="gc-tocpanel__t">目录</span>
+      <span class="gc-spacer"></span>
+      <button type="button" class="gc-act" id="toc-close" aria-label="关闭目录">✕</button>
+    </div>
+    <div id="toc-host" style="display:flex;flex:1;min-height:0"></div>
+  </aside>
+</div>
+
+<main id="stage"></main>
+
+<script>
+/*
+ * 外壳启动分两步：先取内容，再渲染。
+ *
+ * 内容来自 GET /api/public/guide/:slug（D1 里已审核通过并发布的那一版）。
+ * 取不到时回落到 data/guide-seed.js —— 那是随页面打包的出厂稿，用于
+ * 后端不可用、离线校对、以及本地直接打开文件的场景。回落时在顶栏标出来，
+ * 免得看到旧数据却以为是线上内容。
+ */
+(function () {
+  "use strict";
+  var R = window.GuideRender;
+  var SLUG = (function () {
+    var m = /[?&]slug=([a-z0-9-]{3,64})/.exec(location.search);
+    return m ? m[1] : 'freshman-transit';
+  })();
+
+  var stage = document.getElementById('stage');
+  var chrome = document.querySelector('.gc-chrome');
+
+  function setStatus(text, tone) {
+    var el = document.getElementById('src-badge');
+    if (!el) return;
+    el.textContent = text || '';
+    el.dataset.tone = tone || '';
+    el.hidden = !text;
+  }
+
+  function splash(text) {
+    stage.textContent = '';
+    stage.appendChild(R.h('div', {
+      class: 'gc-empty', style: 'margin:24px auto;max-width:780px', text: text,
+    }));
+  }
+
+  splash('正在载入指南内容…');
+
+  /* 手机顶栏的 ⚙ 开关：桌面 CSS 让容器 display:contents，这个状态不起作用 */
+  var toolsBtn = document.getElementById('btn-tools');
+  var toolsRow = document.getElementById('chrome-tools');
+  toolsBtn.addEventListener('click', function () {
+    var open = toolsRow.dataset.open === '1';
+    toolsRow.dataset.open = open ? '0' : '1';
+    toolsBtn.setAttribute('aria-expanded', String(!open));
+  });
+
+  fetch('/api/public/guide/' + encodeURIComponent(SLUG), { credentials: 'same-origin' })
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    })
+    .then(function (payload) {
+      if (!payload || !payload.content || !payload.content.cards) throw new Error('内容为空');
+      setStatus('', '');
+      boot(payload.content, { edition: payload.edition, revisionNo: payload.revisionNo });
+    })
+    .catch(function (err) {
+      var seed = window.GUIDE_DATA;
+      if (!seed || !seed.cards) return splash('无法载入指南内容：' + err.message);
+      setStatus('离线稿', 'warn');
+      boot(seed, { edition: seed.meta && seed.meta.edition, offline: true });
+    });
+
+function boot(D, info) {
+  document.getElementById('edition').textContent =
+    (info && info.edition) || (D.meta && D.meta.edition) || '';
+
+  /* localStorage 在 file:// 或沙箱预览里可能抛 SecurityError，包一层兜底 */
+  var LS = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+
+  /* 「不筛选」的哨兵值用 *，不能用 all —— 数据里真有一个 campus:"all"
+     （松江与附表那种不分校区的整页）。两者同名时，两个 Tab 会同时高亮，
+     且点「各校区通用」会变成「显示全部」。 */
+  var ANY = '*';
+  function normDim(v) { return (v === 'all' || !v) ? ANY : v; }
+
+  var state = {
+    hub: normDim(LS.get('shu-guide-hub')),
+    campus: normDim(LS.get('shu-guide-campus')),
+    filter: LS.get('shu-guide-filter') || 'all',
+    /* 双列是默认版式；窄屏由 CSS 压回单列，这里只记大屏上的手动选择 */
+    columns: LS.get('shu-guide-cols') === '1' ? 1 : 2,
+    reveal: false
+  };
+
+  /* ── 内部链接分流 ────────────────────────────────────
+     #card: 是数据里用得最多的一种（图示热区跳到对应路线卡），
+     之前没有分支、全落到兜底 toast，等于点了没反应。 */
+  var opts = {
+    onNavigate: jumpToGroup,
+    onInternalLink: function (href) {
+      var m;
+      if ((m = /^#card:(.+)$/.exec(href))) {
+        var card = (D.cards || []).filter(function (c) { return c.id === m[1]; })[0];
+        if (!card) return R.toast('未找到卡片：' + m[1]);
+        /* 卡片可能被当前筛选挡住，先把筛选放开再定位 */
+        return revealCard(card);
+      }
+      if ((m = /^#group:(.+)$/.exec(href))) {
+        if ((D.groups || []).some(function (g) { return g.id === m[1]; })) return jumpToGroup(m[1]);
+        return R.toast('该卡片组数据尚未录入：' + m[1]);
+      }
+      if ((m = /^#figure:(.+)$/.exec(href))) {
+        var fc = (D.cards || []).filter(function (c) { return c.figure === m[1]; })[0];
+        if (fc) return revealCard(fc);
+        return R.toast('未找到图示：' + m[1]);
+      }
+      if (/^#shumap:/.test(href)) return R.toast('将深链到 SHUMap 地图页（接入后生效）');
+      if (/^#wechat:/.test(href)) return R.toast('微信公众号购票入口（接入后生效）');
+      R.toast('内部链接：' + href);
+    }
+  };
+
+  /* ── 渲染 ─────────────────────────────────────────── */
+  function render() {
+    R.closePop();
+    stage.textContent = '';
+    opts.filter = state.filter;
+    opts.hub = state.hub;
+    opts.campus = state.campus;
+    opts.columns = state.columns;
+    stage.appendChild(R.renderFlow(D, opts));
+    stage.querySelectorAll('[data-reveal]').forEach(function (w) {
+      w.dataset.reveal = state.reveal ? '1' : '0';
+    });
+    syncCurrent();
+  }
+
+  function chromeH() {
+    var el = document.querySelector('.gc-chrome');
+    return el ? el.offsetHeight : 0;
+  }
+
+  /* 用 offsetTop 手动滚动，不用 scrollIntoView（会破坏嵌入式预览） */
+  function scrollToEl(el) {
+    window.scrollTo({ top: Math.max(0, el.offsetTop - chromeH() - 12), behavior: 'smooth' });
+  }
+
+  function jumpToGroup(groupId) {
+    var g = (D.groups || []).filter(function (x) { return x.id === groupId; })[0];
+    if (!g) return R.toast('未找到卡片组');
+    /* 目标分组被当前 Tab 挡住时，自动把 Tab 切到能看见它的位置 ——
+       否则点了目录却停在空态页上，看起来像没反应。 */
+    var need = false;
+    if (state.hub !== ANY && g.hub !== state.hub) { state.hub = g.hub; need = true; }
+    if (state.campus !== ANY && g.campus !== state.campus) { state.campus = g.campus; need = true; }
+    if (need) { persistDims(); syncDims(); render(); }
+
+    var el = document.getElementById('group-' + groupId);
+    if (!el) return R.toast('该卡片组在当前筛选下没有卡片');
+    scrollToEl(el);
+    location.hash = groupId;
+    syncCurrent(groupId);
+  }
+
+  function revealCard(card) {
+    /* 卡片所在分组可能不在当前 Tab / 出行方式筛选内，逐个放开 */
+    var g = (D.groups || []).filter(function (x) { return x.id === card.group; })[0];
+    var need = false;
+    if (g) {
+      if (state.hub !== ANY && g.hub !== state.hub) { state.hub = g.hub; need = true; }
+      if (state.campus !== ANY && g.campus !== state.campus) { state.campus = g.campus; need = true; }
+    }
+    if (state.filter !== 'all' && card.kind === 'route' && card.mode !== state.filter) {
+      state.filter = 'all'; need = true;
+    }
+    if (need) {
+      persistDims(); LS.set('shu-guide-filter', state.filter);
+      syncDims(); syncFilter(); render();
+    }
+    var el = stage.querySelector('[data-card-id="' + card.id + '"]');
+    if (!el) return R.toast('未找到卡片');
+    scrollToEl(el);
+    el.style.transition = 'box-shadow .2s';
+    el.style.boxShadow = '0 0 0 3px var(--primary)';
+    setTimeout(function () { el.style.boxShadow = ''; }, 1500);
+  }
+
+  /* ── 二维 Tab ─────────────────────────────────────── */
+  function tabButton(row, id, label, onPick) {
+    var b = document.createElement('button');
+    b.className = 'gc-tab';
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.dataset.value = id;
+    b.textContent = label;
+    b.addEventListener('click', onPick);
+    row.appendChild(b);
+    return b;
+  }
+
+  var hubRow = document.getElementById('dim-hub');
+  var campusRow = document.getElementById('dim-campus');
+
+  tabButton(hubRow, ANY, '全部枢纽', function () { pickHub(ANY); });
+  R.hubList(D).forEach(function (hub) {
+    tabButton(hubRow, hub.id, hub.label, function () { pickHub(hub.id); });
+  });
+
+  tabButton(campusRow, ANY, '全部', function () { pickCampus(ANY); });
+  R.campusList(D).forEach(function (c) {
+    tabButton(campusRow, c.id, c.label, function () { pickCampus(c.id); });
+  });
+
+  function pickHub(id) {
+    state.hub = id; persistDims(); syncDims(); render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function pickCampus(id) {
+    state.campus = id; persistDims(); syncDims(); render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function persistDims() {
+    LS.set('shu-guide-hub', state.hub);
+    LS.set('shu-guide-campus', state.campus);
+  }
+  function syncDims() {
+    hubRow.querySelectorAll('.gc-tab').forEach(function (b) {
+      b.setAttribute('aria-selected', b.dataset.value === state.hub ? 'true' : 'false');
+    });
+    campusRow.querySelectorAll('.gc-tab').forEach(function (b) {
+      b.setAttribute('aria-selected', b.dataset.value === state.campus ? 'true' : 'false');
+    });
+  }
+
+  /* ── 出行方式筛选：按数据里真实出现的 mode 生成 ────────── */
+  var MODE_LABEL = { metro: '地铁', bus: '公交', maglev: '磁浮', airport: '市域线', rail: '铁路' };
+  var seg = document.getElementById('filter-seg');
+  (function buildFilter() {
+    var seen = {}, modes = [];
+    (D.cards || []).forEach(function (c) {
+      if (c.kind !== 'route' || !c.mode || seen[c.mode]) return;
+      seen[c.mode] = 1; modes.push(c.mode);
+    });
+    var mk = function (v, label) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.dataset.filter = v; b.textContent = label;
+      b.addEventListener('click', function () {
+        state.filter = v; LS.set('shu-guide-filter', v);
+        syncFilter(); render();
+      });
+      seg.appendChild(b);
+    };
+    mk('all', '全部');
+    modes.forEach(function (m) { mk(m, MODE_LABEL[m] || m); });
+  })();
+  function syncFilter() {
+    seg.querySelectorAll('[data-filter]').forEach(function (x) {
+      x.setAttribute('aria-pressed', x.dataset.filter === state.filter ? 'true' : 'false');
+    });
+  }
+
+  /* ── 目录抽屉 ─────────────────────────────────────── */
+  var tocWrap = document.getElementById('tocwrap');
+  var tocHost = document.getElementById('toc-host');
+  var tocBtn = document.getElementById('btn-toc');
+
+  function buildToc() {
+    tocHost.textContent = '';
+    tocHost.appendChild(R.renderToc(D, {
+      onNavigate: jumpToGroup,
+      onPicked: function () { closeToc(); }
+    }));
+    syncCurrent();
+  }
+  function openToc() {
+    tocWrap.dataset.open = '1';
+    tocBtn.setAttribute('aria-expanded', 'true');
+    buildToc();
+  }
+  function closeToc() {
+    tocWrap.dataset.open = '0';
+    tocBtn.setAttribute('aria-expanded', 'false');
+  }
+  tocBtn.addEventListener('click', function () {
+    tocWrap.dataset.open === '1' ? closeToc() : openToc();
+  });
+  document.getElementById('toc-veil').addEventListener('click', closeToc);
+  document.getElementById('toc-close').addEventListener('click', closeToc);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && tocWrap.dataset.open === '1') closeToc();
+  });
+
+  /* 当前所在分组：滚动时找出视口顶部最近的一个分组，
+     同步给目录高亮。用 rAF 节流，避免滚动时反复布局。 */
+  function currentGroupId() {
+    var secs = stage.querySelectorAll('.gc-group[id]');
+    var line = window.scrollY + chromeH() + 24;
+    var id = '';
+    for (var i = 0; i < secs.length; i++) {
+      if (secs[i].offsetTop <= line) id = secs[i].dataset.groupId;
+      else break;
+    }
+    if (!id && secs.length) id = secs[0].dataset.groupId;
+    return id;
+  }
+  function syncCurrent(forceId) {
+    var id = forceId || currentGroupId();
+    tocHost.querySelectorAll('.gc-toc__item').forEach(function (b) {
+      b.setAttribute('aria-current', b.dataset.groupId === id ? 'true' : 'false');
+    });
+  }
+  var ticking = false;
+  window.addEventListener('scroll', function () {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () { ticking = false; syncCurrent(); });
+  }, { passive: true });
+
+  /* ── 列数切换（只影响大屏；窄屏由 CSS 压回单列） ────────── */
+  var colsBtn = document.getElementById('btn-cols');
+  function syncCols() {
+    var one = state.columns === 1;
+    colsBtn.setAttribute('aria-pressed', one ? 'true' : 'false');
+    colsBtn.textContent = one ? '双列' : '单列';
+    colsBtn.title = one ? '切换为双列（大屏）' : '切换为单列';
+  }
+  colsBtn.addEventListener('click', function () {
+    state.columns = state.columns === 1 ? 2 : 1;
+    LS.set('shu-guide-cols', String(state.columns));
+    syncCols(); render();
+  });
+
+  /* ── 热区显隐 ─────────────────────────────────────── */
+  document.getElementById('btn-reveal').addEventListener('click', function () {
+    state.reveal = !state.reveal;
+    this.setAttribute('aria-pressed', state.reveal ? 'true' : 'false');
+    this.textContent = state.reveal ? '隐藏可点位置' : '显示可点位置';
+    stage.querySelectorAll('[data-reveal]').forEach(function (w) {
+      w.dataset.reveal = state.reveal ? '1' : '0';
+    });
+  });
+
+  /* ── 导出 ─────────────────────────────────────────
+     PDF 保持原稿版式：目录在首页，之后按原稿页序双列排。
+     所以导出前把筛选临时放开，导完再恢复用户的浏览状态。 */
+  document.getElementById('btn-pdf').addEventListener('click', function () {
+    var keep = { hub: state.hub, campus: state.campus, filter: state.filter, columns: state.columns };
+    state.hub = ANY; state.campus = ANY; state.filter = 'all'; state.columns = 2;
+    render();
+    R.toast('在打印对话框中选择「另存为 PDF」，导出为原稿版式');
+    setTimeout(function () {
+      window.print();
+      state.hub = keep.hub; state.campus = keep.campus;
+      state.filter = keep.filter; state.columns = keep.columns;
+      syncDims(); syncFilter(); syncCols(); render();
+    }, 420);
+  });
+
+  document.getElementById('btn-png').addEventListener('click', function () {
+    var cards = Array.prototype.slice.call(
+      stage.querySelectorAll('.gc-card[data-card-id],.gc-figcard[data-card-id]'));
+    if (!cards.length) return R.toast('当前没有可导出的卡片');
+    R.toast('开始导出 ' + cards.length + ' 张卡片，浏览器会逐个下载');
+    var i = 0;
+    (function next() {
+      if (i >= cards.length) return R.toast('已导出 ' + cards.length + ' 张卡片');
+      var el = cards[i], id = el.dataset.cardId;
+      i++;
+      R.exportCardPng(el, 'shu-guide-' + id, 2)
+        .catch(function (err) { R.toast('「' + id + '」导出失败：' + err.message); })
+        .then(function () { setTimeout(next, 420); });
+    })();
+  });
+
+  syncDims();
+  syncFilter();
+  syncCols();
+  render();
+
+  /* hash 深链：分享单个卡片组的链接 */
+  if (location.hash) {
+    var id = decodeURIComponent(location.hash.slice(1));
+    if ((D.groups || []).some(function (g) { return g.id === id; }))
+      setTimeout(function () { jumpToGroup(id); }, 60);
+  }
+}
+})();
+</script>
+</body>
+</html>

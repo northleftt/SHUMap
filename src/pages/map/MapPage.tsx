@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MapCanvas, type MapViewWindow } from "../../components/map/MapCanvas";
 import { MapEventOverlay, buildEventOverlayItems } from "../../components/map/MapEventOverlay";
 import { MapPoiOverlay } from "../../components/map/MapPoiOverlay";
+import { GuideBanner } from "../../components/layout/GuideBanner";
 import { useSheetDrag } from "../../components/sheet/useSheetDrag";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { LoadingState } from "../../components/ui/EmptyState";
@@ -204,13 +205,16 @@ export function MapPage() {
           }
         />
 
-        {/* 顶部浮层：校区切换（仅移动端） + 图层开关 + 回中 */}
-        <div className="absolute inset-x-4 top-4 z-30 flex items-start justify-between">
-          {isMobile ? (
-            <CampusSwitcher campuses={state.campuses} selectedCampus={state.selectedCampus} onSelect={state.resetForCampus} />
-          ) : (
-            <span />
-          )}
+        {/* 顶部浮层：校区切换（仅移动端） + 返校指南入口 + 图层开关 + 回中 */}
+        <div className="absolute inset-x-4 top-4 z-30 flex items-start justify-between gap-3">
+          {/* 左列纵向排：校区切换在上，指南入口在下。限宽避免和右侧圆按钮撞上。
+              指南未发布时 GuideBanner 返回 null，这一列就只剩校区切换。 */}
+          <div className="flex min-w-0 max-w-[min(23rem,calc(100%-5.5rem))] flex-col items-start gap-2">
+            {isMobile ? (
+              <CampusSwitcher campuses={state.campuses} selectedCampus={state.selectedCampus} onSelect={state.resetForCampus} />
+            ) : null}
+            <GuideBanner />
+          </div>
           <div className="flex flex-col items-end gap-2">
             <button
               type="button"
