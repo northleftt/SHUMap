@@ -317,7 +317,37 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
       );
     }
   }
+  // 换底图后，仍停留在旧坐标系的手工标注（设施点/影响区等 svg_viewbox 非 footprint 锚点）
+  // 不会随导入迁移——列进 result_json，由管理端任务卡片提示人工重新选点（见 MapsPage）。
+  const anchorReview = payload.campusId
+    ? await all<{ id: string; role: string; entityType: string; entityId: string; entityName: string | null }>(
+      env.DB,
+      `select la.id,la.role,el.entity_type as entityType,el.entity_id as entityId,
+              coalesce((select pn.name from place_names pn
+                         where pn.place_id=el.entity_id and el.entity_type='place' and pn.name_type='primary' limit 1),
+                       (select ft.name from facility_instances fi
+                         join facility_types ft on ft.id=fi.facility_type_id
+                         where fi.id=el.entity_id and el.entity_type='facility' limit 1)) as entityName
+         from location_anchors la
+         join entity_locations el on el.anchor_id=la.id and el.valid_to is null
+        where la.campus_id=? and la.valid_to is null and la.crs='svg_viewbox' and la.role<>'footprint'
+          and (la.map_version_id is null or la.map_version_id<>?)
+        order by la.role,la.id`,
+      [payload.campusId, mapVersionId],
+    )
+    : [];
   statements.push(env.DB.prepare("update jobs set status='succeeded',result_json=?,finished_at=? where id=?")
-    .bind(jsonString({ mapAssetId, mapVersionId, featureCount: features.length }), now, job.id));
+    .bind(jsonString({
+      mapAssetId,
+      mapVersionId,
+      featureCount: features.length,
+      anchorReview: anchorReview.map((row) => ({
+        anchorId: row.id,
+        role: row.role,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        entityName: row.entityName,
+      })),
+    }), now, job.id));
   await env.DB.batch(statements);
 }

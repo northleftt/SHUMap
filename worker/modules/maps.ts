@@ -154,6 +154,7 @@ interface MapImportJobRow {
   attemptCount: number;
   errorMessage: string | null;
   payloadJson: string | null;
+  resultJson: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -164,6 +165,14 @@ interface MapImportJobPayload {
   campusId: string | null;
   floorId: string | null;
   mediaAssetId: string | null;
+}
+
+export interface AnchorReviewItem {
+  anchorId: string | null;
+  role: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  entityName: string | null;
 }
 
 // 列表是只读视图：payload 缺字段或不是对象时降级为 null，不能让一条脏数据拖垮整个接口。
@@ -186,6 +195,29 @@ function parseJobPayload(raw: string | null): MapImportJobPayload {
   }
 }
 
+// result_json 里导入端写入的 anchorReview（滞留旧坐标系的手工标注），同样容错解析。
+function parseAnchorReview(raw: string | null): AnchorReviewItem[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const list = (value as Record<string, unknown>).anchorReview;
+    if (!Array.isArray(list)) return [];
+    const text = (field: unknown): string | null => (typeof field === "string" && field.trim() ? field.trim() : null);
+    return list
+      .filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && !Array.isArray(item))
+      .map((item) => ({
+        anchorId: text(item.anchorId),
+        role: text(item.role),
+        entityType: text(item.entityType),
+        entityId: text(item.entityId),
+        entityName: text(item.entityName),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * GET /api/admin/maps/import-jobs — 最近的底图/楼层导入任务，管理端轮询用。
  * payload 在 TS 侧解析（而非 SQL json_extract），保证脏数据容错。
@@ -194,7 +226,7 @@ export async function listMapImportJobs(env: Env): Promise<Response> {
   const rows = await all<MapImportJobRow>(
     env.DB,
     `select id,job_type as jobType,status,attempt_count as attemptCount,error_message as errorMessage,
-            payload_json as payloadJson,created_at as createdAt,started_at as startedAt,finished_at as finishedAt
+            payload_json as payloadJson,result_json as resultJson,created_at as createdAt,started_at as startedAt,finished_at as finishedAt
        from jobs where job_type in ('map_import','floor_import')
       order by created_at desc,id desc limit 20`,
   );
@@ -221,6 +253,7 @@ export async function listMapImportJobs(env: Env): Promise<Response> {
       floorId: payload.floorId,
       mediaAssetId: payload.mediaAssetId,
       fileName: payload.mediaAssetId ? fileNames.get(payload.mediaAssetId) ?? null : null,
+      anchorReview: row.status === "succeeded" ? parseAnchorReview(row.resultJson) : [],
       createdAt: row.createdAt,
       startedAt: row.startedAt,
       finishedAt: row.finishedAt,

@@ -426,3 +426,35 @@ test("map import retries transient infrastructure errors instead of failing fast
   assert.equal(item.retried, true);
   database.close();
 });
+
+test("map import lists manual svg_viewbox anchors left on superseded versions for review", async () => {
+  const database = freshDatabase();
+  seedImport(database, importedSvg);
+  const now = "2026-08-01T00:00:00.000Z";
+  database.prepare(
+    `insert into location_anchors(
+       id,campus_id,role,geometry_type,geometry_json,crs,map_version_id,
+       precision_level,verification_status,valid_from,created_at,updated_at
+     ) values('anchor_display','campus_import','primary_display','Point','{"type":"Point","coordinates":[5,5]}',
+       'svg_viewbox','version_previous','exact','unverified',?,?,?)`,
+  ).run(now, now, now);
+  database.prepare(
+    `insert into entity_locations(id,entity_type,entity_id,anchor_id,role,is_primary,valid_from,created_at)
+     values('eloc_display','place','place_import','anchor_display','primary_display',1,?,?)`,
+  ).run(now, now);
+
+  const item = await runImport(database, new R2Bucket(new StoredObject(importedSvg)));
+  assert.equal(item.acknowledged, true);
+  const job = database.prepare("select status,result_json as resultJson from jobs where id='job_import'").get();
+  assert.equal(job.status, "succeeded");
+  const result = JSON.parse(job.resultJson);
+  // 手工标注进入复核清单；footprint 锚点由导入自动迁移，不在清单里
+  assert.deepEqual(result.anchorReview, [{
+    anchorId: "anchor_display",
+    role: "primary_display",
+    entityType: "place",
+    entityId: "place_import",
+    entityName: null,
+  }]);
+  database.close();
+});

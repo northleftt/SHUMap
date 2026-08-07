@@ -100,6 +100,7 @@ test("listMapImportJobs returns parsed payload fields and joined file name", asy
     floorId: null,
     mediaAssetId: "media_a",
     fileName: "宝山校区.svg",
+    anchorReview: [],
     createdAt: now,
     startedAt: now,
     finishedAt: now,
@@ -132,5 +133,33 @@ test("listMapImportJobs returns an empty list when there are no import jobs", as
   const database = freshDatabase();
   const items = await callList(database);
   assert.deepEqual(items, []);
+  database.close();
+});
+
+test("listMapImportJobs parses anchorReview from succeeded job result", async () => {
+  const database = freshDatabase();
+  const now = "2026-08-01T00:00:00.000Z";
+  database.prepare(
+    `insert into jobs(id,job_type,idempotency_key,status,payload_json,result_json,attempt_count,created_at)
+     values('job_ok','map_import','key-ok','succeeded',?,?,0,?)`,
+  ).run(
+    JSON.stringify({ mediaAssetId: "media_x", campusId: "campus_a", floorId: null, versionLabel: "v1" }),
+    JSON.stringify({
+      mapVersionId: "mapver_x",
+      featureCount: 10,
+      anchorReview: [
+        { anchorId: "anchor_1", role: "primary_display", entityType: "facility", entityId: "facility_1", entityName: "饮水点" },
+        { broken: true },
+      ],
+    }),
+    now,
+  );
+
+  const items = await callList(database);
+  assert.equal(items.length, 1);
+  assert.deepEqual(items[0].anchorReview, [
+    { anchorId: "anchor_1", role: "primary_display", entityType: "facility", entityId: "facility_1", entityName: "饮水点" },
+    { anchorId: null, role: null, entityType: null, entityId: null, entityName: null },
+  ]);
   database.close();
 });

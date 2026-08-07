@@ -573,6 +573,14 @@ export function createImportJob(body: {
   return apiFetch<{ id: string; status: string }>("/api/admin/maps/import-jobs", { method: "POST", body });
 }
 
+export interface MapImportAnchorReviewItem {
+  anchorId: string | null;
+  role: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  entityName: string | null;
+}
+
 export interface MapImportJobRow {
   id: string;
   jobType: "map_import" | "floor_import";
@@ -584,6 +592,7 @@ export interface MapImportJobRow {
   floorId: string | null;
   mediaAssetId: string | null;
   fileName: string | null;
+  anchorReview: MapImportAnchorReviewItem[];
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

@@ -427,6 +427,11 @@ export function MapsPage() {
                   {job.status === "failed" && job.errorMessage ? (
                     <p className="mt-1 text-aux font-medium text-error">{job.errorMessage}</p>
                   ) : null}
+                  {job.status === "succeeded" && job.anchorReview.length ? (
+                    <p className="mt-1 text-aux font-medium text-warning">
+                      {job.anchorReview.length} 个手工标注仍在旧版地图坐标系（{job.anchorReview.map((a) => a.entityName ?? a.anchorId ?? "未知").join("、")}），画布如有平移/缩放会错位，发布前请到对应设施/地点重新选点。
+                    </p>
+                  ) : null}
                 </div>
               </div>
             );
