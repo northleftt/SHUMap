@@ -37,7 +37,7 @@ const published = {
   edition: "2025 版 · 电子版",
   revisionId: "grev_1",
   revisionNo: 1,
-  content: { cards: [], cover: {} },
+  content: { cards: [], hubs: [] },
 };
 
 test("a published guide is parsed into a summary", () => {

@@ -138,19 +138,20 @@ function env(sqlite) {
   return { DB: new D1(sqlite), SHUMAP_BUCKET: new Bucket() };
 }
 
-/** 最小可渲染内容：渲染层要求至少有 cards 与 cover。 */
+/** 最小可渲染内容（schema v2）：渲染层要求至少有 cards 与 hubs。 */
 function content(overrides = {}) {
   return {
+    schema: 2,
     meta: { title: "上海大学", subtitle: "新生入校交通指南", edition: "2025 版" },
-    cover: { lead: "从下列枢纽出发…", hubs: [{ id: "hongqiao", name: "虹桥枢纽", entries: [] }] },
     campuses: [{ id: "baoshan", label: "宝山校区", short: "宝山" }],
-    groups: [{ id: "hongqiao-baoshan", hub: "hongqiao", campus: "baoshan", page: 1, title: "虹桥枢纽 → 宝山校区" }],
+    hubs: [{ id: "hongqiao", name: "虹桥枢纽", color: "#3aa17e", order: 1 }],
     cards: [
       {
         id: "hq-bs-metro",
         kind: "route",
-        group: "hongqiao-baoshan",
-        hub: { name: "虹桥枢纽" },
+        hub: "hongqiao",
+        campus: "baoshan",
+        origin: { name: "虹桥枢纽" },
         mode: "metro",
         modeLabel: "地铁",
         durationMin: 75,
@@ -388,14 +389,14 @@ test("unpublishing takes the guide offline while keeping its history", async () 
   assert.equal(kept.n, 1, "下线不该删历史");
 });
 
-test("content missing cards or cover is refused", async () => {
+test("content missing cards or hubs is refused", async () => {
   const e = env(database());
   const created = await payload(await guide.createGuideDocument(
     jsonRequest({ slug: "freshman-transit", title: "指南" }), e, principal, "req_1",
   ));
   await assert.rejects(
     guide.saveGuideRevision(
-      jsonRequest({ title: "指南", content: { cover: {} } }), e, principal, created.id, "req_2",
+      jsonRequest({ title: "指南", content: { hubs: [] } }), e, principal, created.id, "req_2",
     ),
     /content\.cards must be an array/,
   );
@@ -403,7 +404,7 @@ test("content missing cards or cover is refused", async () => {
     guide.saveGuideRevision(
       jsonRequest({ title: "指南", content: { cards: [] } }), e, principal, created.id, "req_3",
     ),
-    /content\.cover must be an object/,
+    /content\.hubs must be an array/,
   );
 });
 
@@ -563,7 +564,7 @@ test("deleting an asset still referenced by published content is refused", async
   await guide.uploadGuideAsset(svgRequest(svg), e, principal, "fig", "req_1");
 
   const { documentId, revisionId } = await approvedRevision(e, {
-    cards: [{ id: "c1", kind: "figure", group: "hongqiao-baoshan", figure: "fig", title: "图" }],
+    cards: [{ id: "c1", kind: "figure", hub: "hongqiao", campus: "baoshan", figure: "fig", title: "图" }],
   });
   await guide.publishGuideRevision(
     jsonRequest({ revisionId }), e, principal, documentId, "req_5",

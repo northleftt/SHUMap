@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>返校指南 · 卡片编辑器</title>
+<title>返校指南 · 内容编辑器（v2）</title>
 <script src="assets/guide-styles.js"></script>
 <script src="data/guide-icons.js"></script>
 <!-- 离线兜底种子：管理端 API 不可用（未登录 / 离线）时才用它，正式内容来自 D1 -->
@@ -11,10 +11,27 @@
 <script src="assets/guide-render.js"></script>
 <script src="assets/guide-versions.js"></script>
 <style>
-  /* 编辑器外壳：只在编辑器里用，打印时由 guide-styles.js 的 @media print 隐藏 */
+  /* v2 渲染层的 guide-styles.js 只带前台令牌，编辑器外壳缺的几个在这里补齐 */
+  :root{--r-lg:14px;--error:#b91c1c;--warning:#d97706;--success:#14803c;
+    --shadow-lift:0 8px 30px rgba(15,23,42,.18);
+    --font-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* 顶栏按钮与品牌字标：v1 时期由旧样式表提供，v2 样式表不再含这两个类，
+     编辑器自己带上，避免再依赖渲染层的内部样式 */
+  .gc-brand{font-size:14px;font-weight:700;letter-spacing:.02em;white-space:nowrap}
+  .gc-btn{border:1px solid var(--line);background:var(--surface);font:inherit;
+    font-size:12.5px;font-weight:600;color:#4d5865;border-radius:var(--r-sm);
+    padding:7px 12px;cursor:pointer;min-height:34px;text-decoration:none;
+    display:inline-flex;align-items:center;white-space:nowrap}
+  .gc-btn:hover{border-color:var(--primary);color:var(--primary)}
+  .gc-btn--primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  .gc-btn--primary:hover{background:var(--primary-pressed);color:#fff}
+
+  /* 编辑器外壳：只在编辑器里用，打印时由 guide-styles.js 的 @media print 隐藏
+     （整棵屏幕 UI 挂在 #gc-screen 下，打印树用 buildPrintRoot 离屏构建） */
   html,body{height:100%}
   body{overflow:hidden}
-  .ge{display:grid;grid-template-columns:400px minmax(0,1fr);
+  .ge{display:grid;grid-template-columns:420px minmax(0,1fr);
     grid-template-rows:auto auto minmax(0,1fr);height:100vh}
   .ge-top{grid-column:1/-1;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
     padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line);z-index:20}
@@ -46,6 +63,8 @@
   .ge-f textarea{min-height:62px;resize:vertical;line-height:19px}
   .ge-f input:focus,.ge-f select:focus,.ge-f textarea:focus{outline:2px solid var(--primary);
     outline-offset:-1px;border-color:var(--primary)}
+  .ge-f__static{font-family:var(--font-mono);font-size:12px;color:var(--sub);
+    padding:8px 2px;overflow-wrap:anywhere}
   .ge-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .ge-row--3{grid-template-columns:1fr 1fr 1fr}
   .ge-row--4{grid-template-columns:1fr 1fr 1fr 1fr}
@@ -64,9 +83,6 @@
   .ge-mini[disabled]{opacity:.35;cursor:not-allowed}
   .ge-adds{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 
-  /* 图标库与素材区的完整样式在下方「图标库」一节（.ge-icons / .ge-ico），
-     这里曾经是两份重复定义，迁移时弄丢了选择器，只剩悬空的声明块，已清理。 */
-
   .ge-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
     color:var(--warning);letter-spacing:.02em;white-space:nowrap}
   .ge-state__d{width:7px;height:7px;border-radius:50%;background:var(--warning)}
@@ -75,8 +91,7 @@
   .ge-state--err{color:var(--error)}
   .ge-state--err .ge-state__d{background:var(--error)}
 
-  /* 顶栏按用途分组：状态区 / 视图 / 数据 / 导出 / 版本。
-     组间用竖线分隔，比一排九个相同按钮更容易找到要点的那个。 */
+  /* 顶栏按用途分组：状态区 / 数据 / 导出 / 版本。组间用竖线分隔。 */
   .ge-sep{width:1px;align-self:stretch;margin:4px 2px;background:var(--line);flex:none}
   .ge-doc{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;
     color:#4d5865;letter-spacing:.02em;white-space:nowrap}
@@ -97,24 +112,56 @@
   .ge-gate__d{font-size:13px;line-height:20px;color:#4d5865;margin-bottom:18px}
   .ge-gate__acts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
 
-  /* 送审冻结条：in_review 期间服务端拒绝写入，先把原因摆在顶上，
-     免得改了半天保存时才发现存不进去。 */
+  /* 送审冻结条：in_review 期间服务端拒绝写入，先把原因摆在顶上 */
   .ge-lock{grid-column:1/-1;grid-row:2;background:#dbe7f8;color:#1e40af;font-size:12px;font-weight:600;
     line-height:18px;padding:8px 16px;letter-spacing:.02em;display:flex;gap:8px;align-items:center}
   .ge-lock[hidden],.ge-doc[hidden]{display:none}
 
+  /* 画布：顶部是枢纽 × 校区组合切换条，下面是指组合的整页预览 */
+  .ge-pairbar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:8px;
+    flex-wrap:wrap;padding:10px 16px;background:var(--page);
+    border-bottom:1px solid var(--line)}
+  .ge-pairbar__l{font-size:12px;font-weight:600;color:var(--sub);letter-spacing:.03em}
+  .ge-pairbar select{font:inherit;font-size:13px;font-weight:600;color:var(--ink);
+    border:1px solid var(--line);border-radius:var(--r-sm);padding:6px 9px;
+    background:var(--surface);min-height:34px}
+  .ge-canvas-body{padding:16px 16px 64px;max-width:1160px;margin:0 auto}
+
   /* 画布里的选中态与拖拽把手 */
-  .ge-canvas .gc-card,.ge-canvas .gc-figcard{outline:2px solid transparent;outline-offset:3px;
+  .ge-canvas .gc-card{outline:2px solid transparent;outline-offset:3px;
     transition:outline-color .14s}
-  .ge-canvas .gc-card:hover,.ge-canvas .gc-figcard:hover{outline-color:#cfe0ee}
-  .ge-canvas [data-sel="1"].gc-card,.ge-canvas [data-sel="1"].gc-figcard{
-    outline-color:var(--primary)}
+  .ge-canvas .gc-card:hover{outline-color:#cfe0ee}
+  .ge-canvas [data-sel="1"].gc-card{outline-color:var(--primary)}
   .ge-canvas .gc-hot{cursor:grab}
   .ge-canvas .gc-hot:active{cursor:grabbing}
   .ge-canvas .gc-hot[data-sel="1"]::after{opacity:1;border-width:3px}
-  .ge-canvas .gc-acts{opacity:1}
+
+  /* 面板里的组合小标题（卡片按 枢纽 → 校区 归组） */
+  .ge-pairh{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--sub);
+    margin:16px 0 7px;display:flex;align-items:center;gap:6px}
+  .ge-pairh__n{font-weight:500;color:var(--faint)}
+
+  /* 枢纽备注的轻量富文本：工具条 + contenteditable，白名单见 sanitizeRichHtml */
+  .ge-richtb{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+  .ge-rich{min-height:96px;border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:9px 10px;font-size:13px;line-height:20px;background:#fff;color:var(--ink)}
+  .ge-rich:focus{outline:2px solid var(--primary);outline-offset:-1px;border-color:var(--primary)}
+  .ge-rich:empty::before{content:"写备注：支持加粗 / 列表 / 链接 / 插图";color:var(--faint)}
+  .ge-rich p{margin:0 0 8px}
+  .ge-rich ul,.ge-rich ol{margin:0 0 8px;padding-left:20px}
+  .ge-rich img{max-width:100%;height:auto;border-radius:var(--r-sm)}
+  .ge-rich a{color:var(--primary)}
+
+  /* 枢纽指引图缩略预览 */
+  .ge-figprev{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .ge-figprev img{max-height:64px;max-width:150px;border:1px solid var(--line);
+    border-radius:var(--r-sm);background:#fff}
+  .ge-figprev__k{font-family:var(--font-mono);font-size:11px;color:var(--sub);
+    overflow-wrap:anywhere}
 
   /* 图标库：类名与 iconLibEditor() 里的 DOM 保持一致 */
+  .ge-icogroup__h{font-size:11px;font-weight:700;letter-spacing:.05em;color:var(--sub);
+    margin:12px 0 7px}
   .ge-icons{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:8px}
   .ge-ico{border:1px solid var(--line);border-radius:var(--r-md);padding:9px 8px;
     background:#fcfdfe;display:flex;flex-direction:column;gap:3px;min-width:0}
@@ -171,8 +218,7 @@
   .ge-v__diff b{font-weight:600;color:#20293a}
   .ge-v__diff ul{margin:4px 0 0;padding-left:16px;display:flex;
     flex-direction:column;gap:2px}
-  /* 对比明细：新增 / 删除 / 变动 三段，各自一个色标。
-     复核时要一眼看出「这一版动了什么」，所以三类不共用一种颜色。 */
+  /* 对比明细：新增 / 删除 / 变动 三段，各自一个色标 */
   .ge-v__diffh{font-size:11px;font-weight:600;line-height:16px;letter-spacing:.02em;
     margin-bottom:2px}
   .ge-v__diffseg{margin-top:7px;padding-left:8px;
@@ -184,46 +230,48 @@
   .ge-v__diffseg[data-kind="changed"]{border-left-color:var(--warning)}
   .ge-v__diffseg[data-kind="changed"] .ge-v__diffh{color:#92400e}
   .ge-v__diffb{font-size:11px;line-height:17px;color:#4d5865;
-    overflow-wrap:anywhere}
+    overflow-wrap:anywhere;white-space:pre-wrap;margin:0}
   .ge-v__diffb code{font-family:var(--font-mono);font-size:10px;color:#5b6573}
   .ge-vempty{text-align:center;padding:34px 14px;font-size:12px;line-height:18px;
     color:var(--sub);border:1px dashed var(--line);border-radius:var(--r-lg)}
 </style>
 </head>
 <body>
-<div class="ge">
+<div class="ge" id="gc-screen">
   <div class="ge-top">
-    <span class="gc-brand">返校指南 · 编辑器</span>
+    <span class="gc-brand">返校指南 · 编辑器 v2</span>
     <span class="ge-doc" id="ge-doc" hidden>
       <span id="ge-doc-slug"></span>
       <span class="ge-doc__badge" id="ge-doc-badge"></span>
     </span>
     <span id="ge-state" class="ge-state ge-state--ok"><span class="ge-state__d"></span>已同步</span>
     <span class="gc-spacer"></span>
-    <button type="button" class="gc-btn" id="ge-reveal" aria-pressed="true">显示热区</button>
-    <span class="ge-sep"></span>
     <button type="button" class="gc-btn" id="ge-json">导出 JSON</button>
     <button type="button" class="gc-btn" id="ge-load">导入 JSON</button>
     <span class="ge-sep"></span>
-    <button type="button" class="gc-btn" id="ge-pngall">批量存图</button>
     <button type="button" class="gc-btn gc-btn--primary" id="ge-pdf">打印 / PDF</button>
     <span class="ge-sep"></span>
     <button type="button" class="gc-btn" id="ge-versions" aria-expanded="false"
             aria-controls="ge-vwrap">版本 / 发布</button>
-    <button type="button" class="gc-btn" id="ge-reset">还原原稿</button>
+    <button type="button" class="gc-btn" id="ge-reset">还原出厂稿</button>
     <a class="gc-btn" href="index.html">查看前台</a>
     <input type="file" id="ge-file" accept=".json,application/json" hidden />
     <input type="file" id="ge-vfile" accept=".json,application/json" hidden />
     <input type="file" id="ge-icofile" accept=".svg,.png,image/svg+xml,image/png" multiple hidden />
     <input type="file" id="ge-figfile" accept=".svg,image/svg+xml" hidden />
+    <input type="file" id="ge-hubfig" accept=".svg,image/svg+xml" hidden />
+    <input type="file" id="ge-noteimg" accept=".png,image/png" hidden />
   </div>
   <div class="ge-lock" id="ge-lock" hidden></div>
 
   <aside class="ge-panel" id="ge-panel" aria-label="内容检查器"></aside>
-  <main class="ge-canvas" id="ge-canvas"></main>
+  <main class="ge-canvas" id="ge-canvas">
+    <div class="ge-pairbar" id="ge-pairbar"></div>
+    <div class="ge-canvas-body" id="ge-canvas-body"></div>
+  </main>
 </div>
 
-<!-- 版本抽屉：存版 / 对比 / 回滚 / 导入导出 -->
+<!-- 版本抽屉：存版 / 对比 / 回滚 / 送审 / 发布 -->
 <div class="ge-vwrap" id="ge-vwrap" data-open="0">
   <div class="ge-vwrap__veil" id="ge-vveil"></div>
   <aside class="ge-vpanel" role="dialog" aria-modal="true" aria-label="版本管理">
@@ -242,7 +290,9 @@
   "use strict";
   var R = window.GuideRender, h = R.h;
   var STORE = "shu-guide-draft-v2";
-  var ORIGINAL = JSON.parse(JSON.stringify(window.GUIDE_DATA || {}));
+  /* 出厂种子进编辑器先过一次 normalizeData：schema v2 原样返回，
+     万一种子回退成 v1（cover/groups）也能就地升级，编辑器只面对 v2 一种形状。 */
+  var ORIGINAL = R.normalizeData(JSON.parse(JSON.stringify(window.GUIDE_DATA || {})));
   var SLUG = (function () {
     var m = /[?&]slug=([a-z0-9-]{3,64})/.exec(location.search);
     return m ? m[1] : "freshman-transit";
@@ -260,7 +310,7 @@
     workingId: null,
     workingNo: 0,
     workingStatus: "",      // draft / in_review / approved
-    assets: [],             // listGuideAssets 的图示素材（figure_svg）
+    assets: [],             // listGuideAssets 的素材清单
     readOnly: false,        // in_review 冻结：服务端会拒绝写入，先把原因摆出来
   };
   var STATUS_LABEL = {
@@ -269,17 +319,37 @@
   };
 
   var data = loadLocal();
-  var view = { sel: null, selHot: null, open: {}, reveal: true };
+  ensureShape();
+  var view = {
+    sel: null, selHot: null, open: {},
+    pair: { hub: "", campus: "" },          // 画布当前预览的 枢纽 × 校区 组合
+    fresh: { hub: "", campus: "" },         // 新建卡片用的两个下拉
+  };
 
   function loadLocal() {
     try {
       var raw = localStorage.getItem(STORE);
       if (raw) {
         var parsed = JSON.parse(raw);
-        if (parsed && parsed.cards && parsed.cover) return parsed;
+        /* v2 直接用；v1 草稿（cover/groups）经 normalizeData 透明升级 */
+        if (parsed && Array.isArray(parsed.cards) &&
+            (parsed.schema === 2 || parsed.cover || parsed.groups || parsed.hubs)) {
+          return R.normalizeData(parsed);
+        }
       }
     } catch (e) {}
     return JSON.parse(JSON.stringify(ORIGINAL));
+  }
+
+  /* 保存 / 导出前把数据钉在 v2 形状上，杜绝把残缺结构写进服务器 */
+  function ensureShape() {
+    data.schema = 2;
+    if (!data.meta || typeof data.meta !== "object") data.meta = {};
+    if (!data.lineColors || typeof data.lineColors !== "object") data.lineColors = {};
+    if (!Array.isArray(data.hubs)) data.hubs = [];
+    if (!Array.isArray(data.campuses)) data.campuses = [];
+    if (!Array.isArray(data.cards)) data.cards = [];
+    return data;
   }
 
   /* 管理端 API 的薄封装：同源带 cookie，非 2xx 统一抛带 status/code 的 Error */
@@ -321,6 +391,7 @@
      在线时写服务器 —— 服务端语义是「保存草稿」：有 draft 原地更新，
      同内容直接返回 unchanged，所以 360ms 防抖连发不会堆版本。 */
   function saveNow() {
+    ensureShape();
     try { localStorage.setItem(STORE, JSON.stringify(data)); } catch (e) {}
     if (!server.online) { markState("ok", "已保存到本地（离线）"); return Promise.resolve(); }
     if (server.readOnly) { markState("err", "送审中，内容已冻结"); return Promise.resolve(); }
@@ -335,8 +406,7 @@
       if (res && res.id) {
         server.workingId = res.id;
         server.workingNo = res.revisionNo;
-        /* 保存可能新开了一版 draft（原 working 是已发布版），状态要跟着换，
-           否则徽章会继续显示「已通过」直到下次刷新 */
+        /* 保存可能新开了一版 draft（原 working 是已发布版），状态要跟着换 */
         if (res.editorialStatus) server.workingStatus = res.editorialStatus;
       }
       markState("ok", "已保存到服务器");
@@ -370,6 +440,12 @@
   }
   function cardById(id) {
     return (data.cards || []).find(function (c) { return c.id === id; });
+  }
+  function hubById(id) {
+    return (data.hubs || []).find(function (x) { return x.id === id; }) || null;
+  }
+  function campusById(id) {
+    return (data.campuses || []).find(function (x) { return x.id === id; }) || null;
   }
 
   /* ══════════════ 卡片增删改序 ══════════════ */
@@ -417,47 +493,46 @@
     refresh();
   }
 
-  function currentGroupId() {
-    var c = view.sel && cardById(view.sel);
-    if (c && c.group) return c.group;
-    return (data.groups && data.groups[0] && data.groups[0].id) || "";
-  }
-
+  /* v2 新建路线卡：枢纽 × 校区 两个下拉决定归属，不再有 v1 的分组层。
+     legs 留空，由编辑者用「+ 站点 / 乘车段 / 步行段」逐段搭。 */
   function addRouteCard() {
-    var g = currentGroupId();
-    var proto = (data.cards || []).filter(function (c) {
-      return c.kind === "route" && c.group === g;
-    })[0];
+    var hub = hubById(view.fresh.hub) || data.hubs[0];
+    var camp = campusById(view.fresh.campus) || data.campuses[0];
+    if (!hub || !camp) return R.toast("请先在「枢纽管理 / 校区管理」里建枢纽和校区");
     var card = {
       id: uniqueId("card-route"),
       kind: "route",
-      group: g,
-      hub: { name: (proto && proto.hub && proto.hub.name) || "新枢纽", note: "" },
-      toward: (proto && proto.toward) || "去往 某校区",
+      hub: hub.id,
+      campus: camp.id,
+      origin: { name: hub.name, note: "" },
+      toward: "去往 " + (camp.label || camp.id),
       mode: "metro",
       modeLabel: "地铁",
-      durationMin: 60,
-      fareYuan: 8,
+      durationMin: null,
+      fareYuan: null,
       flags: [],
-      legs: [
-        { type: "stop", name: "起点站", marker: "dot", rails: ["neutral"] },
-        { type: "ride", rails: ["neutral"], lines: [{ kind: "metro", no: "1", color: "l1", suffix: "号线", toward: "" }] },
-        { type: "stop", name: "终点站", marker: "dot", terminal: true },
-      ],
+      legs: [],
+      note: "",
+      schedule: [],
     };
     data.cards.push(card);
     view.sel = card.id;
     view.open["card:" + card.id] = true;
+    view.pair = { hub: hub.id, campus: camp.id };
     persist();
     refresh();
   }
 
   function addFigureCard() {
+    var hub = hubById(view.fresh.hub) || data.hubs[0];
+    var camp = campusById(view.fresh.campus) || data.campuses[0];
+    if (!hub || !camp) return R.toast("请先建枢纽和校区");
     var keys = figureKeys();
     var card = {
       id: uniqueId("card-figure"),
       kind: "figure",
-      group: currentGroupId(),
+      hub: hub.id,
+      campus: camp.id,
       figure: keys[0] || "",
       title: "示意图",
       caption: "",
@@ -466,35 +541,87 @@
     data.cards.push(card);
     view.sel = card.id;
     view.open["card:" + card.id] = true;
+    view.pair = { hub: hub.id, campus: camp.id };
     persist();
     refresh();
   }
 
-  /* ══════════════ 预览 ══════════════ */
+  function addStepsCard() {
+    var hub = hubById(view.fresh.hub) || data.hubs[0];
+    var camp = campusById(view.fresh.campus) || data.campuses[0];
+    if (!hub || !camp) return R.toast("请先建枢纽和校区");
+    var card = {
+      id: uniqueId("card-steps"),
+      kind: "steps",
+      hub: hub.id,
+      campus: camp.id,
+      origin: { name: hub.name, note: "" },
+      toward: "实景指引",
+      sections: [{ title: "第一节", steps: [{ text: "第一步" }] }],
+    };
+    data.cards.push(card);
+    view.sel = card.id;
+    view.open["card:" + card.id] = true;
+    view.pair = { hub: hub.id, campus: camp.id };
+    persist();
+    refresh();
+  }
+
+  /* ══════════════ 预览（枢纽 × 校区组合整页） ══════════════ */
 
   var opts = {
     onPickCard: function (id) { select(id, null); },
-    onPickHot: function (cardId, hotId) { select(cardId, hotId); },
-    onDuplicate: duplicateCard,
-    onMove: moveCard,
-    onDelete: deleteCard,
-    onNavigate: function (groupId) {
-      var el = document.getElementById("group-" + groupId);
-      if (el) document.getElementById("ge-canvas").scrollTop = el.offsetTop - 12;
+    /* v2 渲染层的回调签名是对象：onPickHot({cardId, hotId}) */
+    onPickHot: function (info) {
+      if (info && info.cardId) select(info.cardId, info.hotId);
     },
     onInternalLink: function (href) { R.toast("前台会跳转到：" + href); },
   };
 
+  /* 画布预览哪一个组合：优先跟随选中卡片，否则取第一个枢纽 × 校区 */
+  function ensurePair() {
+    if (!hubById(view.pair.hub))
+      view.pair.hub = (data.hubs[0] && data.hubs[0].id) || "";
+    if (!campusById(view.pair.campus))
+      view.pair.campus = (data.campuses[0] && data.campuses[0].id) || "";
+  }
+
+  function renderPairBar() {
+    var bar = document.getElementById("ge-pairbar");
+    bar.textContent = "";
+    ensurePair();
+    var hubSel = h("select", null, (data.hubs || []).map(function (x) {
+      return h("option", { value: x.id, text: x.name || x.id });
+    }));
+    hubSel.value = view.pair.hub;
+    hubSel.addEventListener("change", function () {
+      view.pair.hub = hubSel.value;
+      renderPreview();
+    });
+    var campSel = h("select", null, (data.campuses || []).map(function (x) {
+      return h("option", { value: x.id, text: x.label || x.id });
+    }));
+    campSel.value = view.pair.campus;
+    campSel.addEventListener("change", function () {
+      view.pair.campus = campSel.value;
+      renderPreview();
+    });
+    bar.appendChild(h("span", { class: "ge-pairbar__l", text: "预览组合" }));
+    bar.appendChild(hubSel);
+    bar.appendChild(h("span", { class: "ge-pairbar__l", text: "→" }));
+    bar.appendChild(campSel);
+    bar.appendChild(h("span", { class: "ge-pairbar__l",
+      text: "点卡片定位字段；热区可直接拖动" }));
+  }
+
   function renderPreview() {
+    var body = document.getElementById("ge-canvas-body");
     var canvas = document.getElementById("ge-canvas");
     var keepScroll = canvas.scrollTop;
-    canvas.textContent = "";
-    canvas.appendChild(R.renderFlow(data, opts));
-    canvas.querySelectorAll("[data-reveal]").forEach(function (n) {
-      n.dataset.reveal = view.reveal ? "1" : "0";
-    });
-    paintSelection(canvas);
-    attachHotDrag(canvas);
+    renderPairBar();
+    R.renderPairView(body, data, view.pair.hub, view.pair.campus, opts);
+    paintSelection(body);
+    attachHotDrag(body);
     canvas.scrollTop = keepScroll;
   }
 
@@ -510,7 +637,12 @@
   function select(cardId, hotId) {
     view.sel = cardId;
     view.selHot = hotId || null;
-    if (cardId) view.open["card:" + cardId] = true;
+    if (cardId) {
+      view.open["card:" + cardId] = true;
+      /* 画布组合跟随选中卡片，点哪张就看到哪张 */
+      var c = cardById(cardId);
+      if (c) view.pair = { hub: c.hub, campus: c.campus };
+    }
     refresh();
     var node = document.querySelector('.ge-item[data-sel="1"]') ||
                document.querySelector('.ge-sec[data-sel="1"]');
@@ -560,7 +692,7 @@
     });
   }
 
-  /* ══════════════ 检查器 ══════════════ */
+  /* ══════════════ 检查器基础件 ══════════════ */
 
   function field(label, path, o) {
     o = o || {};
@@ -610,351 +742,379 @@
     return sec;
   }
 
-  /* ══════════════ 图标库 ══════════════
-   * 图标不再写死在渲染层里，而是存进 data.icons，按 id 引用。
-   * 上传的文件用 FileReader 转成 data URI（SVG 直接存标记文本），
-   * 因为单卡片导出 PNG 走 <foreignObject>，其中加载不了相对路径的外部文件。
-   * data.icons 随 JSON 导出／导入一起走，所以图标库跟着文档走，不依赖本机。
-   */
-  var ICON_GROUPS = [
-    { value: "transit", label: "交通标识" },
-    { value: "brand", label: "校方 / 社团" },
-    { value: "misc", label: "其它" },
-  ];
+  /* 枢纽 / 校区下拉（卡片归属用） */
+  function hubSelect(path) {
+    return field("起点枢纽", path, {
+      type: "select",
+      options: (data.hubs || []).map(function (x) { return { value: x.id, label: x.name || x.id }; }),
+    });
+  }
+  function campusSelect(path) {
+    return field("到达校区", path, {
+      type: "select",
+      options: (data.campuses || []).map(function (x) { return { value: x.id, label: x.label || x.id }; }),
+    });
+  }
 
-  function ensureIcons() {
-    if (!Array.isArray(data.icons)) {
-      /* 首次进入：把出厂种子实体化进 data，之后用户改的就是自己的副本 */
-      data.icons = JSON.parse(JSON.stringify(window.GUIDE_ICON_SEED || []));
+  /* ══════════════ 1. 文档信息 ══════════════ */
+
+  function metaEditor() {
+    return section("meta", "文档信息", null, false, function () {
+      return h("div", null,
+        field("主标题", "meta.title"),
+        field("副标题", "meta.subtitle"),
+        h("div", { class: "ge-row" },
+          field("版次", "meta.edition"),
+          field("版本号", "meta.version")
+        ),
+        h("div", { class: "ge-row" },
+          field("修订日期", "meta.revisedAt"),
+          field("修订说明", "meta.revisionNote")
+        )
+      );
+    });
+  }
+
+  /* ══════════════ 2. 枢纽管理 ══════════════ */
+
+  function hubIndex(id) {
+    return (data.hubs || []).findIndex(function (x) { return x.id === id; });
+  }
+
+  /* order 是展示序：上移/下移后对全表重排并归一化成 1..n */
+  function moveHub(id, dir) {
+    var list = (data.hubs || []).slice().sort(function (a, b) {
+      return (a.order || 0) - (b.order || 0);
+    });
+    var i = list.findIndex(function (x) { return x.id === id; });
+    var t = i + dir;
+    if (i < 0 || t < 0 || t >= list.length) return;
+    var tmp = list[i]; list[i] = list[t]; list[t] = tmp;
+    list.forEach(function (x, k) { x.order = k + 1; });
+    data.hubs = list;
+    persist();
+    refresh();
+  }
+
+  function deleteHub(id) {
+    var used = (data.cards || []).filter(function (c) { return c.hub === id; }).length;
+    if (used) return R.toast("仍有 " + used + " 张卡片挂在这个枢纽下，先移走或删除它们");
+    if (!window.confirm("删除枢纽「" + id + "」？")) return;
+    data.hubs.splice(hubIndex(id), 1);
+    persist();
+    refresh();
+  }
+
+  function addHub() {
+    var id = window.prompt("枢纽 id（小写字母 / 数字 / 连字符，建好后不可改）", "");
+    if (id === null) return;
+    id = id.trim();
+    if (!/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(id))
+      return R.toast("id 不合规：3-32 位小写字母、数字或连字符");
+    if (hubById(id)) return R.toast("id 已存在：" + id);
+    var order = (data.hubs || []).length + 1;
+    data.hubs.push({
+      id: id, name: "新枢纽", note: null, color: "#465060", order: order,
+      guideFigure: null, guideVideo: null, remark: "",
+    });
+    view.open["hub:" + id] = true;
+    persist();
+    refresh();
+  }
+
+  /* 指引图上传：PUT 到指南素材库，key 固定为 guidefig-<hubId>（服务端做 SVG 消毒） */
+  function uploadHubFigure(hub, file) {
+    if (!server.online) return R.toast("离线模式下不能上传素材");
+    var key = "guidefig-" + hub.id;
+    var fr = new FileReader();
+    fr.onerror = function () { R.toast("读取文件失败"); };
+    fr.onload = function () {
+      fetch("/api/admin/guide/assets/" + encodeURIComponent(key) + "?kind=figure_svg", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "image/svg+xml" },
+        body: fr.result,
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (body) {
+          if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
+          hub.guideFigure = key;
+          persist();
+          refresh();
+          loadAssets();
+          R.toast("已上传「" + key + "」");
+        });
+      }).catch(function (err) { R.toast("上传失败：" + err.message); });
+    };
+    fr.readAsText(file);
+  }
+
+  function clearHubFigure(hub) {
+    var key = hub.guideFigure;
+    hub.guideFigure = null;
+    persist();
+    refresh();
+    if (server.online && key &&
+        window.confirm("已从内容里移除引用。是否同时从素材库删除「" + key + "」？（已发布内容仍引用时服务端会拒绝）")) {
+      api("/api/admin/guide/assets/" + encodeURIComponent(key), { method: "DELETE" })
+        .then(function () { R.toast("已删除素材「" + key + "」"); loadAssets(); })
+        .catch(function (err) { R.toast("删除素材失败：" + err.message); });
     }
-    return data.icons;
   }
 
-  function iconIdTaken(id, exceptIdx) {
-    var list = ensureIcons();
-    for (var i = 0; i < list.length; i++)
-      if (i !== exceptIdx && list[i].id === id) return true;
-    return false;
+  /* 实况视频（预留）：三个框全空时存 null，任一非空时存对象 */
+  function videoField(hub, label, key) {
+    var input = h("input", { type: "text" });
+    input.value = (hub.guideVideo && hub.guideVideo[key]) || "";
+    input.addEventListener("input", function () {
+      var gv = hub.guideVideo ? JSON.parse(JSON.stringify(hub.guideVideo)) : {};
+      gv[key] = input.value;
+      hub.guideVideo = (gv.url || gv.poster || gv.note) ? gv : null;
+      persist();
+      renderPreview();
+    });
+    input.addEventListener("change", function () { refresh(); });
+    return h("label", { class: "ge-f" }, h("span", { class: "ge-f__l", text: label }), input);
   }
 
-  function slugify(name, fallback) {
-    var s2 = String(name || "").toLowerCase()
-      .replace(/\.(svg|png|jpe?g)$/i, "")
-      .replace(/[^a-z0-9一-龥]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-    /* 中文名转不出 ascii slug 时给个稳定兜底，避免 id 为空 */
-    if (!/[a-z0-9]/.test(s2)) s2 = fallback || ("icon-" + Date.now().toString(36));
-    return s2;
-  }
+  /* 备注卡片：轻量富文本。工具条用 execCommand，写回前过渲染层的白名单消毒，
+     与前台渲染走的是同一份 sanitizeRichHtml，所见即所得且无脚本风险。 */
+  function remarkEditor(hub) {
+    var wrap = h("div", null);
+    var div = h("div", { class: "ge-rich", contenteditable: "true" });
+    div.innerHTML = R.sanitizeRichHtml(hub.remark || "");
+    div.addEventListener("input", function () {
+      hub.remark = R.sanitizeRichHtml(div.innerHTML);
+      persist();
+      renderPreview();
+    });
 
-  function uniqueIconId(base) {
-    var id = base, n = 2;
-    while (iconIdTaken(id, -1)) { id = base + "-" + n; n++; }
-    return id;
-  }
+    var tb = function (label, title, fn) {
+      return h("button", {
+        class: "ge-mini", type: "button", text: label, title: title,
+        /* mousedown 先拦默认行为：保住 contenteditable 里的选区，命令才打得上去 */
+        onmousedown: function (e) { e.preventDefault(); fn(); },
+      });
+    };
+    var savedRange = null;
+    var saveSel = function () {
+      var sel = window.getSelection();
+      if (sel.rangeCount && div.contains(sel.anchorNode))
+        savedRange = sel.getRangeAt(0).cloneRange();
+    };
+    div.addEventListener("keyup", saveSel);
+    div.addEventListener("mouseup", saveSel);
 
-  /* 上传：SVG 存标记文本（可继承 currentColor、体积小），位图存 data URI */
-  function readIconFile(file) {
-    return new Promise(function (resolve, reject) {
-      var isSvg = /svg/i.test(file.type) || /\.svg$/i.test(file.name);
-      var fr = new FileReader();
-      fr.onerror = function () { reject(new Error("读取失败")); };
-      fr.onload = function () {
-        var base = slugify(file.name);
-        var ic = { id: uniqueIconId(base), name: file.name.replace(/\.[^.]+$/, ""), group: "transit" };
-        if (isSvg) {
-          var txt = String(fr.result);
-          /* 只取 <svg> 本体，剥掉 XML 声明与注释，避免内联进 DOM 时报错 */
-          var m = txt.match(/<svg[\s\S]*<\/svg>/i);
-          if (!m) return reject(new Error("不是有效的 SVG"));
-          ic.svg = m[0];
-          var vb = ic.svg.match(/viewBox="([\d.\-\s]+)"/i);
-          if (vb) {
-            var n4 = vb[1].trim().split(/\s+/).map(Number);
-            if (n4.length === 4 && n4[3]) ic.ratio = +(n4[2] / n4[3]).toFixed(4);
-          }
-        } else {
-          ic.uri = String(fr.result);
+    wrap.appendChild(h("div", { class: "ge-richtb" },
+      tb("B", "加粗", function () { document.execCommand("bold"); div.dispatchEvent(new Event("input")); }),
+      tb("I", "斜体", function () { document.execCommand("italic"); div.dispatchEvent(new Event("input")); }),
+      tb("U", "下划线", function () { document.execCommand("underline"); div.dispatchEvent(new Event("input")); }),
+      tb("• 列表", "无序列表", function () { document.execCommand("insertUnorderedList"); div.dispatchEvent(new Event("input")); }),
+      tb("链接", "给选中文字加链接", function () {
+        var url = window.prompt("链接地址（http(s):// 或 mailto:）", "https://");
+        if (!url) return;
+        document.execCommand("createLink", false, url);
+        div.dispatchEvent(new Event("input"));
+      }),
+      tb("插图", "上传 PNG 插图到素材库并插入", function () {
+        if (!server.online) return R.toast("离线模式下不能上传插图");
+        saveSel();
+        var fi = document.getElementById("ge-noteimg");
+        fi.dataset.hubId = hub.id;
+        fi.click();
+      })
+    ));
+    wrap.appendChild(div);
+
+    /* 插图回传：ge-noteimg 的 change 处理器按 dataset.hubId 找到这个闭包 */
+    remarkEditor._pending = remarkEditor._pending || {};
+    remarkEditor._pending[hub.id] = {
+      insert: function (src) {
+        div.focus();
+        if (savedRange) {
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(savedRange);
         }
-        resolve(ic);
-      };
-      if (isSvg) fr.readAsText(file);
-      else fr.readAsDataURL(file);
-    });
+        document.execCommand("insertHTML", false, '<img src="' + src + '" alt="备注插图">');
+        div.dispatchEvent(new Event("input"));
+      },
+    };
+    return wrap;
   }
 
-  function addIconFiles(files) {
-    var arr = Array.prototype.slice.call(files || []);
-    if (!arr.length) return;
-    ensureIcons();
-    Promise.all(arr.map(function (f) {
-      return readIconFile(f).catch(function (err) {
-        R.toast(f.name + "：" + err.message);
-        return null;
-      });
-    })).then(function (list) {
-      var ok = list.filter(Boolean);
-      if (!ok.length) return;
-      /* 新图标排在最前，方便刚上传就看到 */
-      data.icons = ok.concat(data.icons);
-      view.open["iconlib"] = true;
-      persist(); refresh();
-      R.toast("已加入 " + ok.length + " 个图标");
-    });
-  }
+  function hubBody(hub) {
+    var hi = hubIndex(hub.id);
+    var base = "hubs." + hi;
+    var w = h("div", null);
 
-  /* 统计某个图标被引用了多少次 —— 删除前要让用户知道会影响什么 */
-  function iconUsage(id) {
-    var n = 0;
-    if (data.meta && data.meta.markIcon === id) n++;
-    (data.cards || []).forEach(function (c) {
-      (c.legs || []).forEach(function (leg) {
-        (leg.lines || []).forEach(function (ln) { if (ln.icon === id) n++; });
-      });
-    });
-    return n;
-  }
+    w.appendChild(h("div", { class: "ge-item__h" },
+      h("span", { class: "ge-item__n", text: "id：" + hub.id + " · 顺序 " + (hub.order || "-") }),
+      h("span", { class: "gc-spacer", style: "flex:1" }),
+      h("button", { class: "ge-mini", type: "button", text: "↑", title: "上移",
+        onclick: function () { moveHub(hub.id, -1); } }),
+      h("button", { class: "ge-mini", type: "button", text: "↓", title: "下移",
+        onclick: function () { moveHub(hub.id, 1); } }),
+      h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕", title: "删除枢纽",
+        onclick: function () { deleteHub(hub.id); } })
+    ));
 
-  function iconLibEditor() {
-    var list = ensureIcons();
-    return section("iconlib", "图标库", list.length + " 个", false, function () {
-      var w = h("div", null,
-        h("div", { class: "ge-hint",
-          text: "上传 SVG 或 PNG 后，任意线路都能在「图标」下拉里选用同一个图标。图标随 JSON 一起导出，换机器也不会丢。" })
-      );
+    w.appendChild(h("div", { class: "ge-row" },
+      field("枢纽名称", base + ".name"),
+      field("色标", base + ".color", { type: "color" })
+    ));
+    w.appendChild(field("括注", base + ".note", { nullable: true }));
 
-      w.appendChild(h("div", { class: "ge-adds", style: "margin:0 0 10px" },
-        h("button", {
-          class: "gc-btn", type: "button", text: "上传图标",
-          onclick: function () { document.getElementById("ge-icofile").click(); },
+    /* —— 指引图 —— */
+    var figBox = h("div", { class: "ge-item" },
+      h("div", { class: "ge-item__h" },
+        h("span", { class: "ge-item__n", text: "指引图（SVG，存素材库）" })));
+    if (hub.guideFigure) {
+      figBox.appendChild(h("div", { class: "ge-figprev" },
+        h("img", {
+          src: "/api/public/guide-assets/" + encodeURIComponent(hub.guideFigure),
+          alt: hub.guideFigure,
+          onerror: function () { this.style.display = "none"; },
         }),
-        h("button", {
-          class: "ge-mini", type: "button", text: "品牌标：" +
-            ((data.meta && data.meta.markIcon) || "brand-shutf"),
-          title: "卡片右上角显示的标识，点此在下方选择",
-          onclick: function () { view.open["iconlib:mark"] = !view.open["iconlib:mark"]; refresh(); },
-        })
-      ));
+        h("span", { class: "ge-figprev__k", text: hub.guideFigure })));
+      figBox.appendChild(h("div", { class: "ge-adds", style: "margin:0" },
+        h("button", { class: "ge-mini", type: "button", text: "替换",
+          onclick: function () {
+            var fi = document.getElementById("ge-hubfig");
+            fi.dataset.hubId = hub.id;
+            fi.click();
+          } }),
+        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "清除",
+          onclick: function () { clearHubFigure(hub); } })));
+    } else {
+      figBox.appendChild(h("div", { class: "ge-adds", style: "margin:0" },
+        h("button", { class: "gc-btn", type: "button", text: "上传指引图（SVG）",
+          onclick: function () {
+            if (!server.online) return R.toast("离线模式下不能上传素材");
+            var fi = document.getElementById("ge-hubfig");
+            fi.dataset.hubId = hub.id;
+            fi.click();
+          } })));
+    }
+    w.appendChild(figBox);
 
-      if (view.open["iconlib:mark"]) {
-        var markSel = h("select", null, list.map(function (ic) {
-          return h("option", { value: ic.id, text: (ic.name || ic.id) + "（" + ic.id + "）" });
-        }));
-        markSel.value = (data.meta && data.meta.markIcon) || "brand-shutf";
-        markSel.addEventListener("change", function () {
-          data.meta.markIcon = markSel.value;
-          persist(); refresh();
-        });
-        w.appendChild(h("label", { class: "ge-f" },
-          h("span", { class: "ge-f__l", text: "卡片右上角的品牌标" }), markSel));
-      }
+    /* —— 实况视频（预留） —— */
+    var vidBox = h("div", { class: "ge-item" },
+      h("div", { class: "ge-item__h" },
+        h("span", { class: "ge-item__n", text: "实况视频（预留 · 全空则不显示）" })));
+    vidBox.appendChild(videoField(hub, "视频地址 url", "url"));
+    vidBox.appendChild(h("div", { class: "ge-row" },
+      videoField(hub, "封面 poster", "poster"),
+      videoField(hub, "说明 note", "note")));
+    w.appendChild(vidBox);
 
-      var grid = h("div", { class: "ge-icons" });
-      list.forEach(function (ic, ii) {
-        var used = iconUsage(ic.id);
-        var cell = h("div", { class: "ge-ico", dataset: { iconId: ic.id } });
-        var prev = h("div", { class: "ge-ico__prev" });
-        var node = R.renderIcon(data, ic.id, { size: 34, label: ic.name });
-        if (node) { node.setAttribute("style", "height:34px;width:auto;max-width:100%"); prev.appendChild(node); }
-        cell.appendChild(prev);
+    /* —— 备注卡片 —— */
+    var rmBox = h("div", { class: "ge-item" },
+      h("div", { class: "ge-item__h" },
+        h("span", { class: "ge-item__n", text: "备注卡片（富文本，白名单消毒）" })));
+    rmBox.appendChild(remarkEditor(hub));
+    w.appendChild(rmBox);
 
-        cell.appendChild(h("div", { class: "ge-ico__name", text: ic.name || ic.id }));
-        cell.appendChild(h("div", { class: "ge-ico__id", text: ic.id }));
-        cell.appendChild(h("div", { class: "ge-ico__use", text: used ? "已用 " + used + " 处" : "未使用" }));
+    return w;
+  }
 
-        var nameIn = h("input", { type: "text", value: ic.name || "" });
-        nameIn.addEventListener("input", function () {
-          data.icons[ii].name = nameIn.value;
-          persist(); renderPreview();
-        });
-        nameIn.addEventListener("change", refresh);
-
-        var grpSel = h("select", null, ICON_GROUPS.map(function (g) {
-          return h("option", { value: g.value, text: g.label });
-        }));
-        grpSel.value = ic.group || "misc";
-        grpSel.addEventListener("change", function () {
-          data.icons[ii].group = grpSel.value;
-          persist(); refresh();
-        });
-
-        cell.appendChild(h("div", { class: "ge-ico__edit" },
-          h("label", { class: "ge-f", style: "margin:0" },
-            h("span", { class: "ge-f__l", text: "名称" }), nameIn),
-          h("label", { class: "ge-f", style: "margin:0" },
-            h("span", { class: "ge-f__l", text: "分组" }), grpSel),
-          h("div", { class: "ge-adds", style: "margin:0" },
-            h("button", {
-              class: "ge-mini", type: "button", text: "替换",
-              title: "用新文件替换这个图标，引用它的地方会一起更新",
-              onclick: function () {
-                var fi = document.getElementById("ge-icofile");
-                fi.dataset.replaceIdx = String(ii);
-                fi.click();
-              },
-            }),
-            h("button", {
-              class: "ge-mini ge-mini--danger", type: "button", text: "删除",
-              onclick: function () {
-                var msg = used
-                  ? "这个图标已被引用 " + used + " 处，删除后那些地方会不显示图标。仍要删除？"
-                  : "删除图标「" + (ic.name || ic.id) + "」？";
-                if (!window.confirm(msg)) return;
-                data.icons.splice(ii, 1);
-                persist(); refresh();
-              },
-            })
-          )
-        ));
-
-        grid.appendChild(cell);
-      });
-      w.appendChild(grid);
-      return w;
+  function hubManager() {
+    var hubs = (data.hubs || []).slice().sort(function (a, b) {
+      return (a.order || 0) - (b.order || 0);
     });
-  }
-
-  /* ══════════════ 图示素材 ══════════════
-   * 图示（线路图、枢纽图）体积大，不随内容 JSON 走：单独存素材库，
-   * 卡片里只存 asset_key 引用。上传走指南专用的 SVG 通道（服务端有消毒，
-   * 与 SHUMap 的 media 通道互不复用）。离线模式只能看，不能传。 */
-  function figureKeys() {
-    var keys = server.assets.map(function (a) { return a.assetKey; });
-    Object.keys(window.GUIDE_FIGURE_DATA || {}).forEach(function (k) {
-      if (keys.indexOf(k) < 0) keys.push(k);
-    });
-    return keys;
-  }
-
-  function figureUsage(key) {
-    var n = 0;
-    (data.cards || []).forEach(function (c) { if (c.figure === key) n++; });
-    return n;
-  }
-
-  /* asset_key 会进 URL，服务端限定 3-64 位小写字母/数字/连字符 */
-  function assetKeyFromName(name) {
-    var s = String(name || "").toLowerCase().replace(/\.[^.]+$/, "")
-      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    if (!/^[a-z0-9]/.test(s)) s = "figure-" + s;
-    if (s.length < 3) s = (s + "-fig").slice(0, 64);
-    return s.slice(0, 62).replace(/-+$/, "") || "figure-new";
-  }
-
-  function loadAssets() {
-    if (!server.online) return Promise.resolve();
-    return api("/api/admin/guide/assets").then(function (res) {
-      server.assets = ((res && res.items) || []).filter(function (a) {
-        return a.assetKind === "figure_svg";
-      });
-      refresh();
-    }).catch(function () { /* 素材清单取不到不阻塞编辑 */ });
-  }
-
-  function assetEditor() {
-    return section("assets", "图示素材", server.online ? server.assets.length + " 张" : "离线", false, function () {
+    return section("hubs", "枢纽管理", hubs.length + " 个", false, function () {
       var w = h("div", null,
         h("div", { class: "ge-hint",
-          text: "图示（线路图、枢纽图）存在素材库里，图示卡片按名称引用。只收 SVG —— 矢量放大不糊；服务端会做安全校验，含脚本的导出件会被拒。" })
-      );
-      if (!server.online) {
-        w.appendChild(h("div", { class: "ge-hint",
-          text: "离线模式下不能管理素材。登录后这里可以上传、替换、删除图示。" }));
-        return w;
-      }
-      w.appendChild(h("div", { class: "ge-adds", style: "margin:0 0 10px" },
-        h("button", {
-          class: "gc-btn", type: "button", text: "上传图示",
-          onclick: function () { document.getElementById("ge-figfile").click(); },
-        })
-      ));
-      if (!server.assets.length) {
-        w.appendChild(h("div", { class: "ge-vempty",
-          text: "素材库为空。上传第一张图示后，图示卡片就能按名称引用它。" }));
-        return w;
-      }
-      var grid = h("div", { class: "ge-icons" });
-      server.assets.forEach(function (a) {
-        var used = figureUsage(a.assetKey);
-        var cell = h("div", { class: "ge-ico" });
-        var prev = h("div", { class: "ge-ico__prev" });
-        prev.appendChild(h("img", {
-          src: "/api/public/guide-assets/" + encodeURIComponent(a.assetKey),
-          alt: a.assetKey,
-          style: "max-height:34px;max-width:100%",
-        }));
-        cell.appendChild(prev);
-        cell.appendChild(h("div", { class: "ge-ico__id", text: a.assetKey }));
-        cell.appendChild(h("div", { class: "ge-ico__use",
-          text: (used ? "已用 " + used + " 处 · " : "未使用 · ") +
-                Math.max(1, Math.round((a.byteSize || 0) / 1024)) + " KB" }));
-        cell.appendChild(h("div", { class: "ge-adds", style: "margin:0" },
-          h("button", {
-            class: "ge-mini", type: "button", text: "替换",
-            title: "用新文件替换这张图，引用它的卡片会一起更新",
-            onclick: function () {
-              var fi = document.getElementById("ge-figfile");
-              fi.dataset.replaceKey = a.assetKey;
-              fi.click();
-            },
-          }),
-          h("button", {
-            class: "ge-mini ge-mini--danger", type: "button", text: "删除",
-            onclick: function () {
-              var msg = used
-                ? "这张图被当前草稿引用 " + used + " 处。已发布内容仍引用时服务端会拒绝删除。仍要删除？"
-                : "删除图示「" + a.assetKey + "」？";
-              if (!window.confirm(msg)) return;
-              api("/api/admin/guide/assets/" + encodeURIComponent(a.assetKey), { method: "DELETE" })
-                .then(function () { R.toast("已删除「" + a.assetKey + "」"); loadAssets(); })
-                .catch(function (err) { R.toast("删除失败：" + err.message); });
-            },
-          })
-        ));
-        grid.appendChild(cell);
+          text: "枢纽是路线卡的起点（虹桥枢纽、铁路上海站…）。顺序决定前台 Tab 与打印顺序；指引图、实况视频、备注都挂在枢纽上。" }));
+      hubs.forEach(function (hub) {
+        w.appendChild(section("hub:" + hub.id, hub.name || hub.id,
+          (data.cards || []).filter(function (c) { return c.hub === hub.id; }).length + " 张卡片",
+          false, function () { return hubBody(hub); }));
       });
-      w.appendChild(grid);
+      w.appendChild(h("div", { class: "ge-adds" },
+        h("button", { class: "gc-btn", type: "button", text: "+ 新建枢纽", onclick: addHub })));
       return w;
     });
   }
 
-  /* 线路里的图标选择器：空值＝按类型用默认图标 */
-  function iconPicker(label, path) {
-    var list = ensureIcons();
-    var cur = getPath(path) || "";
-    var sel = h("select", null,
-      [h("option", { value: "", text: "（按类型自动）" })].concat(
-        list.map(function (ic) {
-          return h("option", { value: ic.id, text: (ic.name || ic.id) });
-        })
-      )
-    );
-    sel.value = cur;
-    sel.addEventListener("change", function () {
-      setPath(path, sel.value || null);
-      persist(); refresh();
-    });
-    var prev = h("span", { class: "ge-ico__inline" });
-    var node = cur ? R.renderIcon(data, cur, { size: 16 }) : null;
-    if (node) prev.appendChild(node);
-    return h("label", { class: "ge-f" },
-      h("span", { class: "ge-f__l", text: label }),
-      h("span", { style: "display:flex;align-items:center;gap:7px" }, sel, prev)
-    );
+  /* ══════════════ 3. 校区管理 ══════════════ */
+
+  function campusIndex(id) {
+    return (data.campuses || []).findIndex(function (x) { return x.id === id; });
   }
+
+  function addCampus() {
+    var id = window.prompt("校区 id（小写字母 / 数字 / 连字符，建好后不可改）", "");
+    if (id === null) return;
+    id = id.trim();
+    if (!/^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$/.test(id))
+      return R.toast("id 不合规：3-32 位小写字母、数字或连字符");
+    if (campusById(id)) return R.toast("id 已存在：" + id);
+    data.campuses.push({ id: id, label: id, short: id });
+    view.open["campus:" + id] = true;
+    persist();
+    refresh();
+  }
+
+  function deleteCampus(id) {
+    var used = (data.cards || []).filter(function (c) { return c.campus === id; }).length;
+    if (used) return R.toast("仍有 " + used + " 张卡片指向这个校区，先移走或删除它们");
+    if (!window.confirm("删除校区「" + id + "」？")) return;
+    data.campuses.splice(campusIndex(id), 1);
+    persist();
+    refresh();
+  }
+
+  function campusManager() {
+    return section("campuses", "校区管理", (data.campuses || []).length + " 个", false, function () {
+      var w = h("div", null,
+        h("div", { class: "ge-hint",
+          text: "校区是路线卡的终点维度，也包含「实景指引」「各校区通用」这类虚拟校区。id 建好后不可改。" }));
+      (data.campuses || []).forEach(function (camp) {
+        var ci = campusIndex(camp.id);
+        w.appendChild(section("campus:" + camp.id, camp.label || camp.id,
+          (data.cards || []).filter(function (c) { return c.campus === camp.id; }).length + " 张卡片",
+          false, function () {
+            var box = h("div", null);
+            box.appendChild(h("div", { class: "ge-item__h" },
+              h("span", { class: "ge-item__n", text: "id：" + camp.id }),
+              h("span", { class: "gc-spacer", style: "flex:1" }),
+              h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕",
+                title: "删除校区",
+                onclick: function () { deleteCampus(camp.id); } })));
+            box.appendChild(h("div", { class: "ge-row" },
+              field("全称", "campuses." + ci + ".label"),
+              field("简称", "campuses." + ci + ".short")));
+            return box;
+          }));
+      });
+      w.appendChild(h("div", { class: "ge-adds" },
+        h("button", { class: "gc-btn", type: "button", text: "+ 新建校区", onclick: addCampus })));
+      return w;
+    });
+  }
+
+  /* ══════════════ 4. 卡片管理 ══════════════ */
 
   var LEG_TYPES = [
     { value: "stop", label: "站点 / 地点" },
     { value: "ride", label: "乘车段" },
     { value: "walk", label: "步行段" },
   ];
-  var RAIL_KEYS = ["l1","l2","l3","l4","l7","l9","l10","l11","l17","bus","walk","neutral"];
   var MODES = [
     { value: "metro", label: "地铁" },
     { value: "bus", label: "公交" },
     { value: "rail", label: "铁路" },
+    { value: "maglev", label: "磁浮" },
+    { value: "airport", label: "机场线" },
     { value: "mixed", label: "混合" },
+    { value: "other", label: "其它" },
   ];
+
+  function railColorOptions() {
+    var keys = Object.keys(data.lineColors || {});
+    if (!keys.length) keys = ["l1", "l2", "bus", "walk", "neutral"];
+    return keys.map(function (k) { return { value: k, label: k }; });
+  }
 
   function legEditor(ci, leg, li, total) {
     var base = "cards." + ci + ".legs." + li;
@@ -1027,7 +1187,7 @@
           h("div", { class: "ge-row" },
             field("线路配色", lb + ".color", {
               type: "select",
-              options: RAIL_KEYS.map(function (k) { return { value: k, label: k }; }),
+              options: railColorOptions(),
             }),
             field("后缀", lb + ".suffix", { nullable: true })
           ),
@@ -1050,19 +1210,51 @@
     return box;
   }
 
+  function scheduleEditor(ci, card) {
+    var base = "cards." + ci + ".schedule";
+    var w = h("div", null,
+      h("div", { class: "ge-item__h" },
+        h("span", { class: "ge-item__n", text: "发车时刻（可选）" })));
+    (card.schedule || []).forEach(function (en, si) {
+      var row = h("div", { class: "ge-item" });
+      row.appendChild(h("div", { class: "ge-item__h" },
+        h("span", { class: "ge-item__n", text: "时刻行 " + (si + 1) }),
+        h("span", { class: "gc-spacer", style: "flex:1" }),
+        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "删除",
+          onclick: function () {
+            getPath(base).splice(si, 1);
+            persist(); refresh();
+          } })));
+      row.appendChild(field("标签", base + "." + si + ".label"));
+      row.appendChild(field("时刻（每行一条）", base + "." + si + ".times",
+        { type: "textarea", rows: 2 }));
+      w.appendChild(row);
+    });
+    w.appendChild(h("div", { class: "ge-adds" },
+      h("button", { class: "ge-mini", type: "button", text: "+ 添加时刻行",
+        onclick: function () {
+          var list = getPath(base);
+          if (!list) { setPath(base, []); list = getPath(base); }
+          list.push({ label: "发车时刻", times: "" });
+          persist(); refresh();
+        } })));
+    return w;
+  }
+
   function routeCardEditor(ci, card) {
     var base = "cards." + ci;
     var wrap = h("div", null,
       h("div", { class: "ge-row" },
         field("卡片 id", base + ".id"),
-        field("所属分组", base + ".group", {
-          type: "select",
-          options: (data.groups || []).map(function (g) { return { value: g.id, label: g.title }; }),
-        })
+        h("div", null)
       ),
       h("div", { class: "ge-row" },
-        field("枢纽名称", base + ".hub.name"),
-        field("括注副标题", base + ".hub.note", { nullable: true })
+        hubSelect(base + ".hub"),
+        campusSelect(base + ".campus")
+      ),
+      h("div", { class: "ge-row" },
+        field("出发点名", base + ".origin.name"),
+        field("括注副标题", base + ".origin.note", { nullable: true })
       ),
       field("去往标签", base + ".toward", { nullable: true }),
       h("div", { class: "ge-row--4 ge-row" },
@@ -1082,6 +1274,9 @@
     wrap.appendChild(h("label", { class: "ge-f" },
       h("span", { class: "ge-f__l", text: "标签（用 / 分隔，如 需提前购票 / 班次少）" }), flagInput));
 
+    wrap.appendChild(field("备注", base + ".note", { type: "textarea", rows: 2 }));
+    wrap.appendChild(scheduleEditor(ci, card));
+
     (card.legs || []).forEach(function (leg, li) {
       wrap.appendChild(legEditor(ci, leg, li, card.legs.length));
     });
@@ -1089,6 +1284,7 @@
     var add = function (type) {
       return function () {
         var legs = getPath(base + ".legs");
+        if (!legs) { setPath(base + ".legs", []); legs = getPath(base + ".legs"); }
         var tail = legs[legs.length - 1];
         var rails = (tail && tail.rails) || ["neutral"];
         if (type === "stop") legs.push({ type: "stop", name: "新站点", marker: "dot", rails: rails });
@@ -1111,21 +1307,29 @@
   function figureCardEditor(ci, card) {
     var base = "cards." + ci;
     var figKeys = figureKeys();
+    if (card.figure && figKeys.indexOf(card.figure) < 0) figKeys.unshift(card.figure);
     var wrap = h("div", null,
       h("div", { class: "ge-hint", text: "热区可以直接在右侧真图上拖动，坐标按百分比写回数据，缩放不失准。" }),
+      field("卡片 id", base + ".id"),
       h("div", { class: "ge-row" },
-        field("卡片 id", base + ".id"),
-        field("所属分组", base + ".group", {
-          type: "select",
-          options: (data.groups || []).map(function (g) { return { value: g.id, label: g.title }; }),
-        })
+        hubSelect(base + ".hub"),
+        campusSelect(base + ".campus")
       ),
       h("div", { class: "ge-row" },
         field("图题", base + ".title"),
         field("图片素材", base + ".figure", {
           type: "select",
-          options: figKeys.map(function (k) { return { value: k, label: k }; }),
+          options: [{ value: "", label: "（未选择）" }].concat(
+            figKeys.map(function (k) { return { value: k, label: k }; })
+          ),
         })
+      ),
+      h("div", { class: "ge-adds", style: "margin:0 0 10px" },
+        h("button", { class: "ge-mini", type: "button", text: "上传新图示（SVG）",
+          onclick: function () {
+            if (!server.online) return R.toast("离线模式下不能上传素材");
+            document.getElementById("ge-figfile").click();
+          } })
       ),
       field("图注", base + ".caption", { type: "textarea", rows: 2, nullable: true })
     );
@@ -1188,87 +1392,505 @@
     return wrap;
   }
 
-  function coverEditor() {
-    var out = h("div", null,
-      section("cover:meta", "文档信息与目录", null, false, function () {
-        var w = h("div", null,
-          field("主标题", "meta.title"),
-          field("副标题", "meta.subtitle"),
-          h("div", { class: "ge-row" },
-            field("版次", "meta.edition"),
-            field("引导语", "cover.lead")
-          ),
-          field("页脚注释", "meta.footnote")
-        );
-        (data.cover.hubs || []).forEach(function (hub, hi) {
-          var box = h("div", { class: "ge-item" });
-          box.appendChild(h("div", { class: "ge-item__h" },
-            h("span", { class: "ge-item__n", text: hub.name })
-          ));
-          box.appendChild(h("div", { class: "ge-row" },
-            field("枢纽名称", "cover.hubs." + hi + ".name"),
-            field("色标", "cover.hubs." + hi + ".color", { type: "color" })
-          ));
-          box.appendChild(field("括注", "cover.hubs." + hi + ".note", { nullable: true }));
-          (hub.entries || []).forEach(function (en, ei) {
-            var eb = "cover.hubs." + hi + ".entries." + ei;
-            box.appendChild(h("div", { class: "ge-row--3 ge-row" },
-              field("条目", eb + ".label"),
-              field("页码", eb + ".page", { type: "number", min: 1 }),
-              field("关联分组", eb + ".groupId", {
-                type: "select", nullable: true,
-                options: [{ value: "", label: "（未录入）" }].concat(
-                  (data.groups || []).map(function (g) { return { value: g.id, label: g.title }; })
-                ),
-              })
-            ));
-          });
-          w.appendChild(box);
-        });
-        return w;
-      })
+  function stepsCardEditor(ci, card) {
+    var base = "cards." + ci;
+    var wrap = h("div", null,
+      field("卡片 id", base + ".id"),
+      h("div", { class: "ge-row" },
+        hubSelect(base + ".hub"),
+        campusSelect(base + ".campus")
+      ),
+      h("div", { class: "ge-row" },
+        field("出发点名", base + ".origin.name"),
+        field("括注副标题", base + ".origin.note", { nullable: true })
+      ),
+      field("去往标签", base + ".toward", { nullable: true }),
+      field("引言", base + ".intro", { type: "textarea", rows: 2, nullable: true })
     );
 
-    (data.groups || []).forEach(function (g, gi) {
-      out.appendChild(section("group:" + g.id, "分组：" + g.title,
-        (data.cards || []).filter(function (c) { return c.group === g.id; }).length + " 张卡片",
-        false, function () {
-          return h("div", null,
-            field("分组 id", "groups." + gi + ".id"),
-            field("分组标题", "groups." + gi + ".title"),
-            field("分组备注", "groups." + gi + ".note", { nullable: true })
-          );
-        }));
+    (card.sections || []).forEach(function (sec, si) {
+      var sb = base + ".sections." + si;
+      var box = h("div", { class: "ge-item" });
+      var mv = function (dir) {
+        return function () {
+          var list = getPath(base + ".sections");
+          var t = si + dir;
+          if (t < 0 || t >= list.length) return;
+          var tmp = list[si]; list[si] = list[t]; list[t] = tmp;
+          persist(); refresh();
+        };
+      };
+      box.appendChild(h("div", { class: "ge-item__h" },
+        h("span", { class: "ge-item__n", text: "小节 " + (si + 1) }),
+        h("span", { class: "gc-spacer", style: "flex:1" }),
+        h("button", { class: "ge-mini", type: "button", text: "↑", title: "上移",
+          disabled: si === 0 ? "disabled" : null, onclick: mv(-1) }),
+        h("button", { class: "ge-mini", type: "button", text: "↓", title: "下移",
+          disabled: si === card.sections.length - 1 ? "disabled" : null, onclick: mv(1) }),
+        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕", title: "删除小节",
+          onclick: function () {
+            getPath(base + ".sections").splice(si, 1);
+            persist(); refresh();
+          } })
+      ));
+      box.appendChild(field("小节标题", sb + ".title", { nullable: true }));
+      box.appendChild(h("div", { class: "ge-row" },
+        field("强调色", sb + ".accent", { type: "color" }),
+        (function () {
+          var cb = h("input", { type: "checkbox" });
+          cb.checked = !!sec.bare;
+          cb.style.width = "auto";
+          cb.style.minHeight = "auto";
+          cb.addEventListener("change", function () {
+            setPath(sb + ".bare", cb.checked ? true : undefined);
+            if (!cb.checked) delete getPath(sb).bare;
+            persist(); refresh();
+          });
+          return h("label", { class: "ge-f" },
+            h("span", { class: "ge-f__l", text: "不显示步骤序号" }), cb);
+        })()
+      ));
+
+      (sec.steps || []).forEach(function (st, ti) {
+        var tb2 = sb + ".steps." + ti;
+        var sbox = h("div", { class: "ge-item", style: "background:#fff" });
+        var smv = function (dir) {
+          return function () {
+            var list = getPath(sb + ".steps");
+            var t = ti + dir;
+            if (t < 0 || t >= list.length) return;
+            var tmp = list[ti]; list[ti] = list[t]; list[t] = tmp;
+            persist(); refresh();
+          };
+        };
+        sbox.appendChild(h("div", { class: "ge-item__h" },
+          h("span", { class: "ge-item__n", text: "步骤 " + (ti + 1) }),
+          h("span", { class: "gc-spacer", style: "flex:1" }),
+          h("button", { class: "ge-mini", type: "button", text: "↑",
+            disabled: ti === 0 ? "disabled" : null, onclick: smv(-1) }),
+          h("button", { class: "ge-mini", type: "button", text: "↓",
+            disabled: ti === sec.steps.length - 1 ? "disabled" : null, onclick: smv(1) }),
+          h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕",
+            onclick: function () {
+              getPath(sb + ".steps").splice(ti, 1);
+              persist(); refresh();
+            } })
+        ));
+        sbox.appendChild(field("内容", tb2 + ".text"));
+        sbox.appendChild(field("小字备注", tb2 + ".note", { nullable: true }));
+        box.appendChild(sbox);
+      });
+      box.appendChild(h("div", { class: "ge-adds" },
+        h("button", { class: "ge-mini", type: "button", text: "+ 步骤",
+          onclick: function () {
+            var list = getPath(sb + ".steps");
+            if (!list) { setPath(sb + ".steps", []); list = getPath(sb + ".steps"); }
+            list.push({ text: "新步骤" });
+            persist(); refresh();
+          } })
+      ));
+      wrap.appendChild(box);
     });
-    return out;
+    wrap.appendChild(h("div", { class: "ge-adds" },
+      h("button", { class: "ge-mini", type: "button", text: "+ 小节",
+        onclick: function () {
+          var list = getPath(base + ".sections");
+          if (!list) { setPath(base + ".sections", []); list = getPath(base + ".sections"); }
+          list.push({ title: "新小节", steps: [{ text: "第一步" }] });
+          persist(); refresh();
+        } })
+    ));
+
+    /* pending：显式声明「这部分原稿还没录进来」，前台会画成待录入提示 */
+    var pendCb = h("input", { type: "checkbox" });
+    pendCb.checked = !!card.pending;
+    pendCb.style.width = "auto";
+    pendCb.style.minHeight = "auto";
+    pendCb.addEventListener("change", function () {
+      setPath(base + ".pending", pendCb.checked ? { label: "待录入", detail: "" } : null);
+      persist(); refresh();
+    });
+    wrap.appendChild(h("label", { class: "ge-f", style: "margin-top:10px" },
+      h("span", { class: "ge-f__l", text: "标记为「待录入」（pending）" }), pendCb));
+    if (card.pending) {
+      wrap.appendChild(field("待录入标题", base + ".pending.label"));
+      wrap.appendChild(field("待录入说明", base + ".pending.detail",
+        { type: "textarea", rows: 3, nullable: true }));
+    }
+    return wrap;
   }
+
+  function cardOpsRow(card) {
+    return h("div", { class: "ge-item__h" },
+      h("span", { class: "ge-item__n", text: card.id }),
+      h("span", { class: "gc-spacer", style: "flex:1" }),
+      h("button", { class: "ge-mini", type: "button", text: "复制",
+        onclick: function () { duplicateCard(card.id); } }),
+      h("button", { class: "ge-mini", type: "button", text: "↑", title: "上移",
+        onclick: function () { moveCard(card.id, -1); } }),
+      h("button", { class: "ge-mini", type: "button", text: "↓", title: "下移",
+        onclick: function () { moveCard(card.id, 1); } }),
+      h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "删除",
+        onclick: function () { deleteCard(card.id); } })
+    );
+  }
+
+  function cardLabel(c) {
+    if (c.kind === "figure") return "图示：" + (c.title || c.id);
+    if (c.kind === "steps") return "步骤：" + ((c.origin && c.origin.name) || c.title || c.id);
+    return ((c.origin && c.origin.name) || c.id) + " · " + (c.modeLabel || c.mode || "");
+  }
+  function cardTag(c) {
+    if (c.kind === "figure") return (c.hotspots || []).length + " 热区";
+    if (c.kind === "steps") return (c.sections || []).length + " 小节";
+    return c.durationMin != null ? c.durationMin + "分钟" : "路线";
+  }
+
+  function cardManager() {
+    var total = (data.cards || []).length;
+    return section("cards", "卡片管理", total + " 张", false, function () {
+      var w = h("div", null);
+
+      /* 新建路线卡：起点枢纽 × 到达校区 两个下拉 + 按钮（v1 的分组选择器已废） */
+      var hubSel = h("select", null, (data.hubs || []).map(function (x) {
+        return h("option", { value: x.id, text: x.name || x.id });
+      }));
+      hubSel.value = view.fresh.hub || view.pair.hub || ((data.hubs[0] || {}).id || "");
+      hubSel.addEventListener("change", function () { view.fresh.hub = hubSel.value; });
+      var campSel = h("select", null, (data.campuses || []).map(function (x) {
+        return h("option", { value: x.id, text: x.label || x.id });
+      }));
+      campSel.value = view.fresh.campus || view.pair.campus || ((data.campuses[0] || {}).id || "");
+      campSel.addEventListener("change", function () { view.fresh.campus = campSel.value; });
+
+      w.appendChild(h("div", { class: "ge-item" },
+        h("div", { class: "ge-row" },
+          h("label", { class: "ge-f", style: "margin:0" },
+            h("span", { class: "ge-f__l", text: "起点枢纽" }), hubSel),
+          h("label", { class: "ge-f", style: "margin:0" },
+            h("span", { class: "ge-f__l", text: "到达校区" }), campSel)
+        ),
+        h("div", { class: "ge-adds" },
+          h("button", { class: "gc-btn gc-btn--primary", type: "button",
+            text: "+ 新建路线卡片", onclick: addRouteCard }),
+          h("button", { class: "ge-mini", type: "button", text: "+ 图示卡",
+            onclick: addFigureCard }),
+          h("button", { class: "ge-mini", type: "button", text: "+ 步骤卡",
+            onclick: addStepsCard })
+        )
+      ));
+
+      /* 卡片按 枢纽 → 校区 归组（从卡片字段推导，没有独立的分组表），
+         组内顺序就是 cards 数组顺序 —— 也是前台与打印的顺序。 */
+      var pairOrder = [];
+      var byPair = {};
+      (data.cards || []).forEach(function (c, ci) {
+        var key = c.hub + "|" + c.campus;
+        if (!byPair[key]) { byPair[key] = []; pairOrder.push(key); }
+        byPair[key].push(ci);
+      });
+      pairOrder.forEach(function (key) {
+        var cis = byPair[key];
+        var first = data.cards[cis[0]];
+        var hub = hubById(first.hub);
+        var camp = campusById(first.campus);
+        w.appendChild(h("div", { class: "ge-pairh" },
+          h("span", { text: (hub ? hub.name : first.hub || "（未指定枢纽）") +
+            " → " + (camp ? camp.label : first.campus || "（未指定校区）") }),
+          h("span", { class: "ge-pairh__n", text: cis.length + " 张" })));
+        cis.forEach(function (ci) {
+          var card = data.cards[ci];
+          w.appendChild(section("card:" + card.id, cardLabel(card), cardTag(card),
+            view.sel === card.id, function () {
+              var body = h("div", null, cardOpsRow(card));
+              if (card.kind === "figure") body.appendChild(figureCardEditor(ci, card));
+              else if (card.kind === "steps") body.appendChild(stepsCardEditor(ci, card));
+              else body.appendChild(routeCardEditor(ci, card));
+              return body;
+            }));
+        });
+      });
+      if (!total)
+        w.appendChild(h("div", { class: "ge-vempty", text: "还没有卡片。选好枢纽和校区，点「新建路线卡片」。" }));
+      return w;
+    });
+  }
+
+  /* ══════════════ 5. 图标库 ══════════════
+   * 图标存进 data.icons（内联注册表，随 JSON 导出／导入），缺失时渲染层
+   * 回落到 GUIDE_ICON_SEED 出厂种子。首次打开面板时把种子实体化进 data，
+   * 之后用户改的就是自己的副本 —— 改名、换分组、删除都直接生效。 */
+  var ICON_GROUPS = [
+    { value: "transit", label: "交通标识" },
+    { value: "brand", label: "校方 / 社团" },
+    { value: "misc", label: "其它" },
+  ];
+
+  function ensureIcons() {
+    if (!Array.isArray(data.icons)) {
+      data.icons = JSON.parse(JSON.stringify(window.GUIDE_ICON_SEED || []));
+    }
+    return data.icons;
+  }
+
+  function iconIdTaken(id, exceptIdx) {
+    var list = ensureIcons();
+    for (var i = 0; i < list.length; i++)
+      if (i !== exceptIdx && list[i].id === id) return true;
+    return false;
+  }
+
+  function slugify(name, fallback) {
+    var s2 = String(name || "").toLowerCase()
+      .replace(/\.(svg|png|jpe?g)$/i, "")
+      .replace(/[^a-z0-9一-龥]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (!/[a-z0-9]/.test(s2)) s2 = fallback || ("icon-" + Date.now().toString(36));
+    return s2;
+  }
+
+  /* 上传：SVG 存标记文本（可继承 currentColor、体积小），位图存 data URI */
+  function readIconFile(file) {
+    return new Promise(function (resolve, reject) {
+      var isSvg = /svg/i.test(file.type) || /\.svg$/i.test(file.name);
+      var fr = new FileReader();
+      fr.onerror = function () { reject(new Error("读取失败")); };
+      fr.onload = function () {
+        var base = slugify(file.name);
+        var ic = { id: base, name: file.name.replace(/\.[^.]+$/, ""), group: "transit" };
+        if (isSvg) {
+          var txt = String(fr.result);
+          /* 只取 <svg> 本体，剥掉 XML 声明与注释，避免内联进 DOM 时报错 */
+          var m = txt.match(/<svg[\s\S]*<\/svg>/i);
+          if (!m) return reject(new Error("不是有效的 SVG"));
+          ic.svg = m[0];
+          var vb = ic.svg.match(/viewBox="([\d.\-\s]+)"/i);
+          if (vb) {
+            var n4 = vb[1].trim().split(/\s+/).map(Number);
+            if (n4.length === 4 && n4[3]) ic.ratio = +(n4[2] / n4[3]).toFixed(4);
+          }
+        } else {
+          ic.uri = String(fr.result);
+        }
+        resolve(ic);
+      };
+      if (isSvg) fr.readAsText(file);
+      else fr.readAsDataURL(file);
+    });
+  }
+
+  function addIconFiles(files) {
+    var arr = Array.prototype.slice.call(files || []);
+    if (!arr.length) return;
+    ensureIcons();
+    Promise.all(arr.map(function (f) {
+      return readIconFile(f).catch(function (err) {
+        R.toast(f.name + "：" + err.message);
+        return null;
+      });
+    })).then(function (list) {
+      var ok = list.filter(Boolean);
+      if (!ok.length) return;
+      var added = [];
+      ok.forEach(function (ic) {
+        /* 按 spec：上传后问一遍 id 和名称，默认取文件名派生值 */
+        var id = window.prompt("图标 id（小写字母 / 数字 / 连字符，线路按它引用）", ic.id);
+        if (id === null) return;
+        id = id.trim();
+        if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(id) || iconIdTaken(id, -1)) {
+          R.toast("id 不合规或已存在：" + id);
+          return;
+        }
+        var name = window.prompt("图标名称", ic.name || id);
+        if (name === null) return;
+        ic.id = id;
+        ic.name = name.trim() || id;
+        data.icons.unshift(ic);
+        added.push(ic);
+      });
+      if (!added.length) return;
+      view.open["iconlib"] = true;
+      persist(); refresh();
+      R.toast("已加入 " + added.length + " 个图标");
+    });
+  }
+
+  /* 统计图标被多少条线路引用 —— 被引用的图标禁止删除，否则时间轴上会空缺 */
+  function iconUsage(id) {
+    var n = 0;
+    (data.cards || []).forEach(function (c) {
+      (c.legs || []).forEach(function (leg) {
+        (leg.lines || []).forEach(function (ln) { if (ln.icon === id) n++; });
+      });
+    });
+    return n;
+  }
+
+  function iconLibEditor() {
+    var list = ensureIcons();
+    return section("iconlib", "图标库", list.length + " 个", false, function () {
+      var w = h("div", null,
+        h("div", { class: "ge-hint",
+          text: "上传 SVG 或 PNG 后，乘车段的线路都能在线路「图标」下拉里选用。图标随 JSON 一起导出，换机器也不会丢；被线路引用的图标不能删除。" }));
+
+      w.appendChild(h("div", { class: "ge-adds", style: "margin:0 0 10px" },
+        h("button", {
+          class: "gc-btn", type: "button", text: "上传图标",
+          onclick: function () { document.getElementById("ge-icofile").click(); },
+        })
+      ));
+
+      ICON_GROUPS.forEach(function (g) {
+        var inGroup = list.map(function (ic, ii) { return { ic: ic, ii: ii }; })
+          .filter(function (x) { return (x.ic.group || "misc") === g.value; });
+        if (!inGroup.length) return;
+        w.appendChild(h("div", { class: "ge-icogroup__h",
+          text: g.label + "（" + inGroup.length + "）" }));
+        var grid = h("div", { class: "ge-icons" });
+        inGroup.forEach(function (x) {
+          var ic = x.ic, ii = x.ii;
+          var used = iconUsage(ic.id);
+          var cell = h("div", { class: "ge-ico", dataset: { iconId: ic.id } });
+          var prev = h("div", { class: "ge-ico__prev" });
+          /* renderIcon 的第三个参数是数字尺寸（px），不是选项对象 */
+          var node = R.renderIcon(data, ic.id, 34);
+          if (node) { node.setAttribute("style", "height:34px;width:auto;max-width:100%"); prev.appendChild(node); }
+          cell.appendChild(prev);
+
+          cell.appendChild(h("div", { class: "ge-ico__name", text: ic.name || ic.id }));
+          cell.appendChild(h("div", { class: "ge-ico__id", text: ic.id }));
+          cell.appendChild(h("div", { class: "ge-ico__use",
+            text: used ? "已用 " + used + " 处" : "未使用" }));
+
+          var nameIn = h("input", { type: "text", value: ic.name || "" });
+          nameIn.addEventListener("input", function () {
+            data.icons[ii].name = nameIn.value;
+            persist(); renderPreview();
+          });
+          nameIn.addEventListener("change", refresh);
+
+          var grpSel = h("select", null, ICON_GROUPS.map(function (gg) {
+            return h("option", { value: gg.value, text: gg.label });
+          }));
+          grpSel.value = ic.group || "misc";
+          grpSel.addEventListener("change", function () {
+            data.icons[ii].group = grpSel.value;
+            persist(); refresh();
+          });
+
+          var noteIn = h("input", { type: "text", value: ic.note || "" });
+          noteIn.addEventListener("input", function () {
+            data.icons[ii].note = noteIn.value;
+            persist();
+          });
+
+          cell.appendChild(h("div", { class: "ge-ico__edit" },
+            h("label", { class: "ge-f", style: "margin:0" },
+              h("span", { class: "ge-f__l", text: "名称" }), nameIn),
+            h("label", { class: "ge-f", style: "margin:0" },
+              h("span", { class: "ge-f__l", text: "分组" }), grpSel),
+            h("label", { class: "ge-f", style: "margin:0" },
+              h("span", { class: "ge-f__l", text: "备注" }), noteIn),
+            h("div", { class: "ge-adds", style: "margin:0" },
+              h("button", {
+                class: "ge-mini", type: "button", text: "替换",
+                title: "用新文件替换这个图标，引用它的地方会一起更新",
+                onclick: function () {
+                  var fi = document.getElementById("ge-icofile");
+                  fi.dataset.replaceIdx = String(ii);
+                  fi.click();
+                },
+              }),
+              h("button", {
+                class: "ge-mini ge-mini--danger", type: "button", text: "删除",
+                onclick: function () {
+                  if (used)
+                    return R.toast("「" + (ic.name || ic.id) + "」仍被 " + used +
+                      " 条线路引用，不能删除。先把线路里的图标换掉。");
+                  if (!window.confirm("删除图标「" + (ic.name || ic.id) + "」？")) return;
+                  data.icons.splice(ii, 1);
+                  persist(); refresh();
+                },
+              })
+            )
+          ));
+
+          grid.appendChild(cell);
+        });
+        w.appendChild(grid);
+      });
+      return w;
+    });
+  }
+
+  /* 线路里的图标选择器：列出 allIcons(data)（用户注册表 + 出厂种子兜底），
+     空值＝按类型用默认图标 */
+  function iconPicker(label, path) {
+    var list = R.allIcons(data);
+    var cur = getPath(path) || "";
+    var sel = h("select", null,
+      [h("option", { value: "", text: "（按类型自动）" })].concat(
+        list.map(function (ic) {
+          return h("option", { value: ic.id, text: (ic.name || ic.id) });
+        })
+      )
+    );
+    sel.value = cur;
+    sel.addEventListener("change", function () {
+      setPath(path, sel.value || null);
+      persist(); refresh();
+    });
+    var prev = h("span", { class: "ge-ico__inline" });
+    var node = cur ? R.renderIcon(data, cur, 16) : null;
+    if (node) prev.appendChild(node);
+    return h("label", { class: "ge-f" },
+      h("span", { class: "ge-f__l", text: label }),
+      h("span", { style: "display:flex;align-items:center;gap:7px" }, sel, prev)
+    );
+  }
+
+  /* ══════════════ 图示素材清单（供图示卡 / 枢纽指引图引用） ══════════════
+   * 图示体积大，不随内容 JSON 走：单独存素材库，卡片里只存 asset_key 引用。
+   * 上传走指南专用通道（服务端 SVG 消毒 / PNG 魔术字节校验）。离线只能看不能传。 */
+  function figureKeys() {
+    var keys = [];
+    server.assets.forEach(function (a) {
+      if (a.assetKind === "figure_svg" || a.assetKind === "figure_png") {
+        if (keys.indexOf(a.assetKey) < 0) keys.push(a.assetKey);
+      }
+    });
+    return keys;
+  }
+
+  function assetKeyFromName(name) {
+    var s = String(name || "").toLowerCase().replace(/\.[^.]+$/, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!/^[a-z0-9]/.test(s)) s = "figure-" + s;
+    if (s.length < 3) s = (s + "-fig").slice(0, 64);
+    return s.slice(0, 62).replace(/-+$/, "") || "figure-new";
+  }
+
+  function loadAssets() {
+    if (!server.online) return Promise.resolve();
+    return api("/api/admin/guide/assets").then(function (res) {
+      server.assets = (res && res.items) || [];
+      refresh();
+    }).catch(function () { /* 素材清单取不到不阻塞编辑 */ });
+  }
+
+  /* ══════════════ 面板 ══════════════ */
 
   function renderPanel() {
     var panel = document.getElementById("ge-panel");
     panel.textContent = "";
     panel.appendChild(h("div", { class: "ge-hint",
-      text: "点右侧任意卡片可定位到它的字段。卡片右上角有存图、复制、上下移、删除；改动自动保存" +
+      text: "点右侧任意卡片可定位到它的字段；改动自动保存" +
             (server.online ? "到服务器草稿。" : "到本地（离线模式）。") }));
-    panel.appendChild(coverEditor());
+    panel.appendChild(metaEditor());
+    panel.appendChild(hubManager());
+    panel.appendChild(campusManager());
+    panel.appendChild(cardManager());
     panel.appendChild(iconLibEditor());
-    panel.appendChild(assetEditor());
-
-    (data.cards || []).forEach(function (card, ci) {
-      var label = card.kind === "figure"
-        ? "图示：" + (card.title || card.id)
-        : (card.hub && card.hub.name ? card.hub.name : card.id) + " · " + (card.modeLabel || card.mode || "");
-      var tag = card.kind === "figure"
-        ? (card.hotspots || []).length + " 热区"
-        : card.durationMin + "分钟";
-      panel.appendChild(section("card:" + card.id, label, tag, view.sel === card.id, function () {
-        return card.kind === "figure" ? figureCardEditor(ci, card) : routeCardEditor(ci, card);
-      }));
-    });
-
-    panel.appendChild(h("div", { class: "ge-adds", style: "margin-top:14px" },
-      h("button", { class: "gc-btn", type: "button", text: "+ 新建路线卡片", onclick: addRouteCard }),
-      h("button", { class: "gc-btn", type: "button", text: "+ 新建图示卡片", onclick: addFigureCard })
-    ));
   }
 
   function refresh() {
@@ -1278,28 +1900,23 @@
 
   /* ══════════════ 顶栏动作 ══════════════ */
 
-  document.getElementById("ge-reveal").addEventListener("click", function () {
-    view.reveal = !view.reveal;
-    this.setAttribute("aria-pressed", String(view.reveal));
-    this.textContent = view.reveal ? "显示热区" : "隐藏热区";
-    renderPreview();
-  });
-
   document.getElementById("ge-json").addEventListener("click", function () {
+    ensureShape();
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     var a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "guide-data.json";
     a.click();
     URL.revokeObjectURL(a.href);
-    R.toast("已导出 guide-data.json，可替换 data/ 里的数据源");
+    R.toast("已导出 guide-data.json（schema v2）");
   });
 
   document.getElementById("ge-load").addEventListener("click", function () {
     document.getElementById("ge-file").click();
   });
+
   /* 图标上传。dataset.replaceIdx 有值时是「替换」而非新增：
-     沿用原 id，引用它的线路/品牌标就会自动跟着换图。 */
+     沿用原 id，引用它的线路就会自动跟着换图。 */
   document.getElementById("ge-icofile").addEventListener("change", function (e) {
     var fi = e.target;
     var files = fi.files;
@@ -1334,8 +1951,11 @@
     fr.onload = function () {
       try {
         var next = JSON.parse(fr.result);
-        if (!next.cards || !next.cover) throw new Error("缺少 cover / cards 字段");
-        data = next;
+        if (!next || !Array.isArray(next.cards) ||
+            !(next.schema === 2 || next.hubs || next.cover || next.groups))
+          throw new Error("缺少 cards / hubs 字段，不像是指南数据");
+        data = R.normalizeData(next);
+        ensureShape();
         view.sel = null; view.selHot = null;
         persist(); refresh();
         R.toast("已载入 " + f.name);
@@ -1345,25 +1965,12 @@
     e.target.value = "";
   });
 
-  document.getElementById("ge-pngall").addEventListener("click", function () {
-    var cards = Array.prototype.slice.call(
-      document.querySelectorAll("#ge-canvas [data-card-id]"));
-    if (!cards.length) return;
-    var i = 0, ok = 0;
-    (function step() {
-      if (i >= cards.length) {
-        R.toast("批量导出完成：" + ok + "/" + cards.length + " 张");
-        return;
-      }
-      var el = cards[i++];
-      R.exportCardPng(el, "shu-guide-" + el.dataset.cardId, 2)
-        .then(function () { ok++; })
-        .catch(function () {})
-        .then(function () { setTimeout(step, 320); });
-    })();
-  });
-
+  /* 打印 / PDF：打印树由渲染层 buildPrintRoot 离屏构建（标题页 + 每枢纽一节），
+     屏幕 UI 整棵在 #gc-screen 里，打印 CSS 自动切换显隐。 */
   document.getElementById("ge-pdf").addEventListener("click", function () {
+    var old = document.querySelector(".gc-print-root");
+    if (old) old.remove();
+    document.body.appendChild(R.buildPrintRoot(data));
     R.toast("打印对话框里选「另存为 PDF」，卡片不会被切断");
     setTimeout(function () { window.print(); }, 320);
   });
@@ -1371,29 +1978,24 @@
   document.getElementById("ge-reset").addEventListener("click", function () {
     if (!window.confirm("还原为出厂稿数据？当前未存版的改动会被覆盖（已存进服务器的版本历史不受影响）。")) return;
     data = JSON.parse(JSON.stringify(ORIGINAL));
+    ensureShape();
     view.sel = null; view.selHot = null;
     persist();
     refresh();
     R.toast("已还原出厂稿数据");
   });
 
-  /* 图示上传。dataset.replaceKey 有值时是「替换」而非新增：
-     同 key 重传就是替换，引用它的卡片自动跟着换图。 */
+  /* 图示卡的图片素材上传（figure_svg，服务端消毒）。同 key 重传就是替换。 */
   document.getElementById("ge-figfile").addEventListener("change", function (e) {
     var fi = e.target;
     var f = fi.files && fi.files[0];
-    var replaceKey = fi.dataset.replaceKey || "";
-    delete fi.dataset.replaceKey;
     fi.value = "";
     if (!f) return;
     if (!server.online) return R.toast("离线模式下不能上传素材");
-    var key = replaceKey;
-    if (!key) {
-      key = window.prompt("素材名称（小写字母 / 数字 / 连字符，卡片按它引用这张图）",
-        assetKeyFromName(f.name));
-      if (key === null) return;
-      key = key.trim();
-    }
+    var key = window.prompt("素材名称（小写字母 / 数字 / 连字符，卡片按它引用这张图）",
+      assetKeyFromName(f.name));
+    if (key === null) return;
+    key = key.trim();
     if (!/^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(key)) {
       return R.toast("名称不合规：3-64 位小写字母、数字或连字符");
     }
@@ -1414,6 +2016,47 @@
       }).catch(function (err) { R.toast("上传失败：" + err.message); });
     };
     fr.readAsText(f);
+  });
+
+  /* 枢纽指引图上传：key 固定 guidefig-<hubId>，由 hubBody 里的按钮触发 */
+  document.getElementById("ge-hubfig").addEventListener("change", function (e) {
+    var fi = e.target;
+    var f = fi.files && fi.files[0];
+    var hubId = fi.dataset.hubId || "";
+    delete fi.dataset.hubId;
+    fi.value = "";
+    if (!f || !hubId) return;
+    var hub = hubById(hubId);
+    if (!hub) return;
+    uploadHubFigure(hub, f);
+  });
+
+  /* 备注插图上传（figure_png）：成功后把 <img> 插回备注编辑器光标处 */
+  document.getElementById("ge-noteimg").addEventListener("change", function (e) {
+    var fi = e.target;
+    var f = fi.files && fi.files[0];
+    var hubId = fi.dataset.hubId || "";
+    delete fi.dataset.hubId;
+    fi.value = "";
+    if (!f || !hubId) return;
+    if (!server.online) return R.toast("离线模式下不能上传插图");
+    var key = ("note-img-" + hubId + "-" + Date.now().toString(36))
+      .replace(/[^a-z0-9-]/g, "-").slice(0, 62);
+    fetch("/api/admin/guide/assets/" + encodeURIComponent(key) + "?kind=figure_png", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "image/png" },
+      body: f,
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
+        var src = "/api/public/guide-assets/" + key;
+        var pending = remarkEditor._pending && remarkEditor._pending[hubId];
+        if (pending) pending.insert(src);
+        loadAssets();
+        R.toast("插图已插入备注");
+      });
+    }).catch(function (err) { R.toast("上传插图失败：" + err.message); });
   });
 
   /* ══════════════ 版本管理 ══════════════
@@ -1449,11 +2092,15 @@
     if (e.key === "Escape" && vwrap.dataset.open === "1") closeVersions();
   });
 
-  function statLine(s) {
+  /* v2 统计行：枢纽 / 校区 / 卡片数（v1 的「组」已不存在） */
+  function statLine() {
+    var s = V.statsOf(data);
     var kinds = Object.keys(s.byKind || {}).map(function (k) {
       return k + " " + s.byKind[k];
     }).join(" / ");
-    return s.groups + " 组 · " + s.cards + " 卡" + (kinds ? "（" + kinds + "）" : "");
+    return (data.hubs || []).length + " 枢纽 · " +
+           (data.campuses || []).length + " 校区 · " +
+           s.cards + " 卡" + (kinds ? "（" + kinds + "）" : "");
   }
 
   function stamp(iso) {
@@ -1463,6 +2110,18 @@
     var pad = function (n) { return String(n).padStart(2, "0"); };
     return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
            " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  /* GuideVersions.diff 的标签函数还是 v1 的（找 hub.name 对象），
+     v2 卡片的 hub 是 id 字符串，这里用本页 cardLabel 重打标签。 */
+  function relabelDiff(dl, sideA, sideB) {
+    var labelFrom = function (list, id) {
+      var c = (list || []).filter(function (x) { return x.id === id; })[0];
+      return c ? cardLabel(c) : id;
+    };
+    dl.added.forEach(function (i) { i.label = labelFrom(sideB.cards, i.id); });
+    dl.removed.forEach(function (i) { i.label = labelFrom(sideA.cards, i.id); });
+    dl.changed.forEach(function (i) { i.label = labelFrom(sideB.cards, i.id); });
   }
 
   /* 把一份 diff 结果画成可读清单。只画有内容的段，避免一屏「无变化」。 */
@@ -1483,16 +2142,15 @@
       ));
     };
     seg("卡片", d.cards);
-    seg("分组", d.groups);
     if (d.meta && d.meta.length)
       box.appendChild(h("div", { class: "ge-v__diffseg" },
         h("div", { class: "ge-v__diffh", text: "文档信息" }),
         h("pre", { class: "ge-v__diffb", text: d.meta.join("\n") })
       ));
-    if (d.cover)
+    if (d.struct)
       box.appendChild(h("div", { class: "ge-v__diffseg" },
-        h("div", { class: "ge-v__diffh", text: "目录" }),
-        h("pre", { class: "ge-v__diffb", text: d.cover })
+        h("div", { class: "ge-v__diffh", text: "枢纽 / 校区 / 图标" }),
+        h("pre", { class: "ge-v__diffb", text: d.struct })
       ));
     if (!box.childNodes.length)
       box.appendChild(h("div", { class: "ge-v__diffseg" },
@@ -1577,7 +2235,7 @@
         h("span", { class: "gc-spacer", style: "flex:1" }),
         h("span", { class: "ge-v__hash", text: V.fingerprint(data) })
       ),
-      h("div", { class: "ge-v__meta", text: statLine(V.statsOf(data)) }),
+      h("div", { class: "ge-v__meta", text: statLine() }),
       curActs
     ));
 
@@ -1626,7 +2284,8 @@
         onclick: function () {
           if (!window.confirm("把编辑内容换成第 " + m.revisionNo + " 版？\n当前内容会先保存，然后被这一版覆盖。")) return;
           fetchRevisionContent(m.id).then(function (content) {
-            data = JSON.parse(JSON.stringify(content));
+            data = R.normalizeData(JSON.parse(JSON.stringify(content)));
+            ensureShape();
             view.sel = null; view.selHot = null;
             clearTimeout(saveTimer);
             return saveNow();
@@ -1670,6 +2329,14 @@
 
       if (vopen[m.id] && vcache[m.id]) {
         var d = V.diff(vcache[m.id], data);
+        relabelDiff(d.cards, vcache[m.id], data);
+        /* V.diff 不认识 v2 的 hubs/campuses/icons，这里补一段结构变动提示 */
+        var structBits = [];
+        ["hubs", "campuses", "icons"].forEach(function (k) {
+          if (V.fingerprint(vcache[m.id][k] || null) !== V.fingerprint(data[k] || null))
+            structBits.push({ hubs: "枢纽", campuses: "校区", icons: "图标库" }[k] + "有变动");
+        });
+        d.struct = structBits.join("；");
         row.appendChild(h("div", { class: "ge-v__meta",
           text: "对比当前草稿：" + V.summarize(d) }));
         row.appendChild(diffView(d));
@@ -1681,7 +2348,7 @@
       text: "共 " + items.length + " 版 · 发布 / 回滚上线都要求该版已通过复核" }));
   }
 
-  /* 导入版本文件：兼容旧版导出信封（{meta, data}）与内容本体（{cards, cover}）。
+  /* 导入版本文件：兼容旧版导出信封（{meta, data}）与内容本体。
      导入 = 把文件内容写进当前编辑区，随后照常走保存（在线写服务器，离线写本地）。 */
   document.getElementById("ge-vimport").addEventListener("click", function () {
     document.getElementById("ge-vfile").click();
@@ -1695,8 +2362,11 @@
       try {
         var parsed = JSON.parse(fr.result);
         var next = (parsed && parsed.data && parsed.data.cards) ? parsed.data : parsed;
-        if (!next || !next.cards || !next.cover) throw new Error("缺少 cover / cards 字段");
-        data = next;
+        if (!next || !Array.isArray(next.cards) ||
+            !(next.schema === 2 || next.hubs || next.cover || next.groups))
+          throw new Error("缺少 cards / hubs 字段，不像是指南数据");
+        data = R.normalizeData(next);
+        ensureShape();
         view.sel = null; view.selHot = null;
         persist(); refresh();
         if (vwrap.dataset.open === "1") renderVersions();
@@ -1784,7 +2454,9 @@
           server.workingId = w.id;
           server.workingNo = w.revisionNo;
           server.workingStatus = w.editorialStatus;
-          data = w.content;
+          /* D1 里可能躺着 v1 旧修订：进编辑器先升级成 v2，保存时写回的就是新形状 */
+          data = R.normalizeData(w.content);
+          ensureShape();
           try { localStorage.setItem(STORE, JSON.stringify(data)); } catch (e) {}
         }
         if (server.workingStatus === "in_review") {
@@ -1804,7 +2476,7 @@
     });
   }
 
-  view.open["cover:meta"] = false;
+  view.open["meta"] = true;
   refresh();
   syncDocBadge();
 

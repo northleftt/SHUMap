@@ -367,32 +367,29 @@ export async function getGuideRevision(env: Env, revisionId: string): Promise<Re
 }
 
 /**
- * 空壳内容：新建文档时如果没带 content，用它占位。
+ * 空壳内容（schema v2）：新建文档时如果没带 content，用它占位。
  *
- * 必须满足 assertContentShape 的契约（cards 数组 + cover 对象），否则
+ * 必须满足 assertContentShape 的契约（cards 数组 + hubs 数组），否则
  * 新建出来的文档一存就被自己的校验拒掉。每次调用返回新对象而不是共享常量 ——
  * 后续会被 JSON 序列化写库，共享可变对象是自找麻烦。
  */
 function EMPTY_CONTENT(): Record<string, unknown> {
   return {
-    meta: { title: "", subtitle: "", edition: "", footnote: "" },
+    schema: 2,
+    meta: { title: "", subtitle: "", edition: "" },
     campuses: [],
-    cover: { lead: "", hubs: [] },
-    groups: [],
+    hubs: [],
     cards: [],
   };
 }
 
-/** 内容的最小契约：渲染层至少需要 cards 与 cover 才画得出东西。 */
+/** 内容的最小契约（schema v2）：渲染层至少需要 cards 与 hubs 才画得出东西。 */
 function assertContentShape(content: Record<string, unknown>): void {
   if (!Array.isArray(content.cards)) {
     throw new HttpError(400, "validation_error", "content.cards must be an array");
   }
-  if (typeof content.cover !== "object" || content.cover === null || Array.isArray(content.cover)) {
-    throw new HttpError(400, "validation_error", "content.cover must be an object");
-  }
-  if (content.groups !== undefined && !Array.isArray(content.groups)) {
-    throw new HttpError(400, "validation_error", "content.groups must be an array when present");
+  if (!Array.isArray(content.hubs)) {
+    throw new HttpError(400, "validation_error", "content.hubs must be an array");
   }
 }
 

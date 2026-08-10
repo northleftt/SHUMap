@@ -1,19 +1,21 @@
 /*
- * guide-render.js — 返校指南电子版共用渲染层（原子卡片架构）
+ * guide-render.js — 返校指南电子版共用渲染层（schema v2 · 枢纽 × 校区架构）
  *
- * 前台展示页、可视化编辑器、导出渲染三个出口都调用这里的函数，
- * 保证「网页上看到的」「编辑器里改的」「导出成 PNG/PDF 的」是同一份代码画出来的。
- *
- * 卡片是最小单位：renderCard 输出一张自包含的卡片 DOM，可以单独导出成图。
+ * 前台展示页与可视化编辑器共读这里的函数，保证「网页上看到的」与
+ * 「编辑器里改的」是同一份代码画出来的。v2 架构：卡片直接携带 hub/campus
+ * 两个 id，不再有 v1 的 cover/groups 分段层；normalizeData 负责把线上
+ * 可能残留的旧版数据（D1 旧修订）就地升级成 v2。
  *
  * 对外接口（window.GuideRender）：
- *   renderCard(card, data, opts)     → 一张卡片（route / figure）
- *   renderCover(cover, data, opts)   → 目录卡片
- *   renderFlow(data, opts)           → 完整卡片流（含分组小标题）
- *   exportCardPng(cardEl, name, s)   → 单卡片 PNG 导出
- *   toast(msg) / closePop()          → 交互反馈
- *   iconList/findIcon/renderIcon    → 图标库（编辑器共用同一注册表）
- *   h / RAIL / guideMark            → 供编辑器复用的图元
+ *   normalizeData(raw)               → v2 数据（兼容 v1 输入）
+ *   allIcons / iconById / renderIcon → 图标库（data.icons 覆盖出厂种子）
+ *   sanitizeRichHtml(html)           → 富文本白名单消毒（编辑器共用）
+ *   renderCard / renderRouteCard / renderFigureCard / renderStepsCard
+ *   renderHubGuide / renderHubVideo / renderRemark → 枢纽级区块
+ *   renderPairView(container, data, hubId, campusId, opts) → 一对组合的整页
+ *   buildPrintRoot(data)             → 打印/PDF 用的离屏文档树
+ *   h / esc / RAIL / HOT_REF / lineColor / lineIcon → 供编辑器复用的图元
+ *   toast / closePop / openPop       → 交互反馈
  */
 window.GuideRender = (function () {
   "use strict";
@@ -25,14 +27,11 @@ window.GuideRender = (function () {
   var RAIL = { x0: 14, gap: 7, gutter: 36 };
 
   /* 热区尺寸的参照宽度（px）：数据里的 w/h 是在「卡片正文宽 728px」下量出来的。
-     渲染时换算成百分比，卡片变窄（手机、双列）时热区跟着等比缩小，
-     不会像固定 px 那样在小屏上糊成一片。728 = 780 卡宽 - 26×2 内边距。 */
+     渲染时换算成百分比，卡片变窄（手机、双列）时热区跟着等比缩小。 */
   var HOT_REF = 728;
 
-  /* 维度筛选的「不限」哨兵。不能用 "all"：数据里 campus:"all" 是一个真实取值
-     （松江枢纽、附表那种不分校区的整页），用 "all" 当哨兵会让「各校区通用」
-     这个 Tab 变成「全部」，两个 Tab 同时高亮且筛不动。 */
-  var ANY_DIM = "*";
+  /* 图示素材统一走 D1 接口，不再有出厂内联包 */
+  var ASSET_BASE = "/api/public/guide-assets/";
 
   function h(tag, attrs) {
     var el = SVG_TAGS.test(tag)
@@ -45,7 +44,12 @@ window.GuideRender = (function () {
       if (k === "class") el.setAttribute("class", v);
       else if (k === "style") el.setAttribute("style", v);
       else if (k === "text") el.textContent = v;
-      else if (k === "dataset") { for (var d in v) el.dataset[d] = v[d]; }
+      else if (k === "dataset") {
+        for (var d in v) {
+          if (v[d] === null || v[d] === undefined) continue;
+          el.dataset[d] = v[d];
+        }
+      }
       else if (k.slice(0, 2) === "on" && typeof v === "function")
         el.addEventListener(k.slice(2).toLowerCase(), v);
       else el.setAttribute(k, String(v));
@@ -60,61 +64,81 @@ window.GuideRender = (function () {
     return el;
   }
 
+  /* 拼 innerHTML 前的转义（编辑器会用到） */
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
   function lineColor(key, data) {
     var map = (data && data.lineColors) || {};
     if (!key) return map.neutral || "#8f98a3";
     return map[key] || key;
   }
 
-  /* ── 确定性伪随机街道底图：只用于目录卡片的水印 ───────────────── */
-  function mulberry32(seed) {
-    var a = seed >>> 0;
-    return function () {
-      a = (a + 0x6d2b79f5) >>> 0;
-      var t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  /* ══════════════ 数据规范化（v1 → v2） ══════════════
+   * D1 里可能还躺着一条旧版已发布修订。v1 特征：顶层有 cover / groups，
+   * 卡片用 group 挂分段、hub 是 {name,note} 对象。这里就地升级：
+   *   cover.hubs → 顶层 hubs（order = 下标 + 1，媒体/备注字段置空）
+   *   card.group → 经 groups 反查 hub / campus 两个 id
+   *   card.hub 对象 → 改名 origin
+   * 已是 v2（schema === 2）或不认识的数据原样返回。 */
+  function normalizeData(raw) {
+    if (!raw || raw.schema === 2) return raw;
+    if (!raw.cover && !raw.groups) return raw;
+    var groups = raw.groups || [];
+    var meta = raw.meta || {};
+
+    var hubs = ((raw.cover && raw.cover.hubs) || []).map(function (hb, i) {
+      return {
+        id: hb.id, name: hb.name, note: hb.note || null,
+        color: hb.color || "#465060", order: i + 1,
+        guideFigure: null, guideVideo: null, remark: "",
+      };
+    });
+
+    var cards = (raw.cards || []).map(function (c) {
+      var g = null;
+      for (var i = 0; i < groups.length; i++)
+        if (groups[i].id === c.group) { g = groups[i]; break; }
+      var out = {};
+      for (var k in c) {
+        if (k === "group" || k === "page" || k === "hub") continue;
+        out[k] = c[k];
+      }
+      if (c.hub && typeof c.hub === "object") out.origin = c.hub;
+      out.hub = g ? g.hub : (typeof c.hub === "string" ? c.hub : "");
+      out.campus = g ? g.campus : (typeof c.campus === "string" ? c.campus : "all");
+      return out;
+    });
+
+    return {
+      schema: 2,
+      meta: {
+        title: meta.title || "", subtitle: meta.subtitle || "",
+        edition: meta.edition || "", version: meta.version || "",
+        revisedAt: meta.revisedAt || "", revisionNote: meta.revisionNote || "",
+      },
+      lineColors: raw.lineColors || {},
+      campuses: raw.campuses || [],
+      hubs: hubs,
+      icons: raw.icons,
+      cards: cards,
     };
   }
 
-  function streetLayer(w, hgt, seed, opts) {
-    var o = opts || {};
-    var rnd = mulberry32(seed);
-    var g = h("g", { fill: "none", stroke: o.stroke || "#dfe3e6", "stroke-linecap": "square" });
-    for (var i = 0; i < (o.majors || 8); i++) {
-      var y = rnd() * hgt;
-      var skew = (rnd() - 0.5) * hgt * 0.16;
-      g.appendChild(h("path", { d: "M-4 " + y.toFixed(1) + " L" + (w + 4) + " " + (y + skew).toFixed(1), "stroke-width": (1 + rnd() * 0.6).toFixed(2) }));
-    }
-    for (var j = 0; j < (o.majorsV || 7); j++) {
-      var x = rnd() * w;
-      var sk2 = (rnd() - 0.5) * w * 0.14;
-      g.appendChild(h("path", { d: "M" + x.toFixed(1) + " -4 L" + (x + sk2).toFixed(1) + " " + (hgt + 4), "stroke-width": (1 + rnd() * 0.6).toFixed(2) }));
-    }
-    var cells = o.cells || 30;
-    for (var c = 0; c < cells; c++) {
-      var cx = rnd() * w, cy = rnd() * hgt;
-      var bw = 12 + rnd() * 40, bh = 10 + rnd() * 34;
-      g.appendChild(h("rect", { x: cx.toFixed(1), y: cy.toFixed(1), width: bw.toFixed(1), height: bh.toFixed(1), "stroke-width": 0.5 }));
-    }
-    var wy = hgt * (0.44 + rnd() * 0.26);
-    g.appendChild(h("path", {
-      d: "M-4 " + wy.toFixed(1) + " Q" + (w * 0.32).toFixed(1) + " " + (wy - hgt * 0.08).toFixed(1) +
-         " " + (w * 0.58).toFixed(1) + " " + (wy + hgt * 0.035).toFixed(1) +
-         " T" + (w + 4) + " " + (wy - hgt * 0.045).toFixed(1),
-      stroke: o.water || "#d3e3ec", "stroke-width": 2.4,
-    }));
-    return h("svg", { viewBox: "0 0 " + w + " " + hgt, preserveAspectRatio: "xMidYMid slice", "aria-hidden": "true" }, g);
+  function hubById(data, id) {
+    var list = (data && data.hubs) || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
   }
 
   /* ══════════════ 图标库 ══════════════
-   * 图标不再写在代码里，而是按 id 查注册表。data.icons 优先（随 JSON 导出／导入
-   * 一起走，用户上传的图标存在这里），缺失时回落到 GUIDE_ICON_SEED 出厂种子。
-   *
-   * 两种存储格式都支持：svg（内联标记）与 uri（data URI）。都不用外部路径 ——
-   * 单卡片导出 PNG 走 <foreignObject>，其中加载不了相对路径的外部文件。
-   */
-  function iconList(data) {
+   * 图标按 id 查注册表。data.icons 优先（用户上传，随 JSON 导出／导入），
+   * 缺失时回落到 GUIDE_ICON_SEED 出厂种子。存储格式二选一：svg（内联标记）
+   * 或 uri（data URI），都不用外部路径。 */
+  function allIcons(data) {
     var seed = window.GUIDE_ICON_SEED || [];
     var own = (data && data.icons) || [];
     var byId = {}, out = [];
@@ -126,54 +150,124 @@ window.GuideRender = (function () {
     return out;
   }
 
-  function findIcon(data, id) {
+  function iconById(data, id) {
     if (!id) return null;
-    var all = iconList(data);
+    var all = allIcons(data);
     for (var i = 0; i < all.length; i++) if (all[i].id === id) return all[i];
     return null;
   }
 
-  /* 把图标画成 DOM。svg 走 innerHTML（保留矢量、可继承 currentColor），
-     uri 走 <img>。size 是高度（px），宽度按 ratio 推算，缺省为正方。 */
-  function renderIcon(data, id, opts) {
-    var o = opts || {};
-    var ic = findIcon(data, id);
+  /* 把图标画成 DOM。iconOrId 可以是图标对象或 id；size 是高度（px），
+     宽度按 ratio 推算，缺省为正方。svg 走 innerHTML，uri 走 <img>。 */
+  function renderIcon(data, iconOrId, size) {
+    var ic = typeof iconOrId === "string" ? iconById(data, iconOrId) : iconOrId;
     if (!ic) return null;
-    var hgt = o.size || 15;
+    var hgt = size || 15;
     var wid = ic.ratio ? Math.round(hgt * ic.ratio) : hgt;
     var box = h("span", {
-      class: "gc-ico" + (o.cls ? " " + o.cls : ""),
-      dataset: { iconId: id },
+      class: "gc-ico",
+      dataset: { iconId: ic.id },
       style: "height:" + hgt + "px;width:" + wid + "px",
-      "aria-label": o.label || ic.name || "",
-      role: o.label ? "img" : null,
-      "aria-hidden": o.label ? null : "true",
+      "aria-hidden": "true",
     });
     if (ic.svg) box.innerHTML = ic.svg;
-    else if (ic.uri) box.appendChild(h("img", { src: ic.uri, alt: o.label || ic.name || "" }));
+    else if (ic.uri) box.appendChild(h("img", { src: ic.uri, alt: ic.name || "" }));
     return box;
-  }
-
-  /* 卡片右上角的品牌标。id 可由 data.meta.markIcon 指定，默认用出厂字标。 */
-  function guideMark(data) {
-    var id = (data && data.meta && data.meta.markIcon) || "brand-shutf";
-    var ic = findIcon(data, id);
-    if (!ic) return h("span", null);
-    var wrap = h("div", { class: "gc-mark", "aria-label": ic.name || "" });
-    var node = renderIcon(data, id, { size: 36, label: ic.name });
-    if (node) {
-      /* 品牌标按容器宽度自适应，不锁死像素高 —— 手机上卡片会变窄 */
-      node.setAttribute("style", "height:auto;width:100%");
-      wrap.appendChild(node);
-    }
-    return wrap;
   }
 
   /* 交通方式图标：数据里可用 ln.icon 指定任意 id；没指定时按 kind 取默认。 */
   var KIND_ICON = { metro: "metro-sh", rail: "rail-sh", bus: null };
   function lineIcon(data, ln) {
     var id = ln.icon || KIND_ICON[ln.kind] || null;
-    return id ? renderIcon(data, id, { cls: "gc-mico", size: 15 }) : null;
+    var node = id ? renderIcon(data, id, 15) : null;
+    if (node) node.setAttribute("class", node.getAttribute("class") + " gc-mico");
+    return node;
+  }
+
+  /* ══════════════ 富文本消毒（枢纽备注 / 编辑器共用） ══════════════
+   * 白名单标签：b strong i em u p br ul ol li a img span。
+   * 属性：a[href] 只允许 http/https/mailto/#（外链补 target=_blank rel=noopener）；
+   * img[src] 只允许 /api/public/guide-assets/ 路径或 data:image/ URI（保留 alt）。
+   * 其余标签剥壳保留文字，script/style 整体删除，其余属性一律删除。 */
+  var RICH_TAGS = { b: 1, strong: 1, i: 1, em: 1, u: 1, p: 1, br: 1, ul: 1, ol: 1, li: 1, a: 1, img: 1, span: 1 };
+  var HREF_OK = /^(https?:|mailto:|#)/i;
+  var IMG_SRC_OK = /^(\/api\/public\/guide-assets\/|data:image\/)/i;
+
+  function sanitizeRichHtml(html) {
+    html = String(html === null || html === undefined ? "" : html);
+    if (!html) return "";
+    if (typeof DOMParser === "undefined") return sanitizeFallback(html);
+    var doc = new DOMParser().parseFromString("<div>" + html + "</div>", "text/html");
+    var box = doc.body.firstChild;
+    if (box) cleanRichChildren(box);
+    return box ? box.innerHTML : "";
+  }
+
+  function cleanRichChildren(parent) {
+    var nodes = Array.prototype.slice.call(parent.childNodes);
+    nodes.forEach(function (node) {
+      if (node.nodeType === 8) { parent.removeChild(node); return; }   // 注释
+      if (node.nodeType !== 1) return;                                 // 文本保留
+      var tag = node.tagName.toLowerCase();
+      if (tag === "script" || tag === "style") { parent.removeChild(node); return; }
+      if (!RICH_TAGS[tag]) {
+        /* 非白名单标签：剥壳，保留内部内容 */
+        cleanRichChildren(node);
+        while (node.firstChild) parent.insertBefore(node.firstChild, node);
+        parent.removeChild(node);
+        return;
+      }
+      cleanRichChildren(node);
+      cleanRichAttrs(node, tag);
+    });
+  }
+
+  function cleanRichAttrs(el, tag) {
+    var keep = {};
+    if (tag === "a") {
+      var href = el.getAttribute("href") || "";
+      if (HREF_OK.test(href)) {
+        keep.href = href;
+        if (/^https?:/i.test(href)) { keep.target = "_blank"; keep.rel = "noopener"; }
+      }
+    } else if (tag === "img") {
+      var src = el.getAttribute("src") || "";
+      if (IMG_SRC_OK.test(src)) keep.src = src;
+      keep.alt = el.getAttribute("alt") || "";
+    }
+    while (el.attributes.length) el.removeAttribute(el.attributes[0].name);
+    for (var k in keep) el.setAttribute(k, keep[k]);
+  }
+
+  /* 无 DOM 环境（node 测试、极端老浏览器）的正则兜底，规则与上面一致 */
+  function sanitizeFallback(html) {
+    var s = String(html);
+    s = s.replace(/<!--[\s\S]*?-->/g, "");
+    s = s.replace(/<\s*(script|style)\b[\s\S]*?<\s*\/\s*\1\s*>/gi, "");
+    s = s.replace(/<\s*(script|style)\b[^>]*\/?>/gi, "");
+    s = s.replace(/<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>/g, function (m, close, tag, attrs) {
+      tag = tag.toLowerCase();
+      if (!RICH_TAGS[tag]) return "";
+      if (close) return "</" + tag + ">";
+      if (tag === "a") {
+        var href = pickAttr(attrs, "href");
+        if (!HREF_OK.test(href)) return "<a>";
+        var extra = /^https?:/i.test(href) ? ' target="_blank" rel="noopener"' : "";
+        return '<a href="' + esc(href) + '"' + extra + ">";
+      }
+      if (tag === "img") {
+        var src = pickAttr(attrs, "src");
+        if (!IMG_SRC_OK.test(src)) src = "";
+        return '<img src="' + esc(src) + '" alt="' + esc(pickAttr(attrs, "alt")) + '">';
+      }
+      return "<" + tag + ">";
+    });
+    return s;
+  }
+
+  function pickAttr(attrs, name) {
+    var m = attrs.match(new RegExp(name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>]+))', "i"));
+    return m ? (m[1] || m[2] || m[3] || "") : "";
   }
 
   /* ══════════════ 时间轴 ══════════════ */
@@ -233,10 +327,10 @@ window.GuideRender = (function () {
         if (ln.suffix) row.appendChild(h("span", { class: "gc-suffix", text: ln.suffix }));
       }
       if (ln.toward) row.appendChild(h("span", { class: "gc-toward-t", text: ln.toward }));
-      if (ln.note) row.appendChild(h("span", { class: "gc-note", text: ln.note }));
+      if (ln.note) row.appendChild(h("span", { class: "gc-lnote", text: ln.note }));
       wrap.appendChild(row);
       (ln.notes || []).forEach(function (n) {
-        wrap.appendChild(h("div", { class: "gc-note", text: n }));
+        wrap.appendChild(h("div", { class: "gc-lnote", text: n }));
       });
     });
     return wrap;
@@ -248,7 +342,8 @@ window.GuideRender = (function () {
     if (leg.type === "ride") return rideBody(leg, data);
     return h("div", null,
       h("div", { class: "gc-stop__name", text: leg.name }),
-      leg.exit ? h("div", { class: "gc-stop__exit", text: leg.exit }) : null
+      leg.exit ? h("div", { class: "gc-stop__exit", text: leg.exit }) : null,
+      leg.note ? h("div", { class: "gc-lnote", text: leg.note }) : null
     );
   }
 
@@ -276,152 +371,90 @@ window.GuideRender = (function () {
     return tl;
   }
 
-  /* ══════════════ 卡片操作条 ══════════════ */
-
-  function actionBar(card, opts) {
-    var o = opts || {};
-    var acts = [];
-    acts.push(h("button", {
-      class: "gc-act", type: "button", title: "把这张卡片导出为 PNG", text: "存图",
-      onclick: function (e) {
-        e.stopPropagation();
-        var el = e.target.closest("[data-card-id]");
-        exportCardPng(el, "shu-guide-" + card.id, 2)
-          .then(function () { toast("已导出「" + (card.title || card.hub && card.hub.name || card.id) + "」"); })
-          .catch(function (err) { toast("导出失败：" + err.message); });
-      },
-    }));
-    if (o.onDuplicate) acts.push(h("button", {
-      class: "gc-act", type: "button", title: "复制这张卡片", text: "复制",
-      onclick: function (e) { e.stopPropagation(); o.onDuplicate(card.id); },
-    }));
-    if (o.onMove) {
-      acts.push(h("button", {
-        class: "gc-act", type: "button", title: "上移", text: "↑",
-        onclick: function (e) { e.stopPropagation(); o.onMove(card.id, -1); },
-      }));
-      acts.push(h("button", {
-        class: "gc-act", type: "button", title: "下移", text: "↓",
-        onclick: function (e) { e.stopPropagation(); o.onMove(card.id, 1); },
-      }));
-    }
-    if (o.onDelete) acts.push(h("button", {
-      class: "gc-act gc-act--danger", type: "button", title: "删除这张卡片", text: "✕",
-      onclick: function (e) { e.stopPropagation(); o.onDelete(card.id); },
-    }));
-    return h("div", { class: "gc-acts gc-noprint" }, acts);
-  }
-
   /* ══════════════ 路线卡片 ══════════════ */
+
+  function renderSchedule(schedule) {
+    var box = h("div", { class: "gc-sched" },
+      h("div", { class: "gc-sched__t", text: "发车时刻" }));
+    (schedule || []).forEach(function (en) {
+      var times = h("div", { class: "gc-sched__times" });
+      String(en.times || "").split("\n").forEach(function (line) {
+        times.appendChild(h("div", { text: line }));
+      });
+      box.appendChild(h("div", { class: "gc-sched__row" },
+        h("div", { class: "gc-sched__label", text: en.label }),
+        times
+      ));
+    });
+    return box;
+  }
 
   function renderRouteCard(card, data, opts) {
     var o = opts || {};
-    var head = h("div", { class: "gc-card__head" },
-      h("div", { class: "gc-hub" },
-        h("h3", { class: "gc-hub__name", text: card.hub.name }),
-        card.hub.note ? h("span", { class: "gc-hub__note", text: card.hub.note }) : null
-      ),
-      guideMark(data)
-    );
+    var origin = card.origin || {};
 
-    var meta = h("div", { class: "gc-card__meta" },
-      card.modeLabel
-        ? h("span", { class: "gc-mode", dataset: { mode: card.mode }, text: card.modeLabel })
-        : null,
-      card.toward ? h("span", { class: "gc-toward", text: card.toward }) : null,
-      h("span", { class: "gc-spacer" }),
-      h("span", { class: "gc-stat" },
-        h("span", null, ""),
-        document.createTextNode(card.durationMin + "分钟"),
-        h("span", null, " / "),
-        document.createTextNode(card.fareYuan + "元")
+    var head = h("div", { class: "gc-card-head" },
+      h("div", { class: "gc-origin" },
+        h("h3", { class: "gc-origin__name", text: origin.name || "" }),
+        origin.note ? h("span", { class: "gc-origin__note", text: origin.note }) : null
       )
     );
 
+    var chips = h("div", { class: "gc-card-chips" },
+      card.toward ? h("span", { class: "gc-dest-chip", text: card.toward }) : null,
+      card.modeLabel
+        ? h("span", { class: "gc-mode-badge", dataset: { mode: card.mode || "other" }, text: card.modeLabel })
+        : null,
+      h("span", { class: "gc-spacer" }),
+      card.durationMin !== null && card.durationMin !== undefined
+        ? h("span", { class: "gc-meta-chip", text: "约 " + card.durationMin + " 分钟" }) : null,
+      card.fareYuan !== null && card.fareYuan !== undefined
+        ? h("span", { class: "gc-meta-chip", text: card.fareYuan + " 元" }) : null
+    );
+
     var flags = (card.flags || []).length
-      ? h("div", { class: "gc-card__meta", style: "border:0;margin:-8px 0 12px;padding:0" },
-          (card.flags || []).map(function (f) { return h("span", { class: "gc-flag", text: f }); }))
+      ? h("div", { class: "gc-flags" },
+          card.flags.map(function (f) { return h("span", { class: "gc-flag", text: f }); }))
+      : null;
+
+    var hasNote = !!(card.note && String(card.note).trim());
+    var hasSched = (card.schedule || []).length > 0;
+    var foot = (hasNote || hasSched)
+      ? h("div", { class: "gc-card-foot" },
+          hasNote ? h("div", { class: "gc-note" },
+            h("span", { class: "gc-note__label", text: "备注" }),
+            h("span", { class: "gc-note__text", text: card.note })) : null,
+          hasSched ? renderSchedule(card.schedule) : null)
       : null;
 
     var el = h("article", {
-      class: "gc-card", dataset: { cardId: card.id, kind: "route", mode: card.mode },
-      "data-od-id": "route-card-" + card.id,
+      class: "gc-card gc-card--route",
+      id: "card-" + card.id,
+      dataset: { cardId: card.id, kind: "route", mode: card.mode },
       tabindex: "0",
-    },
-      actionBar(card, o),
-      head, meta, flags,
-      renderTimeline(card, data, o)
-    );
+    }, head, chips, flags, renderTimeline(card, data, o), foot);
 
     if (o.onPickCard)
       el.addEventListener("click", function () { o.onPickCard(card.id); });
     return el;
   }
 
-  /* ══════════════ 图示卡片（原稿真图 + 热区） ══════════════ */
-
-  /* 图示素材有两个来源，按优先级回落：
-       1. window.GUIDE_FIGURE_DATA —— 出厂内联包（含 base64，离线可用）
-       2. /api/public/guide-assets/<key> —— D1 通道，合入 SHUMap 后的正式来源
-     内联包优先是为了让这套文件脱离后端也能打开（原型与离线校对）；
-     正式部署时不带内联包，全部走接口。 */
-  var ASSET_BASE = "/api/public/guide-assets/";
-
-  /* key → data URI。PNG 导出需要 data URI（<foreignObject> 里加载不了外部文件），
-     所以走接口的图会在导出前被 inlineExternalImages 抓下来缓存在这里。 */
-  var figureCache = {};
-
-  function figureRegistry() { return window.GUIDE_FIGURE_DATA || {}; }
-
-  function figureSrc(key) {
-    var f = figureRegistry()[key];
-    if (f && f.uri) return f.uri;
-    return figureCache[key] || null;
-  }
-  function figureSize(key) {
-    return figureRegistry()[key] || null;
-  }
-  function figureUrl(key) {
-    return ASSET_BASE + encodeURIComponent(key);
-  }
-
-  /* 屏幕/打印用 SVG（矢量，放大不糊、文字仍是文字）；
-     导出 PNG 时由 exportCardPng 换成内联位图 —— <foreignObject> 里
-     无法加载相对路径的外部文件，只有 data URI 才画得出来。 */
+  /* ══════════════ 图示卡片（真图 + 热区） ══════════════
+   * 素材只走 /api/public/guide-assets/<key>（SVG 优先，PNG 亦可）。
+   * 热区坐标用百分比（HOT_REF 换算），随图等比缩放，默认常显。 */
   function renderFigureCard(card, data, opts) {
     var o = opts || {};
-    var meta = figureSize(card.figure);
-    var raster = figureSrc(card.figure);
-    var vector = meta && meta.svg;
-
-    var wrap = h("div", { class: "gc-figwrap", dataset: { reveal: "0" } });
-    /* 三级回落：内联矢量 → 内联位图 → D1 接口。
-       前两级来自出厂包（离线可用），最后一级是合入 SHUMap 后的正式来源。
-       没有内联包时不再显示「素材缺失」——那会让正式部署看起来是坏的。 */
-    var src = vector || raster || figureUrl(card.figure);
+    var wrap = h("div", { class: "gc-figwrap" });
     var img = h("img", {
-      src: src,
-      alt: card.title + "（取自原稿矢量文件）",
-      loading: "lazy",
-      decoding: "async",
-      width: vector ? (meta.vw || null) : (meta ? meta.w : null),
-      height: vector ? (meta.vh || null) : (meta ? meta.h : null),
-      dataset: {
-        figKey: card.figure,
-        vector: vector ? "1" : "0",
-        /* remote=1 标记「这张图的字节还不在本地」：exportCardPng 导出前
-           必须先把它抓成 data URI，否则 <foreignObject> 里画出来是空白。 */
-        remote: (vector || raster) ? "0" : "1",
-      },
+      src: ASSET_BASE + encodeURIComponent(card.figure),
+      alt: card.title || "图示",
+      loading: "lazy", decoding: "async",
+      dataset: { figKey: card.figure },
     });
-    /* 接口取图失败时才降级成文字提示，且说清是哪个键，便于后台补素材 */
     img.addEventListener("error", function () {
       if (img.dataset.failed === "1") return;
       img.dataset.failed = "1";
-      img.replaceWith(h("div", {
-        style: "padding:48px 20px;text-align:center;font-size:13px;color:#68727e",
-        text: "图示素材尚未上传：" + card.figure,
-      }));
+      img.replaceWith(h("div", { class: "gc-placeholder", text: "图示素材尚未上传：" + card.figure }));
     });
     wrap.appendChild(img);
 
@@ -433,7 +466,7 @@ window.GuideRender = (function () {
                ";--hw:" + ((hs.w || 44) / HOT_REF * 100).toFixed(3) + "%" +
                ";--hh:" + ((hs.h || 44) / HOT_REF * 100).toFixed(3) + "%",
         "aria-label": hs.title,
-      }, h("span", { class: "gc-hot__pin" }));
+      });
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
         openPop(btn, hs, o);
@@ -446,57 +479,43 @@ window.GuideRender = (function () {
       wrap.appendChild(btn);
     });
 
-    var reveal = h("button", {
-      class: "gc-act", type: "button", text: "显示可点位置",
-      onclick: function (e) {
-        e.stopPropagation();
-        var on = wrap.dataset.reveal === "1";
-        wrap.dataset.reveal = on ? "0" : "1";
-        e.target.textContent = on ? "显示可点位置" : "隐藏标记";
-      },
-    });
-
     var el = h("article", {
-      class: "gc-figcard", dataset: { cardId: card.id, kind: "figure" },
-      "data-od-id": "figure-card-" + card.id,
+      class: "gc-card gc-card--figure",
+      id: "card-" + card.id,
+      dataset: { cardId: card.id, kind: "figure" },
     },
-      actionBar(card, o),
       h("div", { class: "gc-figcard__head" },
-        h("h3", { class: "gc-figcard__t", text: card.title })
-      ),
+        h("h3", { class: "gc-figcard__t", text: card.title || "图示" })),
       card.caption ? h("div", { class: "gc-figcard__cap", text: card.caption }) : null,
       wrap,
-      h("div", { class: "gc-fighint gc-noprint" },
-        reveal,
-        h("span", { text: (card.hotspots || []).length + " 个可点位置 · 点击查看详情或跳转" })
-      )
+      (card.hotspots || []).length
+        ? h("div", { class: "gc-fighint" },
+            h("span", { text: (card.hotspots || []).length + " 个可点位置 · 点击查看详情或跳转" }))
+        : null
     );
+    if (o.onPickCard)
+      el.addEventListener("click", function () { o.onPickCard(card.id); });
     return el;
   }
 
   /* ══════════════ 步骤卡片（实景指引 / 附表教程） ══════════════
-   * 原稿的「实景指引」页是照片 + 序号说明，「附表1」是纯文字教程。
-   * 两者共用这一种卡片：sections[] 分小节，每节 steps[] 是有序步骤。
-   * section.bare = true 时不显示步骤序号（教程型，不是照着走的操作序列）。
-   * card.pending 用来显式声明「这部分原稿数据还没录进来」——
-   * 宁可在页面上写明缺口，也不要让读者以为看到的就是全部。
-   */
+   * sections[] 分小节，每节 steps[] 是有序步骤；section.bare = true 时不显示
+   * 步骤序号。card.pending 显式声明「这部分原稿数据还没录进来」。 */
   function renderStepsCard(card, data, opts) {
     var o = opts || {};
-    var head = h("div", { class: "gc-card__head" },
-      h("div", { class: "gc-hub" },
-        h("h3", { class: "gc-hub__name", text: card.hub ? card.hub.name : (card.title || "") }),
-        card.hub && card.hub.note
-          ? h("span", { class: "gc-hub__note", text: card.hub.note }) : null
-      ),
-      guideMark(data)
+    var origin = card.origin || {};
+
+    var head = h("div", { class: "gc-card-head" },
+      h("div", { class: "gc-origin" },
+        h("h3", { class: "gc-origin__name", text: origin.name || card.title || "" }),
+        origin.note ? h("span", { class: "gc-origin__note", text: origin.note }) : null
+      )
     );
 
-    var meta = h("div", { class: "gc-card__meta" },
-      card.toward ? h("span", { class: "gc-toward", text: card.toward }) : null,
-      h("span", { class: "gc-spacer" }),
-      card.page ? h("span", { class: "gc-stat" }, h("span", null, "原稿第 " + card.page + " 页")) : null
-    );
+    var chips = card.toward
+      ? h("div", { class: "gc-card-chips" },
+          h("span", { class: "gc-dest-chip", text: card.toward }))
+      : null;
 
     var body = h("div", { class: "gc-steps" });
     if (card.intro) body.appendChild(h("div", { class: "gc-steps__intro", text: card.intro }));
@@ -525,10 +544,10 @@ window.GuideRender = (function () {
 
     var el = h("article", {
       class: "gc-card gc-card--steps",
+      id: "card-" + card.id,
       dataset: { cardId: card.id, kind: "steps" },
-      "data-od-id": "steps-card-" + card.id,
       tabindex: "0",
-    }, actionBar(card, o), head, meta, body);
+    }, head, chips, body);
 
     if (o.onPickCard)
       el.addEventListener("click", function () { o.onPickCard(card.id); });
@@ -541,274 +560,183 @@ window.GuideRender = (function () {
     return renderRouteCard(card, data, opts);
   }
 
-  /* ══════════════ 目录卡片 ══════════════ */
+  /* ══════════════ 枢纽级区块 ══════════════ */
 
-  function renderCover(cover, data, opts) {
+  function hubSecTitle(text) {
+    return h("h3", { class: "gc-hub-sec__t", text: text });
+  }
+
+  /* 枢纽指引：有 guideFigure 渲染素材图（SVG 走接口），否则虚线占位 */
+  function renderHubGuide(hub) {
+    var body;
+    if (hub && hub.guideFigure) {
+      body = h("img", {
+        class: "gc-hub-fig",
+        src: ASSET_BASE + encodeURIComponent(hub.guideFigure),
+        alt: (hub.name || "") + " 枢纽指引图",
+        loading: "lazy", decoding: "async",
+      });
+      body.addEventListener("error", function () {
+        body.replaceWith(h("div", { class: "gc-placeholder", text: "枢纽指引图加载失败：" + hub.guideFigure }));
+      });
+    } else {
+      body = h("div", { class: "gc-placeholder", text: "枢纽指引图待上传" });
+    }
+    return h("section", { class: "gc-hub-sec" }, hubSecTitle("枢纽指引"), body);
+  }
+
+  /* 实况指引：有 guideVideo.url 渲染 <video controls>，否则虚线占位 */
+  function renderHubVideo(hub) {
+    var gv = hub && hub.guideVideo;
+    var kids;
+    if (gv && gv.url) {
+      kids = [
+        h("video", {
+          class: "gc-hub-video", controls: "controls", preload: "metadata",
+          src: gv.url, poster: gv.poster || null,
+        }),
+      ];
+      if (gv.note) kids.push(h("div", { class: "gc-hub-video__note", text: gv.note }));
+    } else {
+      kids = [h("div", { class: "gc-placeholder", text: "实况指引视频待上传" })];
+    }
+    return h("section", { class: "gc-hub-sec" }, hubSecTitle("实况指引"), kids);
+  }
+
+  /* 备注：hub.remark 经白名单消毒后渲染。空备注在前台返回 null（不渲染），
+     编辑器传 opts.placeholder 可换成虚线占位。 */
+  function renderRemark(hub, opts) {
     var o = opts || {};
-    var grid = h("div", { class: "gc-hubs", "data-od-id": "cover-hub-grid" });
-    (cover.hubs || []).forEach(function (hub) {
-      var entries = h("div", { class: "gc-entries" });
-      (hub.entries || []).forEach(function (en) {
-        var linked = !!en.groupId;
-        var btn = h("button", {
-          class: "gc-entry", type: "button",
-          dataset: { linked: linked ? "1" : "0", groupId: en.groupId || "" },
-          "aria-label": hub.name + " " + en.label + " 第" + en.page + "页" + (linked ? "" : "（本轮未包含）"),
-        },
-          h("span", { class: "gc-entry__arrow", text: en.arrow || "→" }),
-          h("span", { class: "gc-entry__label", text: en.label }),
-          h("span", { class: "gc-entry__page", text: linked ? "第" + en.page + "页" : "第" + en.page + "页 · 待录入" })
-        );
-        if (linked && o.onNavigate) btn.addEventListener("click", function () { o.onNavigate(en.groupId); });
-        else if (!linked) btn.addEventListener("click", function () {
-          toast("第" + en.page + "页「" + hub.name + " " + en.label + "」数据尚未录入");
-        });
-        entries.appendChild(btn);
-      });
-      grid.appendChild(h("div", { class: "gc-hubcard", dataset: { hubId: hub.id } },
-        h("h3", { class: "gc-hubcard__name" },
-          h("span", { class: "gc-swatch", style: "--c:" + hub.color }),
-          h("span", { text: hub.name })
-        ),
-        hub.note ? h("div", { class: "gc-hubcard__note", text: hub.note }) : null,
-        entries,
-        hub.tail ? h("div", { class: "gc-hubcard__note", style: "margin-top:5px", text: hub.tail }) : null
-      ));
-    });
-
-    return h("article", {
-      class: "gc-cover", dataset: { cardId: "cover", kind: "cover" }, "data-od-id": "cover-card",
-    },
-      h("div", { class: "gc-cover__wm" }, streetLayer(780, 620, 424242, { cells: 34 })),
-      h("div", { style: "display:flex;justify-content:flex-end;margin-bottom:6px" }, guideMark(data)),
-      h("div", { "data-od-id": "cover-title" },
-        h("div", { class: "gc-cover__t1", text: data.meta.title }),
-        h("div", { class: "gc-cover__t2", text: data.meta.subtitle })
-      ),
-      h("div", { class: "gc-cover__rule" }),
-      h("div", { class: "gc-cover__lead", text: cover.lead }),
-      grid,
-      h("div", { class: "gc-cover__foot", text: "*" + data.meta.footnote })
-    );
+    var html = hub && hub.remark ? sanitizeRichHtml(hub.remark) : "";
+    if (!html.trim()) {
+      if (!o.placeholder) return null;
+      return h("section", { class: "gc-hub-sec" }, hubSecTitle("备注"),
+        h("div", { class: "gc-placeholder",
+          text: typeof o.placeholder === "string" ? o.placeholder : "备注待填写" }));
+    }
+    var box = h("div", { class: "gc-remark" });
+    box.innerHTML = html;
+    return h("section", { class: "gc-hub-sec" }, hubSecTitle("备注"), box);
   }
 
-  /* ══════════════ 出发点选择器（屏幕专用） ══════════════
-   * 原稿目录是「枢纽 × 校区 + 页码」的表格，那是纸质版翻页用的。
-   * 手机上没有页码这回事，所以屏幕上换成这个选择器：先点枢纽，再点校区。
-   * 目录卡片（renderCover）仍然保留，只在打印/PDF 里出现，版式与原稿一致。
-   */
-  /* data.campuses 是数组（要保序），查名字得先转成 id → 条目 的表。
-     缓存在闭包里没意义 —— 编辑器会整份换掉 data，所以每次现算。 */
-  function campusEntry(data, id) {
-    var list = (data && data.campuses) || [];
-    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
-    return null;
-  }
-
-  /* 校区短名：优先 group 自带的 campusLabel（允许单个分组改写），
-     其次查 data.campuses，最后退回 campus 键本身。短名用在选择器、
-     目录和顶部 Tab 上 —— 那些地方放不下「虹桥枢纽 → 宝山校区」这种完整标题。
-     short 只在顶部 Tab 用（"宝山"），label 用在选择器和目录（"宝山校区"）。 */
-  function campusLabel(data, g, useShort) {
-    if (!g) return "";
-    if (g.campusLabel) return g.campusLabel;
-    var e = campusEntry(data, g.campus);
-    if (e) return (useShort && e.short) || e.label || e.id;
-    return g.campus || g.title || "";
-  }
-
-  /* 顶部 Tab 用的枢纽 / 校区维度。只列真正有卡片的项，
-     避免 Tab 上出现点进去是空的选项。 */
-  function hubList(data) {
-    var out = [];
-    ((data.cover && data.cover.hubs) || []).forEach(function (hub) {
-      var n = 0;
-      (data.groups || []).forEach(function (g) {
-        if (g.hub !== hub.id) return;
-        n += (data.cards || []).filter(function (c) { return c.group === g.id; }).length;
-      });
-      if (n) out.push({ id: hub.id, label: hub.name, color: hub.color, count: n });
-    });
-    return out;
-  }
-
-  /* 校区维度按 data.campuses 的声明顺序排，而不是按 groups 里第一次出现的
-     顺序 —— 后者会让 Tab 顺序随分组增删漂移。 */
-  function campusList(data) {
-    var out = [];
-    ((data && data.campuses) || []).forEach(function (c) {
-      var n = 0;
-      (data.groups || []).forEach(function (g) {
-        if (g.campus !== c.id) return;
-        n += (data.cards || []).filter(function (x) { return x.group === g.id; }).length;
-      });
-      if (n) out.push({ id: c.id, label: c.label || c.id, short: c.short || c.label || c.id, count: n });
-    });
-    return out;
-  }
-
-  function renderPicker(data, opts) {
+  /* ══════════════ 枢纽 × 校区组合页 ══════════════
+   * 顺序：该组合的卡片栅格（route/figure/steps 按数据序）→ 枢纽指引 →
+   * 实况指引 → 备注。opts.modeFilter（Set 或数组）只筛路线卡的出行方式。 */
+  function renderPairView(container, data, hubId, campusId, opts) {
     var o = opts || {};
-    var hubs = (data.cover && data.cover.hubs) || [];
-    var grid = h("div", { class: "gc-pick__grid" });
+    var d = normalizeData(data);
+    var hub = hubById(d, hubId);
 
-    hubs.forEach(function (hub) {
-      var groups = (data.groups || []).filter(function (g) { return g.hub === hub.id; });
-      if (!groups.length) return;
-      var chips = h("div", { class: "gc-pick__chips" });
-      groups.forEach(function (g) {
-        var n = (data.cards || []).filter(function (c) { return c.group === g.id; }).length;
-        var btn = h("button", {
-          class: "gc-pick__chip", type: "button",
-          dataset: { groupId: g.id },
-          "aria-label": hub.name + " 去往 " + campusLabel(data, g) + "，" + n + " 张卡片",
-        },
-          h("span", { class: "gc-pick__chipL", text: campusLabel(data, g) }),
-          h("span", { class: "gc-pick__chipN", text: n + " 卡" })
-        );
-        if (o.onNavigate)
-          btn.addEventListener("click", function () { o.onNavigate(g.id); });
-        chips.appendChild(btn);
-      });
-      grid.appendChild(h("div", { class: "gc-pick__hub", dataset: { hubId: hub.id } },
-        h("h3", { class: "gc-pick__hubN" },
-          h("span", { class: "gc-swatch", style: "--c:" + hub.color }),
-          h("span", { text: hub.name })
-        ),
-        hub.note ? h("div", { class: "gc-pick__hubNote", text: hub.note }) : null,
-        chips
-      ));
-    });
+    while (container.firstChild) container.removeChild(container.firstChild);
 
-    return h("section", { class: "gc-pick gc-noprint", "data-od-id": "entry-picker" },
-      h("div", { class: "gc-pick__head" },
-        h("div", null,
-          h("div", { class: "gc-pick__t1", text: data.meta.title }),
-          h("div", { class: "gc-pick__t2", text: data.meta.subtitle })
-        ),
-        guideMark(data)
-      ),
-      h("div", { class: "gc-pick__lead", text: (data.cover && data.cover.lead) || "从下列枢纽出发…" }),
-      grid
-    );
-  }
-
-  /* ══════════════ 浏览目录（大纲） ══════════════
-   * 按枢纽把分组折起来，点条目跳到对应卡片组。返回的节点自带
-   * data-group-id，外壳用它同步「当前所在分组」的高亮。
-   */
-  function renderToc(data, opts) {
-    var o = opts || {};
-    var hubs = (data.cover && data.cover.hubs) || [];
-    var box = h("nav", { class: "gc-toc", "aria-label": "指南目录" });
-
-    hubs.forEach(function (hub) {
-      var groups = (data.groups || []).filter(function (g) { return g.hub === hub.id; });
-      if (!groups.length) return;
-      var items = h("div", { class: "gc-toc__items" });
-      groups.forEach(function (g) {
-        var cards = (data.cards || []).filter(function (c) { return c.group === g.id; });
-        var btn = h("button", {
-          class: "gc-toc__item", type: "button",
-          dataset: { groupId: g.id },
-        },
-          h("span", { class: "gc-toc__label", text: campusLabel(data, g) }),
-          h("span", { class: "gc-toc__n", text: String(cards.length) })
-        );
-        btn.addEventListener("click", function () {
-          if (o.onNavigate) o.onNavigate(g.id);
-          if (o.onPicked) o.onPicked(g.id);
-        });
-        items.appendChild(btn);
-      });
-      box.appendChild(h("div", { class: "gc-toc__hub" },
-        h("div", { class: "gc-toc__hubN" },
-          h("span", { class: "gc-swatch", style: "--c:" + hub.color }),
-          h("span", { text: hub.name })
-        ),
-        items
-      ));
-    });
-    return box;
-  }
-
-  /* ══════════════ 卡片流 ══════════════ */
-
-  function renderFlow(data, opts) {
-    var o = opts || {};
-    var flow = h("div", {
-      class: "gc-flow", "data-od-id": "card-flow",
-      /* cols：1 = 强制单列（手机），2 = 双列（大屏与打印）。
-         cover：print = 目录只在打印里出现（屏幕走 .gc-pick 选择器）；
-                both  = 屏幕也显示目录，供编辑器预览导出版式。 */
-      dataset: {
-        cols: o.columns === 1 ? "1" : "2",
-        cover: o.showCover ? "both" : "print",
-      },
-    });
-
-    /* 屏幕看选择器，打印看原稿目录 —— 两者都进 DOM，由 CSS 决定谁出现 */
-    if (!o.hideCover) {
-      flow.appendChild(renderPicker(data, o));
-      flow.appendChild(renderCover(data.cover, data, o));
+    var filter = null;
+    if (o.modeFilter) {
+      filter = typeof o.modeFilter.has === "function"
+        ? o.modeFilter
+        : { has: function (m) { return o.modeFilter.indexOf(m) !== -1; } };
     }
 
-    var groups = data.groups || [];
-    var seen = {};
-    groups.forEach(function (g) {
-      var cards = (data.cards || []).filter(function (c) { return c.group === g.id; });
-      if (!cards.length) return;
-      cards.forEach(function (c) { seen[c.id] = true; });
-
-      /* "*"（或不传）= 不按该维度筛。不能用 "all" 当哨兵：
-         数据里真有 campus:"all"（松江、附表那种不分校区的整页）。 */
-      if (o.hub && o.hub !== ANY_DIM && g.hub !== o.hub) return;
-      if (o.campus && o.campus !== ANY_DIM && g.campus !== o.campus) return;
-
-      var shown = cards.filter(function (c) {
-        return !(o.filter && c.kind === "route" && o.filter !== "all" && c.mode !== o.filter);
-      });
-      if (!shown.length) return;
-
-      var holder = h("div", { class: "gc-group__cards" });
-      shown.forEach(function (c) { holder.appendChild(renderCard(c, data, o)); });
-
-      flow.appendChild(h("section", {
-        class: "gc-group", id: "group-" + g.id,
-        dataset: { groupId: g.id, hub: g.hub || "", campus: g.campus || "" },
-      },
-        h("div", { class: "gc-grouphead" },
-          h("h2", { class: "gc-grouphead__t", text: g.title }),
-          g.note ? h("span", { class: "gc-grouphead__n", text: g.note }) : null,
-          h("span", { class: "gc-grouphead__rule" })
-        ),
-        holder
-      ));
+    var cards = (d.cards || []).filter(function (c) {
+      return c.hub === hubId && c.campus === campusId;
+    });
+    var shown = cards.filter(function (c) {
+      return !(filter && c.kind === "route" && !filter.has(c.mode));
     });
 
-    /* 未归入任何分组的卡片仍然渲染，避免数据里加了卡片却看不见 */
-    var loose = (data.cards || []).filter(function (c) { return !seen[c.id]; });
-    var dimmed = (o.hub && o.hub !== ANY_DIM) || (o.campus && o.campus !== ANY_DIM);
-    if (loose.length && !dimmed) {
-      var lh = h("div", { class: "gc-group__cards" });
-      loose.forEach(function (c) { lh.appendChild(renderCard(c, data, o)); });
-      flow.appendChild(h("section", { class: "gc-group", dataset: { groupId: "" } },
-        h("div", { class: "gc-grouphead" },
-          h("h2", { class: "gc-grouphead__t", text: "未分组卡片" }),
-          h("span", { class: "gc-grouphead__rule" })
-        ),
-        lh
-      ));
+    if (shown.length) {
+      var grid = h("div", { class: "gc-grid" });
+      shown.forEach(function (c) { grid.appendChild(renderCard(c, d, o)); });
+      container.appendChild(grid);
+    } else {
+      container.appendChild(h("div", { class: "gc-empty", text: "当前筛选下没有卡片，换个出行方式试试。" }));
     }
 
-    if (!flow.querySelector(".gc-group"))
-      flow.appendChild(h("div", { class: "gc-empty", text: "当前筛选下没有卡片，换个枢纽或校区试试。" }));
-
-    return flow;
+    if (hub) {
+      container.appendChild(renderHubGuide(hub));
+      container.appendChild(renderHubVideo(hub));
+      var remark = renderRemark(hub, o);
+      if (remark) container.appendChild(remark);
+    }
+    return container;
   }
 
-  /* ══════════════ 弹出详情 / 提示 ══════════════ */
+  /* ══════════════ 打印 / PDF 文档树 ══════════════
+   * 离屏构建，viewer 把它 append 一次，用打印 CSS 切换显隐：
+   * 屏幕 UI 包在 #gc-screen 里，打印时隐藏 #gc-screen、显示 .gc-print-root。
+   * 第 1 页是标题页（标题 + 枢纽 × 校区路线数矩阵），之后每个枢纽一页起：
+   * 色带页眉 → 枢纽指引 → 备注 → 各校区的「枢纽 → 校区」小标题 + 卡片（双列）。 */
+  function buildPrintRoot(data) {
+    var d = normalizeData(data);
+    var meta = d.meta || {};
+    var hubs = (d.hubs || []).slice().sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    var campuses = d.campuses || [];
 
+    /* 枢纽 × 校区 路线数矩阵 */
+    var counts = {};
+    (d.cards || []).forEach(function (c) {
+      if (c.kind !== "route") return;
+      counts[c.hub + "|" + c.campus] = (counts[c.hub + "|" + c.campus] || 0) + 1;
+    });
+
+    var headRow = h("tr", null, h("th", { text: "" }));
+    campuses.forEach(function (camp) {
+      headRow.appendChild(h("th", { text: camp.short || camp.label || camp.id }));
+    });
+    var tbody = h("tbody", null);
+    hubs.forEach(function (hub) {
+      var tr = h("tr", null, h("td", { class: "gc-print-matrix__hub", text: hub.name }));
+      campuses.forEach(function (camp) {
+        var n = counts[hub.id + "|" + camp.id] || 0;
+        tr.appendChild(h("td", { text: n ? String(n) : "—" }));
+      });
+      tbody.appendChild(tr);
+    });
+
+    var editionLine = [meta.edition, meta.version ? "版本 " + meta.version : "", meta.revisedAt ? "修订于 " + meta.revisedAt : ""]
+      .filter(function (s) { return s; }).join(" · ");
+
+    var root = h("div", { class: "gc-print-root" },
+      h("section", { class: "gc-print-title" },
+        h("h1", { class: "gc-print-title__t", text: meta.title || "" }),
+        meta.subtitle ? h("div", { class: "gc-print-title__s", text: meta.subtitle }) : null,
+        editionLine ? h("div", { class: "gc-print-title__e", text: editionLine }) : null,
+        h("div", { class: "gc-print-matrix__cap", text: "各枢纽前往各校区的路线方案数" }),
+        h("table", { class: "gc-print-matrix" }, h("thead", null, headRow), tbody)
+      )
+    );
+
+    hubs.forEach(function (hub) {
+      var sec = h("section", { class: "gc-print-hub" });
+      sec.appendChild(h("div", {
+        class: "gc-print-hubband", style: "background:" + (hub.color || "#465060"),
+      },
+        h("span", { class: "gc-print-hubband__n", text: hub.name }),
+        hub.note ? h("span", { class: "gc-print-hubband__note", text: hub.note }) : null
+      ));
+      sec.appendChild(renderHubGuide(hub));
+      var remark = renderRemark(hub);
+      if (remark) sec.appendChild(remark);
+
+      campuses.forEach(function (camp) {
+        var cards = (d.cards || []).filter(function (c) {
+          return c.hub === hub.id && c.campus === camp.id;
+        });
+        if (!cards.length) return;
+        sec.appendChild(h("h3", { class: "gc-print-subhead",
+          text: hub.name + " → " + (camp.label || camp.id) }));
+        var box = h("div", { class: "gc-print-cards" });
+        cards.forEach(function (c) { box.appendChild(renderCard(c, d)); });
+        sec.appendChild(box);
+      });
+      root.appendChild(sec);
+    });
+
+    return root;
+  }
+
+  /* ══════════════ 弹出详情 / 提示 ══════════════
+   * 热区链接三种去向：#card:<id> 页内滚动到那张卡片；#shumap:<id> 交给
+   * opts.onShumapLink（或 onInternalLink）处理；http(s) 新窗口打开。 */
   var popEl = null;
   function closePop() {
     if (popEl) { popEl.remove(); popEl = null; }
@@ -829,6 +757,16 @@ window.GuideRender = (function () {
         a.addEventListener("click", function (e) {
           e.preventDefault();
           closePop();
+          var mCard = l.href.match(/^#card:(.+)$/);
+          var mShu = l.href.match(/^#shumap:(.+)$/);
+          if (mCard) {
+            var target = document.getElementById("card-" + mCard[1]);
+            if (target && target.scrollIntoView) {
+              target.scrollIntoView({ behavior: "smooth", block: "start" });
+              return;
+            }
+          }
+          if (mShu && o.onShumapLink) { o.onShumapLink(mShu[1], l); return; }
           if (o.onInternalLink) o.onInternalLink(l.href, l);
           else toast("内部跳转：" + l.href);
         });
@@ -868,137 +806,18 @@ window.GuideRender = (function () {
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePop(); });
 
-  /* ══════════════ 单卡片 PNG 导出 ══════════════ */
-
-  /* 把走接口的图抓成 data URI 并缓存。
-     必须做这一步：<foreignObject> 内不会发起网络请求，外部 URL 一律画成空白。
-     缓存按 key 存，所以「批量存图」只会为同一张图抓一次。 */
-  function inlineRemoteFigure(key) {
-    if (figureCache[key]) return Promise.resolve(figureCache[key]);
-    return fetch(figureUrl(key), { credentials: "same-origin" })
-      .then(function (res) {
-        if (!res.ok) throw new Error("图示 " + key + " 取回失败（HTTP " + res.status + "）");
-        return res.blob();
-      })
-      .then(function (blob) {
-        return new Promise(function (resolve, reject) {
-          var fr = new FileReader();
-          fr.onload = function () { resolve(String(fr.result)); };
-          fr.onerror = function () { reject(new Error("图示 " + key + " 无法转成内联数据")); };
-          fr.readAsDataURL(blob);
-        });
-      })
-      .then(function (uri) { figureCache[key] = uri; return uri; });
-  }
-
-  /* 导出前的准备：把这张卡片里所有 remote=1 的图预取成 data URI。
-     没有远端图时立即 resolve，不引入额外一轮事件循环。 */
-  function prepareCardForExport(cardEl) {
-    if (!cardEl) return Promise.resolve();
-    var keys = Array.prototype.slice
-      .call(cardEl.querySelectorAll('img[data-remote="1"][data-fig-key]'))
-      .map(function (im) { return im.dataset.figKey; })
-      .filter(function (k, i, arr) { return k && arr.indexOf(k) === i; });
-    if (!keys.length) return Promise.resolve();
-    return Promise.all(keys.map(inlineRemoteFigure));
-  }
-
-  function exportCardPng(cardEl, filename, scale) {
-    /* 先把远端图内联进缓存，再走原来的同步渲染管线。
-       这样调用方仍然只看到一个 Promise，行为不变。 */
-    return prepareCardForExport(cardEl).then(function () {
-      return exportCardPngSync(cardEl, filename, scale);
-    });
-  }
-
-  function exportCardPngSync(cardEl, filename, scale) {
-    return new Promise(function (resolve, reject) {
-      if (!cardEl) return reject(new Error("找不到卡片元素"));
-      var s = scale || 2;
-      var pad = 18;
-      var w = cardEl.offsetWidth;
-      var hgt = cardEl.offsetHeight;
-      if (!w || !hgt) return reject(new Error("卡片尺寸为 0"));
-
-      var clone = cardEl.cloneNode(true);
-      clone.querySelectorAll(".gc-acts,.gc-fighint,.gc-noprint").forEach(function (n) { n.remove(); });
-      clone.querySelectorAll("[data-reveal]").forEach(function (n) { n.dataset.reveal = "0"; });
-      /* 把矢量图换回内联位图：<foreignObject> 内无法加载相对路径的外部
-         SVG 文件，不换的话导出的图里图示位置会是空白。 */
-      clone.querySelectorAll('img[data-vector="1"]').forEach(function (im) {
-        var meta = figureSize(im.dataset.figKey);
-        if (meta && meta.uri) {
-          var box = im.getBoundingClientRect();
-          im.setAttribute("src", meta.uri);
-          im.setAttribute("width", meta.w);
-          im.setAttribute("height", meta.h);
-          if (box.width) im.setAttribute("style", "width:100%;height:auto;display:block");
-        }
-      });
-      /* 走接口的图：换成 prepareCardForExport 预取好的 data URI。
-         宽高保持渲染时的实际盒子，避免导出图里比例变形。 */
-      clone.querySelectorAll('img[data-remote="1"]').forEach(function (im) {
-        var uri = figureCache[im.dataset.figKey];
-        if (!uri) return;
-        im.setAttribute("src", uri);
-        im.removeAttribute("width");
-        im.removeAttribute("height");
-        im.setAttribute("style", "width:100%;height:auto;display:block");
-      });
-      clone.removeAttribute("tabindex");
-      clone.setAttribute("style", "width:" + w + "px;box-shadow:none;margin:0");
-
-      var wrap = document.createElement("div");
-      wrap.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-      wrap.setAttribute("style",
-        "width:" + (w + pad * 2) + "px;padding:" + pad + "px;background:#f5f6f8;" +
-        "display:flex;justify-content:center;font-family:" +
-        '"PingFang SC","Hiragino Sans GB","Noto Sans SC",sans-serif');
-      var st = document.createElement("style");
-      st.textContent = window.GUIDE_CSS;
-      wrap.appendChild(st);
-      wrap.appendChild(clone);
-
-      var totalW = w + pad * 2;
-      var totalH = hgt + pad * 2;
-      var svg =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="' + totalW + '" height="' + totalH + '">' +
-        '<foreignObject width="100%" height="100%">' +
-        new XMLSerializer().serializeToString(wrap) +
-        "</foreignObject></svg>";
-
-      var img = new Image();
-      img.onload = function () {
-        var cv = document.createElement("canvas");
-        cv.width = totalW * s;
-        cv.height = totalH * s;
-        var ctx = cv.getContext("2d");
-        ctx.fillStyle = "#f5f6f8";
-        ctx.fillRect(0, 0, cv.width, cv.height);
-        ctx.setTransform(s, 0, 0, s, 0, 0);
-        ctx.drawImage(img, 0, 0);
-        try {
-          var a = document.createElement("a");
-          a.download = (filename || "guide-card") + ".png";
-          a.href = cv.toDataURL("image/png");
-          a.click();
-          resolve(true);
-        } catch (err) { reject(err); }
-      };
-      img.onerror = function () { reject(new Error("PNG 渲染失败")); };
-      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-    });
-  }
-
   return {
-    h: h, RAIL: RAIL, lineColor: lineColor, guideMark: guideMark,
-    iconList: iconList, findIcon: findIcon, renderIcon: renderIcon, lineIcon: lineIcon,
-    streetLayer: streetLayer, figureSrc: figureSrc, figureSize: figureSize,
-    renderCard: renderCard, renderRouteCard: renderRouteCard, renderFigureCard: renderFigureCard,
-    renderStepsCard: renderStepsCard,
-    renderCover: renderCover, renderFlow: renderFlow,
-    renderPicker: renderPicker, renderToc: renderToc,
-    hubList: hubList, campusList: campusList, campusLabel: campusLabel,
-    toast: toast, closePop: closePop, exportCardPng: exportCardPng,
+    h: h, esc: esc, RAIL: RAIL, HOT_REF: HOT_REF,
+    lineColor: lineColor, lineIcon: lineIcon,
+    normalizeData: normalizeData,
+    allIcons: allIcons, iconById: iconById, renderIcon: renderIcon,
+    sanitizeRichHtml: sanitizeRichHtml,
+    renderCard: renderCard, renderRouteCard: renderRouteCard,
+    renderFigureCard: renderFigureCard, renderStepsCard: renderStepsCard,
+    renderTimeline: renderTimeline,
+    renderHubGuide: renderHubGuide, renderHubVideo: renderHubVideo,
+    renderRemark: renderRemark, renderPairView: renderPairView,
+    buildPrintRoot: buildPrintRoot,
+    toast: toast, closePop: closePop, openPop: openPop,
   };
 })();

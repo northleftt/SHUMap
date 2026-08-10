@@ -63,20 +63,4 @@ window.GUIDE_ICON_SEED = [
       'stroke-linecap="round"/>' +
       "</svg>",
   },
-  {
-    id: "brand-shutf",
-    name: "SHUTF 字标",
-    group: "brand",
-    note: "出厂占位 · 建议上传官方矢量文件替换",
-    ratio: 132 / 46,
-    svg:
-      '<svg viewBox="0 0 132 46" xmlns="http://www.w3.org/2000/svg" role="img">' +
-      '<polygon points="96,3 126,3 126,30 118,22 118,14 104,14" fill="#1e80c1"/>' +
-      '<polygon points="108,26 126,8 126,30" fill="#1e80c1" opacity="0.55"/>' +
-      '<text x="2" y="40" font-family="\'Times New Roman\',Songti SC,serif" font-size="27" ' +
-      'font-weight="700" letter-spacing="0.02em" fill="#0f172a">SHUTF</text>' +
-      '<path d="M2 43.4 H128" stroke="#0f172a" stroke-width="1.4"/>' +
-      '<path d="M77 12 h13 M83.5 12 v22" stroke="#0f172a" stroke-width="2.1"/>' +
-      "</svg>",
-  },
 ];

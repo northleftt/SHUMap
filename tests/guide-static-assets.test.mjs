@@ -1,6 +1,6 @@
 // 指南静态页的引用完整性。
 //
-// 为什么要有这个测试：编辑器曾整页失效，原因不是逻辑错误而是
+// 为什么要有这个测试：编辑器曾整页失效，问题来自静态资源引用，
 // editor.html 引用了两个已被删改名的文件（guide-figures.js / guide-data.js）。
 // 更隐蔽的是 Cloudflare Assets 对未命中路径回落 SPA 的 index.html ——
 // 请求返回 200 + text/html，浏览器把 HTML 当 JS 解析报 Unexpected token '<'，

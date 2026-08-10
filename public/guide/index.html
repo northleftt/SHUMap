@@ -9,57 +9,123 @@
 <!-- 离线兜底种子：接口不可用时才用它，正式内容来自 D1 -->
 <script src="data/guide-seed.js"></script>
 <script src="assets/guide-render.js"></script>
+<style>
+/* ══════════════ 页面骨架（仅本页使用，组件样式见 guide-styles.js） ══════════════
+ * 屏幕 UI 全包在 #gc-screen 里：@media print 时 guide-styles.js 隐藏它、
+ * 显示 buildPrintRoot 生成的 .gc-print-root。 */
+#gc-screen{max-width:1180px;margin:0 auto;padding:0 20px 48px}
+
+/* ── 顶栏 ── */
+.gc-topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;
+  gap:10px 14px;flex-wrap:wrap;margin:0 -20px;padding:12px 20px;
+  background:rgba(245,246,248,.94);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line)}
+.gc-topbar__title{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
+.gc-topbar__big{font-size:20px;font-weight:700;line-height:28px;letter-spacing:-.01em}
+.gc-topbar__small{font-size:14px;font-weight:600;line-height:20px;color:var(--ink-2)}
+.gc-topbar__edition{font-size:12px;font-weight:500;line-height:17px;color:var(--sub);
+  letter-spacing:.02em}
+.gc-srcbadge{font-size:11px;font-weight:600;line-height:16px;padding:2px 9px;
+  border-radius:999px;letter-spacing:.03em;white-space:nowrap}
+.gc-srcbadge[data-tone="warn"]{color:var(--warning-ink);background:var(--warning-bg);
+  border:1px solid var(--warning-line)}
+
+.gc-btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);
+  background:var(--surface);color:var(--ink-2);font:inherit;font-size:13px;
+  font-weight:600;line-height:19px;padding:7px 14px;border-radius:var(--r-sm);
+  cursor:pointer;text-decoration:none;white-space:nowrap;
+  transition:border-color .15s ease,color .15s ease,background .15s ease}
+.gc-btn:hover{border-color:var(--primary);color:var(--primary)}
+.gc-btn--primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.gc-btn--primary:hover{background:var(--primary-pressed);border-color:var(--primary-pressed);
+  color:#fff}
+
+/* ── 出发 × 到达 选择器 ── */
+.gc-picker{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;
+  margin:20px 0 8px}
+.gc-pick-col{min-width:0}
+.gc-pick-col__label{font-size:13px;font-weight:600;line-height:19px;color:var(--sub);
+  letter-spacing:.06em;margin-bottom:8px}
+.gc-pick-list{display:flex;flex-direction:column;gap:8px}
+.gc-pick-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+  font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:11px 14px;cursor:pointer;
+  box-shadow:var(--shadow-card);
+  transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
+.gc-pick-item:hover{border-color:var(--primary)}
+.gc-pick-item.is-active{border-color:var(--primary);background:var(--primary-container)}
+.gc-pick-item:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.gc-pick-item:disabled:hover{border-color:var(--line)}
+.gc-pick-dot{flex:none;width:12px;height:12px;border-radius:50%}
+.gc-pick-main{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
+.gc-pick-name{font-size:15px;font-weight:600;line-height:22px}
+.gc-pick-note{font-size:12px;font-weight:500;line-height:17px;color:var(--sub)}
+.gc-pick-count{flex:none;margin-left:auto;font-size:12px;font-weight:600;line-height:17px;
+  color:var(--sub);background:var(--chip);padding:2px 9px;border-radius:999px;
+  font-variant-numeric:tabular-nums}
+
+/* ── 出行方式筛选 chips（当前组合 >1 种方式时才出现） ── */
+.gc-modebar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
+.gc-modebar__label{font-size:12px;font-weight:500;line-height:17px;color:var(--sub);
+  letter-spacing:.04em}
+.gc-chip{font:inherit;font-size:13px;font-weight:600;line-height:19px;padding:5px 14px;
+  border-radius:999px;border:1px solid var(--line);background:var(--surface);
+  color:var(--ink-2);cursor:pointer;
+  transition:border-color .15s ease,background .15s ease,color .15s ease}
+.gc-chip:hover{border-color:var(--primary)}
+.gc-chip.is-on{background:var(--primary);border-color:var(--primary);color:#fff}
+
+/* ── 结果区与页脚 ── */
+.gc-result{min-height:200px}
+.gc-foot{margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
+  font-size:12px;line-height:18px;color:var(--faint);text-align:center;
+  letter-spacing:.02em}
+
+/* ── 窄屏：选择器堆叠，顶栏收紧 ── */
+@media screen and (max-width:720px){
+  .gc-picker{grid-template-columns:minmax(0,1fr)}
+  .gc-topbar__big{font-size:17px;line-height:24px}
+  .gc-topbar__small{font-size:13px}
+}
+</style>
 </head>
 <body>
 
-<div class="gc-chrome gc-noprint" data-od-id="viewer-chrome">
-  <div class="gc-chrome__row">
-    <button type="button" class="gc-btn gc-btn--icon" id="btn-toc" aria-expanded="false"
-            aria-controls="tocwrap" title="打开目录">☰ 目录</button>
-    <div class="gc-brand">返校指南 <span id="edition"></span></div>
+<!-- 屏幕 UI：打印时整体隐藏（guide-styles.js 的 @media print 规则） -->
+<div id="gc-screen">
+  <header class="gc-topbar">
+    <div class="gc-topbar__title">
+      <span class="gc-topbar__big" id="meta-title">上海大学</span>
+      <span class="gc-topbar__small" id="meta-subtitle">新生入校交通指南</span>
+    </div>
+    <span class="gc-topbar__edition" id="edition"></span>
     <span class="gc-srcbadge" id="src-badge" hidden></span>
     <span class="gc-spacer"></span>
-    <!-- 手机上次级操作收进 ⚙，桌面展开在顶栏里（见 guide-styles.js 的 .gc-chrome__tools） -->
-    <button type="button" class="gc-btn gc-btn--icon gc-btn--tools" id="btn-tools"
-            aria-expanded="false" aria-controls="chrome-tools" title="筛选与工具">⚙</button>
-    <div class="gc-chrome__tools" id="chrome-tools">
-      <div class="gc-seg" role="group" aria-label="出行方式筛选" id="filter-seg"></div>
-      <button type="button" class="gc-btn" id="btn-cols" aria-pressed="false">单列</button>
-      <button type="button" class="gc-btn" id="btn-reveal" aria-pressed="false">显示可点位置</button>
-      <button type="button" class="gc-btn" id="btn-png">批量存图</button>
-      <button type="button" class="gc-btn gc-btn--primary" id="btn-pdf">导出 PDF</button>
-      <a class="gc-btn" href="editor.html">打开编辑器</a>
-    </div>
-  </div>
+    <button type="button" class="gc-btn gc-btn--primary" id="btn-pdf">导出 PDF</button>
+    <a class="gc-btn" href="editor.html">打开编辑器</a>
+  </header>
 
-  <!-- 二维 Tab：第一排选出发枢纽，第二排选到达校区。
-       两排是「与」关系，交集为空时卡片流会给出空态提示。 -->
-  <div class="gc-dims" id="dims">
-    <div class="gc-dim">
-      <span class="gc-dim__l">出发</span>
-      <div class="gc-dim__row" role="tablist" aria-label="出发枢纽" id="dim-hub"></div>
-    </div>
-    <div class="gc-dim">
-      <span class="gc-dim__l">到达</span>
-      <div class="gc-dim__row" role="tablist" aria-label="到达校区" id="dim-campus"></div>
-    </div>
-  </div>
+  <main>
+    <!-- 核心交互：左边选出发枢纽，右边选到达校区（只列当前枢纽有卡的校区） -->
+    <section class="gc-picker" aria-label="选择出发枢纽与到达校区">
+      <div class="gc-pick-col">
+        <div class="gc-pick-col__label">出发</div>
+        <div class="gc-pick-list" id="pick-hub" role="group" aria-label="出发枢纽"></div>
+      </div>
+      <div class="gc-pick-col">
+        <div class="gc-pick-col__label">到达</div>
+        <div class="gc-pick-list" id="pick-campus" role="group" aria-label="到达校区"></div>
+      </div>
+    </section>
+
+    <!-- 出行方式筛选：chips 由当前组合的路线卡动态生成 -->
+    <div class="gc-modebar" id="mode-bar" hidden></div>
+
+    <div class="gc-result" id="result"></div>
+  </main>
+
+  <footer class="gc-foot" id="foot" hidden></footer>
 </div>
-
-<!-- 目录抽屉 -->
-<div class="gc-tocwrap gc-noprint" id="tocwrap" data-open="0">
-  <div class="gc-tocwrap__veil" id="toc-veil"></div>
-  <aside class="gc-tocpanel" role="dialog" aria-modal="true" aria-label="指南目录">
-    <div class="gc-tocpanel__h">
-      <span class="gc-tocpanel__t">目录</span>
-      <span class="gc-spacer"></span>
-      <button type="button" class="gc-act" id="toc-close" aria-label="关闭目录">✕</button>
-    </div>
-    <div id="toc-host" style="display:flex;flex:1;min-height:0"></div>
-  </aside>
-</div>
-
-<main id="stage"></main>
 
 <script>
 /*
@@ -68,7 +134,8 @@
  * 内容来自 GET /api/public/guide/:slug（D1 里已审核通过并发布的那一版）。
  * 取不到时回落到 data/guide-seed.js —— 那是随页面打包的出厂稿，用于
  * 后端不可用、离线校对、以及本地直接打开文件的场景。回落时在顶栏标出来，
- * 免得看到旧数据却以为是线上内容。
+ * 免得看到旧数据却以为是线上内容。无论哪条路径，数据都先过 normalizeData
+ * 再使用（线上可能还躺着 v1 旧修订）。
  */
 (function () {
   "use strict";
@@ -78,34 +145,25 @@
     return m ? m[1] : 'freshman-transit';
   })();
 
-  var stage = document.getElementById('stage');
-  var chrome = document.querySelector('.gc-chrome');
+  var resultEl = document.getElementById('result');
+  var modeBar = document.getElementById('mode-bar');
+  var hubListEl = document.getElementById('pick-hub');
+  var campusListEl = document.getElementById('pick-campus');
 
   function setStatus(text, tone) {
     var el = document.getElementById('src-badge');
-    if (!el) return;
     el.textContent = text || '';
     el.dataset.tone = tone || '';
     el.hidden = !text;
   }
 
   function splash(text) {
-    stage.textContent = '';
-    stage.appendChild(R.h('div', {
-      class: 'gc-empty', style: 'margin:24px auto;max-width:780px', text: text,
-    }));
+    modeBar.hidden = true;
+    resultEl.textContent = '';
+    resultEl.appendChild(R.h('div', { class: 'gc-empty', text: text }));
   }
 
   splash('正在载入指南内容…');
-
-  /* 手机顶栏的 ⚙ 开关：桌面 CSS 让容器 display:contents，这个状态不起作用 */
-  var toolsBtn = document.getElementById('btn-tools');
-  var toolsRow = document.getElementById('chrome-tools');
-  toolsBtn.addEventListener('click', function () {
-    var open = toolsRow.dataset.open === '1';
-    toolsRow.dataset.open = open ? '0' : '1';
-    toolsBtn.setAttribute('aria-expanded', String(!open));
-  });
 
   fetch('/api/public/guide/' + encodeURIComponent(SLUG), { credentials: 'same-origin' })
     .then(function (res) {
@@ -115,332 +173,242 @@
     .then(function (payload) {
       if (!payload || !payload.content || !payload.content.cards) throw new Error('内容为空');
       setStatus('', '');
-      boot(payload.content, { edition: payload.edition, revisionNo: payload.revisionNo });
+      boot(payload.content, { edition: payload.edition });
     })
     .catch(function (err) {
       var seed = window.GUIDE_DATA;
       if (!seed || !seed.cards) return splash('无法载入指南内容：' + err.message);
       setStatus('离线稿', 'warn');
-      boot(seed, { edition: seed.meta && seed.meta.edition, offline: true });
+      boot(seed, {});
     });
 
-function boot(D, info) {
-  document.getElementById('edition').textContent =
-    (info && info.edition) || (D.meta && D.meta.edition) || '';
+  /* ── 页面状态 ── */
+  var D = null;            /* normalizeData 之后的 v2 数据 */
+  var printRoot = null;    /* buildPrintRoot 生成的离屏打印树，只 append 一次 */
+  var state = { hub: '', campus: '', modesOff: {} };  /* modesOff：被关掉的出行方式 */
 
-  /* localStorage 在 file:// 或沙箱预览里可能抛 SecurityError，包一层兜底 */
-  var LS = {
-    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
-    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
-  };
+  function boot(raw, info) {
+    D = R.normalizeData(raw);
+    if (!D || !(D.cards || []).length) return splash('指南数据为空或格式不正确');
 
-  /* 「不筛选」的哨兵值用 *，不能用 all —— 数据里真有一个 campus:"all"
-     （松江与附表那种不分校区的整页）。两者同名时，两个 Tab 会同时高亮，
-     且点「各校区通用」会变成「显示全部」。 */
-  var ANY = '*';
-  function normDim(v) { return (v === 'all' || !v) ? ANY : v; }
+    var meta = D.meta || {};
+    document.getElementById('meta-title').textContent = meta.title || '上海大学';
+    document.getElementById('meta-subtitle').textContent = meta.subtitle || '';
+    document.getElementById('edition').textContent =
+      (info && info.edition) || meta.edition || '';
 
-  var state = {
-    hub: normDim(LS.get('shu-guide-hub')),
-    campus: normDim(LS.get('shu-guide-campus')),
-    filter: LS.get('shu-guide-filter') || 'all',
-    /* 双列是默认版式；窄屏由 CSS 压回单列，这里只记大屏上的手动选择 */
-    columns: LS.get('shu-guide-cols') === '1' ? 1 : 2,
-    reveal: false
-  };
+    /* 页脚版本行：有数据才显示 */
+    var footBits = [];
+    if (meta.version) footBits.push('版本 ' + meta.version);
+    if (meta.revisedAt) footBits.push('修订于 ' + meta.revisedAt);
+    var foot = document.getElementById('foot');
+    foot.textContent = footBits.join(' · ');
+    foot.hidden = !footBits.length;
 
-  /* ── 内部链接分流 ────────────────────────────────────
-     #card: 是数据里用得最多的一种（图示热区跳到对应路线卡），
-     之前没有分支、全落到兜底 toast，等于点了没反应。 */
-  var opts = {
-    onNavigate: jumpToGroup,
-    onInternalLink: function (href) {
-      var m;
-      if ((m = /^#card:(.+)$/.exec(href))) {
-        var card = (D.cards || []).filter(function (c) { return c.id === m[1]; })[0];
-        if (!card) return R.toast('未找到卡片：' + m[1]);
-        /* 卡片可能被当前筛选挡住，先把筛选放开再定位 */
-        return revealCard(card);
-      }
-      if ((m = /^#group:(.+)$/.exec(href))) {
-        if ((D.groups || []).some(function (g) { return g.id === m[1]; })) return jumpToGroup(m[1]);
-        return R.toast('该卡片组数据尚未录入：' + m[1]);
-      }
-      if ((m = /^#figure:(.+)$/.exec(href))) {
-        var fc = (D.cards || []).filter(function (c) { return c.figure === m[1]; })[0];
-        if (fc) return revealCard(fc);
-        return R.toast('未找到图示：' + m[1]);
-      }
-      if (/^#shumap:/.test(href)) return R.toast('将深链到 SHUMap 地图页（接入后生效）');
-      if (/^#wechat:/.test(href)) return R.toast('微信公众号购票入口（接入后生效）');
-      R.toast('内部链接：' + href);
-    }
-  };
+    /* 打印树随数据（重新）加载而刷新；屏幕/打印切换纯 CSS，无需打印前再动它 */
+    if (printRoot) printRoot.remove();
+    printRoot = R.buildPrintRoot(D);
+    document.body.appendChild(printRoot);
 
-  /* ── 渲染 ─────────────────────────────────────────── */
-  function render() {
-    R.closePop();
-    stage.textContent = '';
-    opts.filter = state.filter;
-    opts.hub = state.hub;
-    opts.campus = state.campus;
-    opts.columns = state.columns;
-    stage.appendChild(R.renderFlow(D, opts));
-    stage.querySelectorAll('[data-reveal]').forEach(function (w) {
-      w.dataset.reveal = state.reveal ? '1' : '0';
+    var hubs = sortedHubs();
+    if (!hubs.length) return splash('暂无枢纽数据');
+
+    /* 深链 #h=<hubId>&c=<campusId>：无效项回落到默认（首个枢纽 × 首个有卡校区） */
+    var fromHash = parseHash();
+    state.hub = (fromHash.h && hubById(fromHash.h)) ? fromHash.h : hubs[0].id;
+    state.campus = validCampus(state.hub, fromHash.c);
+    state.modesOff = {};
+
+    buildHubList(hubs);
+    buildCampusList();
+    syncPicker();
+    render();
+    updateHash();
+  }
+
+  /* ── 数据查询 ── */
+  function sortedHubs() {
+    return (D.hubs || []).slice().sort(function (a, b) {
+      return (a.order || 0) - (b.order || 0);
     });
-    syncCurrent();
+  }
+  function hubById(id) {
+    var list = D.hubs || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+  function campusById(id) {
+    var list = D.campuses || [];
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+  function cardCount(hubId, campusId) {
+    var n = 0;
+    (D.cards || []).forEach(function (c) {
+      if (c.hub === hubId && c.campus === campusId) n++;
+    });
+    return n;
+  }
+  /* 校区 id 必须在数据里且当前枢纽下有卡，否则回落到第一个有卡校区 */
+  function validCampus(hubId, campusId) {
+    if (campusId && campusById(campusId) && cardCount(hubId, campusId) > 0) return campusId;
+    var list = D.campuses || [];
+    for (var i = 0; i < list.length; i++)
+      if (cardCount(hubId, list[i].id) > 0) return list[i].id;
+    return list.length ? list[0].id : '';
   }
 
-  function chromeH() {
-    var el = document.querySelector('.gc-chrome');
-    return el ? el.offsetHeight : 0;
+  var MODE_LABEL = { metro: '地铁', bus: '公交', maglev: '磁浮', airport: '市域线',
+                     rail: '铁路', mixed: '联程', other: '其他' };
+  /* 当前组合的路线卡里真实出现的出行方式（按卡片顺序去重） */
+  function modesFor(hubId, campusId) {
+    var seen = {}, out = [];
+    (D.cards || []).forEach(function (c) {
+      if (c.hub !== hubId || c.campus !== campusId || c.kind !== 'route' || !c.mode) return;
+      if (seen[c.mode]) return;
+      seen[c.mode] = 1;
+      out.push({ mode: c.mode, label: c.modeLabel || MODE_LABEL[c.mode] || c.mode });
+    });
+    return out;
   }
 
-  /* 用 offsetTop 手动滚动，不用 scrollIntoView（会破坏嵌入式预览） */
-  function scrollToEl(el) {
-    window.scrollTo({ top: Math.max(0, el.offsetTop - chromeH() - 12), behavior: 'smooth' });
+  /* ── 选择器 ── */
+  function buildHubList(hubs) {
+    hubListEl.textContent = '';
+    hubs.forEach(function (hub) {
+      var b = R.h('button', { class: 'gc-pick-item', type: 'button', dataset: { id: hub.id } },
+        R.h('span', { class: 'gc-pick-dot', style: 'background:' + (hub.color || '#465060') }),
+        R.h('span', { class: 'gc-pick-main' },
+          R.h('span', { class: 'gc-pick-name', text: hub.name }),
+          hub.note ? R.h('span', { class: 'gc-pick-note', text: hub.note }) : null
+        )
+      );
+      b.addEventListener('click', function () { pickHub(hub.id); });
+      hubListEl.appendChild(b);
+    });
   }
 
-  function jumpToGroup(groupId) {
-    var g = (D.groups || []).filter(function (x) { return x.id === groupId; })[0];
-    if (!g) return R.toast('未找到卡片组');
-    /* 目标分组被当前 Tab 挡住时，自动把 Tab 切到能看见它的位置 ——
-       否则点了目录却停在空态页上，看起来像没反应。 */
-    var need = false;
-    if (state.hub !== ANY && g.hub !== state.hub) { state.hub = g.hub; need = true; }
-    if (state.campus !== ANY && g.campus !== state.campus) { state.campus = g.campus; need = true; }
-    if (need) { persistDims(); syncDims(); render(); }
-
-    var el = document.getElementById('group-' + groupId);
-    if (!el) return R.toast('该卡片组在当前筛选下没有卡片');
-    scrollToEl(el);
-    location.hash = groupId;
-    syncCurrent(groupId);
+  function buildCampusList() {
+    campusListEl.textContent = '';
+    (D.campuses || []).forEach(function (camp) {
+      var n = cardCount(state.hub, camp.id);
+      var b = R.h('button', {
+        class: 'gc-pick-item', type: 'button',
+        dataset: { id: camp.id }, disabled: n === 0,
+      },
+        R.h('span', { class: 'gc-pick-main' },
+          R.h('span', { class: 'gc-pick-name', text: camp.label || camp.id })),
+        R.h('span', { class: 'gc-pick-count', text: n > 0 ? String(n) : '暂无' })
+      );
+      if (n > 0) b.addEventListener('click', function () { pickCampus(camp.id); });
+      campusListEl.appendChild(b);
+    });
   }
 
-  function revealCard(card) {
-    /* 卡片所在分组可能不在当前 Tab / 出行方式筛选内，逐个放开 */
-    var g = (D.groups || []).filter(function (x) { return x.id === card.group; })[0];
-    var need = false;
-    if (g) {
-      if (state.hub !== ANY && g.hub !== state.hub) { state.hub = g.hub; need = true; }
-      if (state.campus !== ANY && g.campus !== state.campus) { state.campus = g.campus; need = true; }
-    }
-    if (state.filter !== 'all' && card.kind === 'route' && card.mode !== state.filter) {
-      state.filter = 'all'; need = true;
-    }
-    if (need) {
-      persistDims(); LS.set('shu-guide-filter', state.filter);
-      syncDims(); syncFilter(); render();
-    }
-    var el = stage.querySelector('[data-card-id="' + card.id + '"]');
-    if (!el) return R.toast('未找到卡片');
-    scrollToEl(el);
-    el.style.transition = 'box-shadow .2s';
-    el.style.boxShadow = '0 0 0 3px var(--primary)';
-    setTimeout(function () { el.style.boxShadow = ''; }, 1500);
+  function syncPicker() {
+    hubListEl.querySelectorAll('.gc-pick-item').forEach(function (b) {
+      var on = b.dataset.id === state.hub;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    campusListEl.querySelectorAll('.gc-pick-item').forEach(function (b) {
+      var on = b.dataset.id === state.campus;
+      b.classList.toggle('is-active', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
   }
-
-  /* ── 二维 Tab ─────────────────────────────────────── */
-  function tabButton(row, id, label, onPick) {
-    var b = document.createElement('button');
-    b.className = 'gc-tab';
-    b.type = 'button';
-    b.setAttribute('role', 'tab');
-    b.dataset.value = id;
-    b.textContent = label;
-    b.addEventListener('click', onPick);
-    row.appendChild(b);
-    return b;
-  }
-
-  var hubRow = document.getElementById('dim-hub');
-  var campusRow = document.getElementById('dim-campus');
-
-  tabButton(hubRow, ANY, '全部枢纽', function () { pickHub(ANY); });
-  R.hubList(D).forEach(function (hub) {
-    tabButton(hubRow, hub.id, hub.label, function () { pickHub(hub.id); });
-  });
-
-  tabButton(campusRow, ANY, '全部', function () { pickCampus(ANY); });
-  R.campusList(D).forEach(function (c) {
-    tabButton(campusRow, c.id, c.label, function () { pickCampus(c.id); });
-  });
 
   function pickHub(id) {
-    state.hub = id; persistDims(); syncDims(); render();
+    if (state.hub === id) return;
+    state.hub = id;
+    if (cardCount(id, state.campus) === 0) state.campus = validCampus(id, null);
+    state.modesOff = {};
+    buildCampusList();
+    syncPicker();
+    render();
+    updateHash();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   function pickCampus(id) {
-    state.campus = id; persistDims(); syncDims(); render();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-  function persistDims() {
-    LS.set('shu-guide-hub', state.hub);
-    LS.set('shu-guide-campus', state.campus);
-  }
-  function syncDims() {
-    hubRow.querySelectorAll('.gc-tab').forEach(function (b) {
-      b.setAttribute('aria-selected', b.dataset.value === state.hub ? 'true' : 'false');
-    });
-    campusRow.querySelectorAll('.gc-tab').forEach(function (b) {
-      b.setAttribute('aria-selected', b.dataset.value === state.campus ? 'true' : 'false');
-    });
-  }
-
-  /* ── 出行方式筛选：按数据里真实出现的 mode 生成 ────────── */
-  var MODE_LABEL = { metro: '地铁', bus: '公交', maglev: '磁浮', airport: '市域线', rail: '铁路' };
-  var seg = document.getElementById('filter-seg');
-  (function buildFilter() {
-    var seen = {}, modes = [];
-    (D.cards || []).forEach(function (c) {
-      if (c.kind !== 'route' || !c.mode || seen[c.mode]) return;
-      seen[c.mode] = 1; modes.push(c.mode);
-    });
-    var mk = function (v, label) {
-      var b = document.createElement('button');
-      b.type = 'button'; b.dataset.filter = v; b.textContent = label;
-      b.addEventListener('click', function () {
-        state.filter = v; LS.set('shu-guide-filter', v);
-        syncFilter(); render();
-      });
-      seg.appendChild(b);
-    };
-    mk('all', '全部');
-    modes.forEach(function (m) { mk(m, MODE_LABEL[m] || m); });
-  })();
-  function syncFilter() {
-    seg.querySelectorAll('[data-filter]').forEach(function (x) {
-      x.setAttribute('aria-pressed', x.dataset.filter === state.filter ? 'true' : 'false');
-    });
-  }
-
-  /* ── 目录抽屉 ─────────────────────────────────────── */
-  var tocWrap = document.getElementById('tocwrap');
-  var tocHost = document.getElementById('toc-host');
-  var tocBtn = document.getElementById('btn-toc');
-
-  function buildToc() {
-    tocHost.textContent = '';
-    tocHost.appendChild(R.renderToc(D, {
-      onNavigate: jumpToGroup,
-      onPicked: function () { closeToc(); }
-    }));
-    syncCurrent();
-  }
-  function openToc() {
-    tocWrap.dataset.open = '1';
-    tocBtn.setAttribute('aria-expanded', 'true');
-    buildToc();
-  }
-  function closeToc() {
-    tocWrap.dataset.open = '0';
-    tocBtn.setAttribute('aria-expanded', 'false');
-  }
-  tocBtn.addEventListener('click', function () {
-    tocWrap.dataset.open === '1' ? closeToc() : openToc();
-  });
-  document.getElementById('toc-veil').addEventListener('click', closeToc);
-  document.getElementById('toc-close').addEventListener('click', closeToc);
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && tocWrap.dataset.open === '1') closeToc();
-  });
-
-  /* 当前所在分组：滚动时找出视口顶部最近的一个分组，
-     同步给目录高亮。用 rAF 节流，避免滚动时反复布局。 */
-  function currentGroupId() {
-    var secs = stage.querySelectorAll('.gc-group[id]');
-    var line = window.scrollY + chromeH() + 24;
-    var id = '';
-    for (var i = 0; i < secs.length; i++) {
-      if (secs[i].offsetTop <= line) id = secs[i].dataset.groupId;
-      else break;
-    }
-    if (!id && secs.length) id = secs[0].dataset.groupId;
-    return id;
-  }
-  function syncCurrent(forceId) {
-    var id = forceId || currentGroupId();
-    tocHost.querySelectorAll('.gc-toc__item').forEach(function (b) {
-      b.setAttribute('aria-current', b.dataset.groupId === id ? 'true' : 'false');
-    });
-  }
-  var ticking = false;
-  window.addEventListener('scroll', function () {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(function () { ticking = false; syncCurrent(); });
-  }, { passive: true });
-
-  /* ── 列数切换（只影响大屏；窄屏由 CSS 压回单列） ────────── */
-  var colsBtn = document.getElementById('btn-cols');
-  function syncCols() {
-    var one = state.columns === 1;
-    colsBtn.setAttribute('aria-pressed', one ? 'true' : 'false');
-    colsBtn.textContent = one ? '双列' : '单列';
-    colsBtn.title = one ? '切换为双列（大屏）' : '切换为单列';
-  }
-  colsBtn.addEventListener('click', function () {
-    state.columns = state.columns === 1 ? 2 : 1;
-    LS.set('shu-guide-cols', String(state.columns));
-    syncCols(); render();
-  });
-
-  /* ── 热区显隐 ─────────────────────────────────────── */
-  document.getElementById('btn-reveal').addEventListener('click', function () {
-    state.reveal = !state.reveal;
-    this.setAttribute('aria-pressed', state.reveal ? 'true' : 'false');
-    this.textContent = state.reveal ? '隐藏可点位置' : '显示可点位置';
-    stage.querySelectorAll('[data-reveal]').forEach(function (w) {
-      w.dataset.reveal = state.reveal ? '1' : '0';
-    });
-  });
-
-  /* ── 导出 ─────────────────────────────────────────
-     PDF 保持原稿版式：目录在首页，之后按原稿页序双列排。
-     所以导出前把筛选临时放开，导完再恢复用户的浏览状态。 */
-  document.getElementById('btn-pdf').addEventListener('click', function () {
-    var keep = { hub: state.hub, campus: state.campus, filter: state.filter, columns: state.columns };
-    state.hub = ANY; state.campus = ANY; state.filter = 'all'; state.columns = 2;
+    if (state.campus === id) return;
+    state.campus = id;
+    state.modesOff = {};
+    syncPicker();
     render();
-    R.toast('在打印对话框中选择「另存为 PDF」，导出为原稿版式');
-    setTimeout(function () {
-      window.print();
-      state.hub = keep.hub; state.campus = keep.campus;
-      state.filter = keep.filter; state.columns = keep.columns;
-      syncDims(); syncFilter(); syncCols(); render();
-    }, 420);
-  });
-
-  document.getElementById('btn-png').addEventListener('click', function () {
-    var cards = Array.prototype.slice.call(
-      stage.querySelectorAll('.gc-card[data-card-id],.gc-figcard[data-card-id]'));
-    if (!cards.length) return R.toast('当前没有可导出的卡片');
-    R.toast('开始导出 ' + cards.length + ' 张卡片，浏览器会逐个下载');
-    var i = 0;
-    (function next() {
-      if (i >= cards.length) return R.toast('已导出 ' + cards.length + ' 张卡片');
-      var el = cards[i], id = el.dataset.cardId;
-      i++;
-      R.exportCardPng(el, 'shu-guide-' + id, 2)
-        .catch(function (err) { R.toast('「' + id + '」导出失败：' + err.message); })
-        .then(function () { setTimeout(next, 420); });
-    })();
-  });
-
-  syncDims();
-  syncFilter();
-  syncCols();
-  render();
-
-  /* hash 深链：分享单个卡片组的链接 */
-  if (location.hash) {
-    var id = decodeURIComponent(location.hash.slice(1));
-    if ((D.groups || []).some(function (g) { return g.id === id; }))
-      setTimeout(function () { jumpToGroup(id); }, 60);
+    updateHash();
   }
-}
+
+  /* ── 出行方式筛选：>1 种方式才显示；全部默认开，可多点切换 ── */
+  function syncModeBar(modes) {
+    modeBar.textContent = '';
+    if (modes.length <= 1) { modeBar.hidden = true; return; }
+    modeBar.hidden = false;
+    modeBar.appendChild(R.h('span', { class: 'gc-modebar__label', text: '出行方式' }));
+    modes.forEach(function (m) {
+      var on = !state.modesOff[m.mode];
+      var b = R.h('button', {
+        class: 'gc-chip' + (on ? ' is-on' : ''), type: 'button',
+        'aria-pressed': String(on), text: m.label,
+      });
+      b.addEventListener('click', function () {
+        if (state.modesOff[m.mode]) delete state.modesOff[m.mode];
+        else state.modesOff[m.mode] = 1;
+        render();
+      });
+      modeBar.appendChild(b);
+    });
+  }
+
+  /* ── 渲染：筛选 chips + 组合页（卡片栅格 / 枢纽指引 / 实况指引 / 备注） ── */
+  function render() {
+    var modes = modesFor(state.hub, state.campus);
+    /* 掉出当前组合的方式清掉开关记录，免得状态越积越脏 */
+    var off = {};
+    modes.forEach(function (m) { if (state.modesOff[m.mode]) off[m.mode] = 1; });
+    state.modesOff = off;
+    syncModeBar(modes);
+
+    var filter = null;
+    if (modes.length > 1) {
+      filter = modes.filter(function (m) { return !state.modesOff[m.mode]; })
+        .map(function (m) { return m.mode; });
+    }
+    R.renderPairView(resultEl, D, state.hub, state.campus, {
+      modeFilter: filter,
+      onInternalLink: onInternalLink,
+    });
+  }
+
+  /* 热区弹层里的内部链接：#card: 由渲染层自己滚动定位，其余在这里兜底 */
+  function onInternalLink(href) {
+    if (/^#shumap:/.test(href)) return R.toast('将深链到 SHUMap 地图页（接入后生效）');
+    if (/^#wechat:/.test(href)) return R.toast('微信公众号购票入口（接入后生效）');
+    R.toast('内部链接：' + href);
+  }
+
+  /* ── 深链 ── */
+  function parseHash() {
+    var out = { h: null, c: null };
+    var q = location.hash.replace(/^#/, '');
+    if (!q) return out;
+    q.split('&').forEach(function (kv) {
+      var m = /^([hc])=(.+)$/.exec(kv);
+      if (m) out[m[1]] = decodeURIComponent(m[2]);
+    });
+    return out;
+  }
+  function updateHash() {
+    try {
+      history.replaceState(null, '', '#h=' + encodeURIComponent(state.hub) +
+        '&c=' + encodeURIComponent(state.campus));
+    } catch (e) { /* file:// 等场景 replaceState 可能受限，忽略 */ }
+  }
+
+  /* ── 导出 PDF：打印输出完全来自 buildPrintRoot 的离屏树，直接调起打印 ── */
+  document.getElementById('btn-pdf').addEventListener('click', function () {
+    R.toast('在打印对话框中选择「另存为 PDF」');
+    setTimeout(function () { window.print(); }, 250);
+  });
 })();
 </script>
 </body>
