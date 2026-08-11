@@ -77,16 +77,63 @@ window.GuideRender = (function () {
     return map[key] || key;
   }
 
-  /* ══════════════ 数据规范化（v1 → v2） ══════════════
-   * D1 里可能还躺着一条旧版已发布修订。v1 特征：顶层有 cover / groups，
-   * 卡片用 group 挂分段、hub 是 {name,note} 对象。这里就地升级：
-   *   cover.hubs → 顶层 hubs（order = 下标 + 1，媒体/备注字段置空）
-   *   card.group → 经 groups 反查 hub / campus 两个 id
-   *   card.hub 对象 → 改名 origin
-   * 已是 v2（schema === 2）或不认识的数据原样返回。 */
+  /* ══════════════ 数据规范化 ══════════════
+   * 两种历史形态都要就地升级：
+   *   v1：顶层有 cover / groups，卡片用 group 挂分段、hub 是 {name,note} 对象
+   *   中间形态 v2：schema 已是 2，但实景指引/换乘指南还是独立的 steps 卡
+   *     （sceneGuide 改造前保存的草稿就是这种）—— steps 卡摘进 hub.sceneGuide
+   * 已经是当前形态（无 steps 卡的 v2）或不认识的数据原样返回。 */
   function normalizeData(raw) {
-    if (!raw || raw.schema === 2) return raw;
-    if (!raw.cover && !raw.groups) return raw;
+    if (!raw) return raw;
+    var d;
+    if (raw.schema === 2) {
+      d = raw;
+    } else if (raw.cover || raw.groups) {
+      d = upgradeV1(raw);
+    } else {
+      return raw;
+    }
+    return liftSceneGuides(d);
+  }
+
+  /* steps 卡 → hub.sceneGuide。非破坏：没有 steps 卡时原样返回输入。 */
+  function liftSceneGuides(d) {
+    var cards = d.cards || [];
+    if (!cards.some(function (c) { return c.kind === "steps"; })) return d;
+
+    var hubs = (d.hubs || []).map(function (hb) {
+      var out = {};
+      for (var k in hb) out[k] = hb[k];
+      /* 已有 sceneGuide 又混着 steps 卡的中间数据：深拷贝再合并，不改输入对象 */
+      if (out.sceneGuide) out.sceneGuide = JSON.parse(JSON.stringify(out.sceneGuide));
+      else out.sceneGuide = null;
+      return out;
+    });
+    var keptCards = [];
+    cards.forEach(function (c) {
+      if (c.kind !== "steps") { keptCards.push(c); return; }
+      var hub = null;
+      for (var i = 0; i < hubs.length; i++) if (hubs[i].id === c.hub) { hub = hubs[i]; break; }
+      if (!hub) { keptCards.push(c); return; }   // 找不到枢纽就不丢数据
+      if (!hub.sceneGuide) hub.sceneGuide = {};
+      if (c.intro) hub.sceneGuide.intro = hub.sceneGuide.intro ? hub.sceneGuide.intro + "\n" + c.intro : c.intro;
+      hub.sceneGuide.sections = (hub.sceneGuide.sections || []).concat(c.sections || []);
+      if (c.pending) hub.sceneGuide.pending = c.pending;
+    });
+    var campuses = (d.campuses || []).filter(function (camp) {
+      return camp.id !== "scene" || keptCards.some(function (c) { return c.campus === "scene"; });
+    });
+
+    var out = {};
+    for (var k in d) out[k] = d[k];
+    out.schema = 2;
+    out.hubs = hubs;
+    out.campuses = campuses;
+    out.cards = keptCards;
+    return out;
+  }
+
+  function upgradeV1(raw) {
     var groups = raw.groups || [];
     var meta = raw.meta || {};
 
@@ -113,23 +160,6 @@ window.GuideRender = (function () {
       return out;
     });
 
-    /* 实景指引 / 换乘指南的 steps 卡属于枢纽本身：摘进 hub.sceneGuide，
-       不再作为独立卡片；「实景指引」校区随之失去卡片，一并移除。 */
-    var keptCards = [];
-    cards.forEach(function (c) {
-      if (c.kind !== "steps") { keptCards.push(c); return; }
-      var hub = null;
-      for (var i = 0; i < hubs.length; i++) if (hubs[i].id === c.hub) { hub = hubs[i]; break; }
-      if (!hub) { keptCards.push(c); return; }   // 找不到枢纽就不丢数据
-      if (!hub.sceneGuide) hub.sceneGuide = {};
-      if (c.intro) hub.sceneGuide.intro = hub.sceneGuide.intro ? hub.sceneGuide.intro + "\n" + c.intro : c.intro;
-      hub.sceneGuide.sections = (hub.sceneGuide.sections || []).concat(c.sections || []);
-      if (c.pending) hub.sceneGuide.pending = c.pending;
-    });
-    var campuses = (raw.campuses || []).filter(function (camp) {
-      return camp.id !== "scene" || keptCards.some(function (c) { return c.campus === "scene"; });
-    });
-
     return {
       schema: 2,
       meta: {
@@ -138,10 +168,10 @@ window.GuideRender = (function () {
         revisedAt: meta.revisedAt || "", revisionNote: meta.revisionNote || "",
       },
       lineColors: raw.lineColors || {},
-      campuses: campuses,
+      campuses: raw.campuses || [],
       hubs: hubs,
       icons: raw.icons,
-      cards: keptCards,
+      cards: cards,
     };
   }
 

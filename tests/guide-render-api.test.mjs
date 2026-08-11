@@ -148,6 +148,46 @@ test("normalizeData upgrades v1 cover/groups data to the v2 shape", () => {
   assert.equal(typeof d.meta.edition, "string", "v2 meta 字段应补齐");
 });
 
+test("normalizeData lifts steps cards into hub.sceneGuide (intermediate v2 drafts)", () => {
+  const { normalizeData } = loadRender().window.GuideRender;
+  // sceneGuide 改造前保存的草稿：schema 已是 2，但实景指引还是独立 steps 卡
+  const draft = {
+    schema: 2,
+    meta: { title: "t" },
+    campuses: [
+      { id: "baoshan", label: "宝山校区", short: "宝山" },
+      { id: "scene", label: "实景指引", short: "实景" },
+    ],
+    hubs: [
+      { id: "hongqiao", name: "虹桥枢纽", color: "#3aa17e", order: 1, guideFigure: null, guideVideo: null, remark: "" },
+    ],
+    cards: [
+      { id: "hq-bs-metro", kind: "route", hub: "hongqiao", campus: "baoshan", legs: [] },
+      {
+        id: "hq-scene", kind: "steps", hub: "hongqiao", campus: "scene",
+        sections: [{ title: "第一节", steps: [{ text: "第一步" }] }],
+        pending: { label: "待录入", detail: "d" },
+      },
+    ],
+  };
+  const d = normalizeData(draft);
+
+  assert.notEqual(d, draft, "中间形态应产出新对象");
+  assert.equal(d.cards.length, 1, "steps 卡应从 cards 摘除");
+  assert.equal(d.cards[0].id, "hq-bs-metro");
+  const hub = d.hubs[0];
+  assert.equal(hub.sceneGuide.sections.length, 1, "steps 小节应迁入 sceneGuide");
+  assert.equal(hub.sceneGuide.sections[0].title, "第一节");
+  assert.deepEqual(hub.sceneGuide.pending, { label: "待录入", detail: "d" }, "pending 应跟着迁");
+  assert.ok(!d.campuses.some((c) => c.id === "scene"), "失去卡片的 scene 校区应移除");
+  assert.equal(draft.cards.length, 2, "输入对象不应被改动");
+  assert.equal(draft.hubs[0].sceneGuide, undefined, "输入的 hub 不应被改动");
+
+  // 已是当前形态（无 steps 卡）的 v2 仍原样返回
+  const current = { schema: 2, hubs: [{ id: "h", sceneGuide: { sections: [] } }], cards: [] };
+  assert.equal(normalizeData(current), current);
+});
+
 test("icon registry: data.icons override the factory seed by id", () => {
   const GR = loadRender().window.GuideRender;
   const seed = GR.allIcons({});
