@@ -116,6 +116,24 @@ interface MapSelectionValidation {
   missingMapVersionIds: string[];
 }
 
+/**
+ * 地图版本不在本次 release 中时，不能只给一串 location id：发布员需要知道是哪
+ * 个实体、它仍绑在哪个旧版本，以及本次为同一空间选中了什么版本。
+ */
+interface MapBindingIssue {
+  anchorId: string;
+  entityType: LocationCandidate["entityType"];
+  entityId: string;
+  entityName: string;
+  role: string;
+  currentMapVersionId: string | null;
+  currentMapVersionLabel: string | null;
+  currentMapCampusName: string | null;
+  selectedMapVersionId: string | null;
+  selectedMapVersionLabel: string | null;
+  selectedMapCampusName: string | null;
+}
+
 type ReleaseMap = Omit<MapCandidate, "assetByteSize" | "assetSha256" | "assetStatus" | "assetBucketScope">;
 
 interface LocationCandidate {
@@ -146,6 +164,11 @@ interface LocationCandidate {
   updated_at: string;
   sourceElementId: string | null;
   featureKind: string | null;
+  /** 当前锚点绑定的地图版本信息；发布失败时用来给后台可操作的修复提示。 */
+  boundMapVersionLabel: string | null;
+  boundMapCampusId: string | null;
+  boundMapFloorId: string | null;
+  boundMapCampusName: string | null;
 }
 
 function locationGeometry(location: LocationCandidate): Record<string, unknown> | null {
@@ -536,9 +559,13 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
   const allLocations = await all<LocationCandidate>(
     env.DB,
     `select el.entity_type as entityType,el.entity_id as entityId,el.role,el.is_primary as isPrimary,
-            la.*,mf.source_element_id as sourceElementId,mf.feature_kind as featureKind
+            la.*,mf.source_element_id as sourceElementId,mf.feature_kind as featureKind,
+            bound_mv.version_label as boundMapVersionLabel,bound_mv.campus_id as boundMapCampusId,
+            bound_mv.floor_id as boundMapFloorId,bound_campus.name as boundMapCampusName
        from entity_locations el join location_anchors la on la.id=el.anchor_id
        left join map_features mf on mf.id=la.map_feature_id
+       left join map_versions bound_mv on bound_mv.id=la.map_version_id
+       left join campuses bound_campus on bound_campus.id=bound_mv.campus_id
       where el.valid_to is null and (la.valid_to is null or la.valid_to>?)`,
     [isoNow()],
   );
@@ -715,6 +742,33 @@ function validateMapSelection(requestedMapVersionIds: string[], maps: MapCandida
   };
 }
 
+function mapBindingIssue(
+  location: LocationCandidate,
+  maps: MapCandidate[],
+  entityNames: Map<string, string>,
+): MapBindingIssue {
+  // 楼层位置优先对应本层图纸；其余位置对应校区图。这样后台能明确指出本次
+  // 已选择的替代版本，而不是只报出一个无法反查的 anchor id。
+  const floorId = location.floor_id ?? location.boundMapFloorId;
+  const campusId = location.campus_id ?? location.boundMapCampusId;
+  const selectedMap = floorId
+    ? maps.find((map) => map.floor_id === floorId)
+    : maps.find((map) => map.floor_id === null && map.campus_id === campusId);
+  return {
+    anchorId: location.id,
+    entityType: location.entityType,
+    entityId: location.entityId,
+    entityName: entityNames.get(`${location.entityType}:${location.entityId}`) ?? location.entityId,
+    role: location.role,
+    currentMapVersionId: location.map_version_id,
+    currentMapVersionLabel: location.boundMapVersionLabel,
+    currentMapCampusName: location.boundMapCampusName,
+    selectedMapVersionId: selectedMap?.id ?? null,
+    selectedMapVersionLabel: selectedMap?.version_label ?? null,
+    selectedMapCampusName: selectedMap?.campusName ?? null,
+  };
+}
+
 function validateCandidate(
   candidate: Awaited<ReturnType<typeof buildCandidate>>,
   mapAssets: MapAssetValidation[],
@@ -730,6 +784,19 @@ function validateCandidate(
   }
   if (!candidate.maps.length) errors.push("At least one published or explicitly selected map version is required");
   const mapIds = new Set(candidate.maps.map((map) => map.id));
+  const entityNames = new Map<string, string>([
+    ...candidate.places.map((place): [string, string] => [`place:${place.id}`, place.displayName]),
+    ...candidate.facilities.map((facility): [string, string] => [`facility:${facility.id}`, facility.displayName]),
+    ...candidate.merchants.map((merchant): [string, string] => [`merchant_outlet:${merchant.id}`, merchant.displayName]),
+    ...candidate.manifest.transit.stops.map((stop): [string, string] => [`transit_stop:${stop.id}`, stop.name]),
+  ]);
+  const mapBindingIssues: MapBindingIssue[] = [];
+  const mapBindingIssueAnchorIds = new Set<string>();
+  const addMapBindingIssue = (location: LocationCandidate) => {
+    if (mapBindingIssueAnchorIds.has(location.id)) return;
+    mapBindingIssueAnchorIds.add(location.id);
+    mapBindingIssues.push(mapBindingIssue(location, candidate.maps, entityNames));
+  };
   const campusMapCount = new Map<string, number>();
   const floorMapCount = new Map<string, number>();
   for (const map of candidate.maps) {
@@ -800,6 +867,7 @@ function validateCandidate(
   for (const location of locations) {
     if (location.map_version_id && !mapIds.has(location.map_version_id)) {
       errors.push(`Location ${location.id} uses a map version outside this release`);
+      addMapBindingIssue(location);
     }
     if (location.role === "navigation_target") {
       const geometry = locationGeometry(location);
@@ -847,10 +915,11 @@ function validateCandidate(
     }
     if (!footprint.map_version_id || !mapIds.has(footprint.map_version_id)) {
       errors.push(`Building ${place.id} footprint must use a map version in this release`);
+      addMapBindingIssue(footprint);
     }
   }
   if (!candidate.places.length) warnings.push("Release has no approved places");
-  return { valid: errors.length === 0, errors, warnings, mapAssets, mapSelection, counts: {
+  return { valid: errors.length === 0, errors, warnings, mapAssets, mapSelection, mapBindingIssues, counts: {
     places: candidate.places.length, facilities: candidate.facilities.length, merchants: candidate.merchants.length,
     maps: candidate.maps.length, locations: candidate.locations.length, searchDocuments: candidate.searchDocuments.length,
   } };

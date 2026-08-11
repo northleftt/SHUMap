@@ -177,9 +177,13 @@ test("place review still drives the collection task from submitted to accepted",
 test("release validation failures survive the client error path and reach the UI", () => {
   const client = readSource("src/lib/api/client.ts");
   const page = readSource("src/admin/pages/ReleasesPage.tsx");
+  const api = readSource("src/lib/api/admin.ts");
   assert.match(client, /public readonly body\?: unknown/);
   assert.match(page, /validationFailure/);
   assert.match(page, /err\.status !== 422/);
+  assert.match(api, /interface ReleaseMapBindingIssue/);
+  assert.match(page, /mapBindingIssues/);
+  assert.match(page, /前往修复/);
 });
 
 test("operational event review carries the reviewer note end to end", () => {

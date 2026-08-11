@@ -346,6 +346,55 @@ test("release rejects a location bound to a map version outside the selection", 
 
   assert.equal(response.status, 422);
   assert.ok(body.validation.errors.includes("Location anchor_outside_service uses a map version outside this release"));
+  assert.deepEqual(body.validation.mapBindingIssues, [{
+    anchorId: "anchor_outside_service",
+    entityType: "place",
+    entityId: placeId,
+    entityName: "测试地点",
+    role: "other",
+    currentMapVersionId: "map_outside",
+    currentMapVersionLabel: "outside-v1",
+    currentMapCampusName: "测试校区",
+    selectedMapVersionId: "map_test",
+    selectedMapVersionLabel: "test-v1",
+    selectedMapCampusName: "测试校区",
+  }]);
+  assert.deepEqual(bucket.puts, []);
+});
+
+test("release reports one actionable map binding issue when an old building footprint fails two rules", async () => {
+  const bytes = new TextEncoder().encode("<svg id='selected'/> ");
+  const database = databaseWithMap(bytes);
+  const placeId = seedPublishedPlace(database);
+  const now = "2026-08-01T00:00:00.000Z";
+  database.prepare(
+    `insert into media_assets(id,bucket_scope,object_key,original_name,content_type,byte_size,sha256,status,created_at,approved_at)
+     values('media_outside_footprint','private','maps/outside-footprint.svg','outside-footprint.svg','image/svg+xml',?,?,'approved',?,?)`,
+  ).run(bytes.byteLength, sha256(bytes), now, now);
+  database.prepare(
+    "insert into map_assets(id,asset_type,media_asset_id,checksum,metadata_json,created_at) values('asset_outside_footprint','campus_svg','media_outside_footprint',?,'{}',?)",
+  ).run(sha256(bytes), now);
+  database.prepare(
+    `insert into map_versions(id,campus_id,map_asset_id,version_label,coordinate_space_type,coordinate_space_json,lifecycle_status,created_at)
+     values('map_outside_footprint','campus_test','asset_outside_footprint','outside-footprint-v1','svg_viewbox','{}','ready',?)`,
+  ).run(now);
+  seedFeature(database, "feature_outside_footprint", "map_outside_footprint", "outside-footprint");
+  seedLocation(database, {
+    id: "anchor_outside_footprint",
+    placeId,
+    role: "footprint",
+    geometryType: "Polygon",
+    mapVersionId: "map_outside_footprint",
+    mapFeatureId: "feature_outside_footprint",
+  });
+  const bucket = new R2Bucket(new Map([["maps/test.svg", bytes], ["maps/outside-footprint.svg", bytes]]));
+  const response = await coordinator(database, bucket).fetch(publishRequest("outside-footprint-map"));
+  const body = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.ok(body.validation.errors.includes("Location anchor_outside_footprint uses a map version outside this release"));
+  assert.ok(body.validation.errors.includes("Building place_release_test footprint must use a map version in this release"));
+  assert.deepEqual(body.validation.mapBindingIssues.map((issue) => issue.anchorId), ["anchor_outside_footprint"]);
   assert.deepEqual(bucket.puts, []);
 });
 
