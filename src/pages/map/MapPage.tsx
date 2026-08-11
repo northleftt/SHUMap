@@ -1,5 +1,5 @@
 import { Crosshair, Layers, Maximize2, Minimize2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MapCanvas, type MapViewWindow } from "../../components/map/MapCanvas";
 import { MapEventOverlay, buildEventOverlayItems } from "../../components/map/MapEventOverlay";
 import { MapPoiOverlay } from "../../components/map/MapPoiOverlay";
@@ -86,11 +86,36 @@ export function MapPage() {
   }, [isMobile]);
 
   const tabBar = isMobile ? mobileTabBarHeight : 0;
+
+  // poi 档抽屉内容自适应：实测 PoiDetailSheet 自然内容高度（封顶 maxPoiHeight），
+  // 内容少抽屉坐低、不预留空白；商户子视图切换/图片加载等高度变化由 ResizeObserver
+  // 跟踪。useLayoutEffect 在绘制前完成首测，看不到「先按上限撑满再缩回」的一帧。
+  const [poiContentHeight, setPoiContentHeight] = useState<number | null>(null);
+  const poiMeasureRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!isMobile || state.sheetMode !== "poi") {
+      setPoiContentHeight(null);
+      return;
+    }
+    const element = poiMeasureRef.current;
+    if (!element) return;
+    const measure = () => {
+      const next = Math.ceil(element.getBoundingClientRect().height);
+      setPoiContentHeight((current) => (current === next ? current : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isMobile, state.sheetMode, state.selectedPoi?.poiKey, state.selectedMerchantId]);
+
+  const maxPoiHeight = Math.min(containerHeight * 0.74, 620);
   const visibleHeights: Record<MapSheetMode, number> = {
     collapsed: 78,
     home: Math.min(containerHeight * 0.52, 480),
     results: containerHeight - tabBar - 56,
-    poi: Math.min(containerHeight * 0.74, 620),
+    // poi 档可见高度 = 实测内容高度封顶 maxPoiHeight；未量到时先按上限（首帧前会被校正）
+    poi: Math.min(poiContentHeight ?? maxPoiHeight, maxPoiHeight),
   };
   const topForMode = (mode: MapSheetMode) => containerHeight - tabBar - visibleHeights[mode];
 
@@ -120,6 +145,11 @@ export function MapPage() {
   // 于是横向左移一格避让回中/图层，而不是压到卡片里挡住搜索框。
   const sheetToggleTop = Math.max(16, sheetTop - 56);
   const sheetToggleRight = sheetToggleTop < 120 ? 68 : 16;
+
+  // poi 档关闭钮：整体抬到卡片上缘之上（不再半压卡片上缘、遮挡收藏/标题），
+  // 钳制与 sheetToggle 同一套（顶边上方 52px；顶边太高时左移避让右侧控件列）。
+  const poiCloseTop = Math.max(16, sheetTop - 52);
+  const poiCloseRight = poiCloseTop < 120 ? 68 : 16;
 
   // 必须 memo：新对象每次渲染都会触发 MapCanvas 的定位 effect → setViewWindow 死循环
   const selectionFocusBounds = useMemo(
@@ -342,6 +372,19 @@ export function MapPage() {
           </div>
         ) : null}
 
+        {/* poi 档关闭钮：抬到卡片上缘之上（移出抽屉容器，位置随 sheetTop 算） */}
+        {isMobile && state.sheetMode === "poi" ? (
+          <button
+            type="button"
+            aria-label="关闭详情"
+            className="absolute z-40 grid h-9 w-9 place-items-center rounded-full bg-surface text-sub shadow-floating"
+            style={{ top: poiCloseTop, right: poiCloseRight }}
+            onClick={state.closePoi}
+          >
+            <X size={16} />
+          </button>
+        ) : null}
+
         {/* 全屏/恢复浮钮：贴在卡片上缘右侧，跟随卡片顶边移动 */}
         {isMobile && sheetToggle ? (
           <button
@@ -368,30 +411,22 @@ export function MapPage() {
               </div>
             </div>
 
-            {state.sheetMode === "poi" ? (
-              <button
-                type="button"
-                aria-label="关闭详情"
-                className="absolute -top-4 right-4 z-40 grid h-9 w-9 place-items-center rounded-full bg-surface text-sub shadow-floating"
-                onClick={state.closePoi}
-              >
-                <X size={16} />
-              </button>
-            ) : null}
-
             <div className="h-full overflow-hidden rounded-t-4xl bg-surface shadow-sheet">
               {state.sheetMode === "collapsed" ? (
                 <div className="px-4 pt-3">
                   <SearchInput value={state.query} onChange={state.handleQueryChange} onFocus={state.handleQueryFocus} />
                 </div>
               ) : state.sheetMode === "poi" && state.selectedPoi ? (
-                <div className="h-full overflow-y-auto pt-2">
-                  <PoiDetailSheet
-                    building={state.selectedPoi}
-                    events={operations.status === "ready" ? operations.activeEvents : null}
-                    facilityStatus={state.facilityStatus}
-                    initialMerchantId={state.selectedMerchantId}
-                  />
+                <div className="h-full overflow-y-auto">
+                  {/* 内容自适应测量容器：高度 = 自然内容高度，poi 档抽屉按它定可见高度 */}
+                  <div ref={poiMeasureRef} className="pt-2">
+                    <PoiDetailSheet
+                      building={state.selectedPoi}
+                      events={operations.status === "ready" ? operations.activeEvents : null}
+                      facilityStatus={state.facilityStatus}
+                      initialMerchantId={state.selectedMerchantId}
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="h-full pt-2">

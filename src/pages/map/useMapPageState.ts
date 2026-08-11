@@ -190,7 +190,9 @@ export function useMapPageState() {
       poiName: poi.name,
       meta: { source },
     });
-    if (sheetMode !== "poi") setPreviousSheetMode(sheetMode === "collapsed" ? "home" : sheetMode);
+    // 记录打开前的档位，closePoi 原样回退（collapsed 也回 collapsed：全屏回全屏、
+    // 搜索回搜索、默认回默认——2026-08-10 修订，小程序端 previousModeBeforePoi 同式）。
+    if (sheetMode !== "poi") setPreviousSheetMode(sheetMode);
     if (poi.campusKey !== activeCampusKey) setSelectedCampus(poi.campusKey);
     setSelectedPoiKey(poiKey);
     // 搜索命中商户时直接落到该商户视图，否则展示楼宇详情

@@ -2,7 +2,7 @@ import { ChevronDown } from "lucide-react";
 import { useState } from "react";
 import type { CampusConfig, CampusKey } from "../../lib/types";
 
-/** M1 左上角校区切换 pill + 下拉。 */
+/** M1 左上角校区切换 pill + 下拉。pill 为平面样式（无阴影，细边框），对齐小程序胶囊质感。 */
 export function CampusSwitcher({
   selectedCampus,
   campuses,
@@ -20,7 +20,7 @@ export function CampusSwitcher({
     <div className="relative">
       <button
         type="button"
-        className="flex h-9 items-center gap-1.5 rounded-full bg-surface px-4 text-body font-medium text-ink shadow-floating"
+        className="flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface px-4 text-body font-medium text-ink"
         onClick={() => setOpen((value) => !value)}
       >
         {current.label}
