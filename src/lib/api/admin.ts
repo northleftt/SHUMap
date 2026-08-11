@@ -983,6 +983,21 @@ export interface PublishReleaseInput {
   mapVersionIds: string[];
 }
 
+/** 发布校验发现的旧地图绑定；供发布中心直接指出应去哪里重新选点。 */
+export interface ReleaseMapBindingIssue {
+  anchorId: string;
+  entityType: "place" | "facility" | "merchant_outlet" | "transit_stop";
+  entityId: string;
+  entityName: string;
+  role: string;
+  currentMapVersionId: string | null;
+  currentMapVersionLabel: string | null;
+  currentMapCampusName: string | null;
+  selectedMapVersionId: string | null;
+  selectedMapVersionLabel: string | null;
+  selectedMapCampusName: string | null;
+}
+
 export interface PublishReleaseResult {
   id: string;
   version?: string;
@@ -1003,6 +1018,8 @@ export interface PublishReleaseResult {
       selectedMapVersionIds: string[];
       missingMapVersionIds: string[];
     };
+    /** 老 Worker 的校验响应没有该字段，前端读取时需兼容一次滚动部署窗口。 */
+    mapBindingIssues?: ReleaseMapBindingIssue[];
     counts: Record<string, number>;
   };
 }
