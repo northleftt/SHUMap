@@ -50,17 +50,13 @@ function accountError(err: unknown, defaultMessage: string): string {
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "超级管理员",
+  admin: "管理员",
   volunteer: "志愿者",
-  viewer: "只读成员",
-  content_editor: "内容编辑",
-  map_editor: "地图编辑",
-  transit_editor: "校车编辑",
-  reviewer: "审核员",
-  publisher: "发布负责人",
 };
 
 const ROLE_TONE: Record<string, Tone> = {
   owner: "error",
+  admin: "warning",
   volunteer: "info",
 };
 
