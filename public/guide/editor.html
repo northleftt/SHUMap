@@ -554,27 +554,6 @@
     refresh();
   }
 
-  function addStepsCard() {
-    var hub = hubById(view.fresh.hub) || data.hubs[0];
-    var camp = campusById(view.fresh.campus) || data.campuses[0];
-    if (!hub || !camp) return R.toast("请先建枢纽和校区");
-    var card = {
-      id: uniqueId("card-steps"),
-      kind: "steps",
-      hub: hub.id,
-      campus: camp.id,
-      origin: { name: hub.name, note: "" },
-      toward: "实景指引",
-      sections: [{ title: "第一节", steps: [{ text: "第一步" }] }],
-    };
-    data.cards.push(card);
-    view.sel = card.id;
-    view.open["card:" + card.id] = true;
-    view.pair = { hub: hub.id, campus: camp.id };
-    persist();
-    refresh();
-  }
-
   /* ══════════════ 预览（枢纽 × 校区组合整页） ══════════════ */
 
   var opts = {
@@ -1005,15 +984,39 @@
     }
     w.appendChild(figBox);
 
-    /* —— 实况视频（预留） —— */
-    var vidBox = h("div", { class: "ge-item" },
+    /* —— 实况指引：实景引导图文（sceneGuide）+ 视频入口（guideVideo） —— */
+    var sgBox = h("div", { class: "ge-item" },
       h("div", { class: "ge-item__h" },
-        h("span", { class: "ge-item__n", text: "实况视频（预留 · 全空则不显示）" })));
-    vidBox.appendChild(videoField(hub, "视频地址 url", "url"));
-    vidBox.appendChild(h("div", { class: "ge-row" },
+        h("span", { class: "ge-item__n", text: "实况指引（实景引导图文 + 视频入口）" })));
+    var hubIdx = (data.hubs || []).indexOf(hub);
+    var sgBase = "hubs." + hubIdx + ".sceneGuide";
+    if (!hub.sceneGuide) {
+      sgBox.appendChild(h("div", { class: "ge-hint",
+        text: "还没有实景引导内容。前台「实况指引」区块将只显示视频入口（如已配置）。" }));
+      sgBox.appendChild(h("div", { class: "ge-adds" },
+        h("button", { class: "ge-mini", type: "button", text: "+ 添加实景引导内容",
+          onclick: function () {
+            hub.sceneGuide = { sections: [{ title: "新小节", steps: [{ text: "第一步" }] }] };
+            persist(); refresh();
+          } })));
+    } else {
+      sgBox.appendChild(field("引言", sgBase + ".intro", { type: "textarea", rows: 2, nullable: true }));
+      sgBox.appendChild(sectionsEditor(sgBase, hub.sceneGuide));
+      sgBox.appendChild(h("div", { class: "ge-adds" },
+        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "清空实景引导",
+          onclick: function () {
+            if (!window.confirm("清空「" + (hub.name || hub.id) + "」的全部实景引导内容？")) return;
+            hub.sceneGuide = null;
+            persist(); refresh();
+          } })));
+    }
+    sgBox.appendChild(h("div", { class: "ge-hint", style: "margin-top:10px",
+      text: "填了视频地址后，前台实况指引区块会出现「点击查看视频引导」入口。" }));
+    sgBox.appendChild(videoField(hub, "视频地址 url", "url"));
+    sgBox.appendChild(h("div", { class: "ge-row" },
       videoField(hub, "封面 poster", "poster"),
       videoField(hub, "说明 note", "note")));
-    w.appendChild(vidBox);
+    w.appendChild(sgBox);
 
     /* —— 备注卡片 —— */
     var rmBox = h("div", { class: "ge-item" },
@@ -1032,7 +1035,7 @@
     return section("hubs", "枢纽管理", hubs.length + " 个", false, function () {
       var w = h("div", null,
         h("div", { class: "ge-hint",
-          text: "枢纽是路线卡的起点（虹桥枢纽、铁路上海站…）。顺序决定前台 Tab 与打印顺序；指引图、实况视频、备注都挂在枢纽上。" }));
+          text: "枢纽是路线卡的起点（虹桥枢纽、铁路上海站…）。顺序决定前台列表与打印顺序；指引图、实况指引（实景引导图文 + 视频入口）、备注都挂在枢纽上。" }));
       hubs.forEach(function (hub) {
         w.appendChild(section("hub:" + hub.id, hub.name || hub.id,
           (data.cards || []).filter(function (c) { return c.hub === hub.id; }).length + " 张卡片",
@@ -1076,7 +1079,7 @@
     return section("campuses", "校区管理", (data.campuses || []).length + " 个", false, function () {
       var w = h("div", null,
         h("div", { class: "ge-hint",
-          text: "校区是路线卡的终点维度，也包含「实景指引」「各校区通用」这类虚拟校区。id 建好后不可改。" }));
+          text: "校区是路线卡的终点维度，「各校区通用」用于松江站这类不分校区的路线。实景指引不在这里——它绑在枢纽的「实况指引」上。id 建好后不可改。" }));
       (data.campuses || []).forEach(function (camp) {
         var ci = campusIndex(camp.id);
         w.appendChild(section("campus:" + camp.id, camp.label || camp.id,
@@ -1400,23 +1403,12 @@
     return wrap;
   }
 
-  function stepsCardEditor(ci, card) {
-    var base = "cards." + ci;
-    var wrap = h("div", null,
-      field("卡片 id", base + ".id"),
-      h("div", { class: "ge-row" },
-        hubSelect(base + ".hub"),
-        campusSelect(base + ".campus")
-      ),
-      h("div", { class: "ge-row" },
-        field("出发点名", base + ".origin.name"),
-        field("括注副标题", base + ".origin.note", { nullable: true })
-      ),
-      field("去往标签", base + ".toward", { nullable: true }),
-      field("引言", base + ".intro", { type: "textarea", rows: 2, nullable: true })
-    );
+  /* 小节 + pending 编辑器：steps 卡片与枢纽 sceneGuide 共用。
+     base 是指向「含 sections/pending 的对象」的路径，owner 是该对象本身（取长度用）。 */
+  function sectionsEditor(base, owner) {
+    var wrap = h("div", null);
 
-    (card.sections || []).forEach(function (sec, si) {
+    (owner.sections || []).forEach(function (sec, si) {
       var sb = base + ".sections." + si;
       var box = h("div", { class: "ge-item" });
       var mv = function (dir) {
@@ -1434,7 +1426,7 @@
         h("button", { class: "ge-mini", type: "button", text: "↑", title: "上移",
           disabled: si === 0 ? "disabled" : null, onclick: mv(-1) }),
         h("button", { class: "ge-mini", type: "button", text: "↓", title: "下移",
-          disabled: si === card.sections.length - 1 ? "disabled" : null, onclick: mv(1) }),
+          disabled: si === owner.sections.length - 1 ? "disabled" : null, onclick: mv(1) }),
         h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕", title: "删除小节",
           onclick: function () {
             getPath(base + ".sections").splice(si, 1);
@@ -1509,9 +1501,9 @@
         } })
     ));
 
-    /* pending：显式声明「这部分原稿还没录进来」，前台会画成待录入提示 */
+    /* pending：显式声明「这部分还没录进来」，前台会画成待录入提示 */
     var pendCb = h("input", { type: "checkbox" });
-    pendCb.checked = !!card.pending;
+    pendCb.checked = !!owner.pending;
     pendCb.style.width = "auto";
     pendCb.style.minHeight = "auto";
     pendCb.addEventListener("change", function () {
@@ -1520,11 +1512,30 @@
     });
     wrap.appendChild(h("label", { class: "ge-f", style: "margin-top:10px" },
       h("span", { class: "ge-f__l", text: "标记为「待录入」（pending）" }), pendCb));
-    if (card.pending) {
+    if (owner.pending) {
       wrap.appendChild(field("待录入标题", base + ".pending.label"));
       wrap.appendChild(field("待录入说明", base + ".pending.detail",
         { type: "textarea", rows: 3, nullable: true }));
     }
+    return wrap;
+  }
+
+  function stepsCardEditor(ci, card) {
+    var base = "cards." + ci;
+    var wrap = h("div", null,
+      field("卡片 id", base + ".id"),
+      h("div", { class: "ge-row" },
+        hubSelect(base + ".hub"),
+        campusSelect(base + ".campus")
+      ),
+      h("div", { class: "ge-row" },
+        field("出发点名", base + ".origin.name"),
+        field("括注副标题", base + ".origin.note", { nullable: true })
+      ),
+      field("去往标签", base + ".toward", { nullable: true }),
+      field("引言", base + ".intro", { type: "textarea", rows: 2, nullable: true })
+    );
+    wrap.appendChild(sectionsEditor(base, card));
     return wrap;
   }
 
@@ -1582,9 +1593,8 @@
           h("button", { class: "gc-btn gc-btn--primary", type: "button",
             text: "+ 新建路线卡片", onclick: addRouteCard }),
           h("button", { class: "ge-mini", type: "button", text: "+ 图示卡",
-            onclick: addFigureCard }),
-          h("button", { class: "ge-mini", type: "button", text: "+ 步骤卡",
-            onclick: addStepsCard })
+            onclick: addFigureCard })
+          /* 步骤卡已取消：实景指引/换乘指南绑在枢纽的「实况指引」上，见枢纽管理 */
         )
       ));
 

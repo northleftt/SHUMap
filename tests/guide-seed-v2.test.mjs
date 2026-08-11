@@ -82,6 +82,28 @@ test("hubs have the v2 shape: id/name/color/order plus media and remark fields",
   }
 });
 
+test("scene guidance lives on hubs (sceneGuide), not as standalone steps cards", () => {
+  // 实景指引/换乘指南绑在枢纽的「实况指引」上：cards 里不再有 steps 卡，
+  // campuses 里不再有「实景指引」校区，枢纽用 sceneGuide 承载小节图文。
+  assert.ok(!data.cards.some((c) => c.kind === "steps"), "cards 里不应再有 steps 卡");
+  assert.ok(!data.campuses.some((c) => c.id === "scene"), "campuses 里不应再有 scene");
+
+  const withScene = data.hubs.filter((h) => h.sceneGuide);
+  assert.ok(withScene.length >= 5, "至少 5 个枢纽应有 sceneGuide（虹桥/上海站/南站/浦东/附录）");
+  for (const hub of withScene) {
+    const sg = hub.sceneGuide;
+    assert.ok(Array.isArray(sg.sections), `hub ${hub.id} sceneGuide.sections 必须是数组`);
+    for (const sec of sg.sections) {
+      assert.equal(typeof sec.title, "string");
+      assert.ok(Array.isArray(sec.steps), `hub ${hub.id} 小节「${sec.title}」缺 steps`);
+      for (const st of sec.steps) assert.equal(typeof st.text, "string");
+    }
+  }
+  // 松江站换乘指南的 pending（车次表待录入）要跟着迁过去
+  const appendix = data.hubs.find((h) => h.id === "appendix");
+  assert.ok(appendix?.sceneGuide?.pending, "appendix 枢纽的 sceneGuide 应保留 pending");
+});
+
 test("schedule notes embedded in route legs were lifted to card-level schedule", () => {
   const west = data.cards.find((c) => c.id === "hq-jd-bus-west");
   assert.ok(west, "缺卡片 hq-jd-bus-west");

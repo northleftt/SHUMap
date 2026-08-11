@@ -208,6 +208,26 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   background:#0f172a}
 .gc-hub-video__note{margin-top:8px;font-size:12px;line-height:18px;color:var(--sub)}
 
+/* 实况指引：视频入口卡片 + 居中弹层 */
+.gc-video-entry{display:flex;align-items:center;gap:12px;width:100%;margin-top:14px;
+  padding:14px 16px;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface);cursor:pointer;font:inherit;text-align:left;
+  transition:border-color .15s ease, box-shadow .15s ease}
+.gc-video-entry:hover{border-color:var(--primary);box-shadow:var(--shadow-card)}
+.gc-video-entry__icon{flex:none;width:34px;height:34px;border-radius:50%;
+  background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;
+  font-size:13px;padding-left:2px}
+.gc-video-entry__t{font-size:14px;font-weight:600;color:var(--ink)}
+.gc-video-entry__n{font-size:12px;color:var(--sub);margin-left:auto;text-align:right}
+.gc-video-layer{position:fixed;inset:0;z-index:95;background:rgba(15,23,42,.72);
+  display:flex;align-items:center;justify-content:center;padding:20px}
+.gc-video-layer__box{position:relative;max-width:min(920px,94vw);width:100%}
+.gc-video-layer__video{width:100%;max-height:84vh;display:block;border-radius:var(--r-md);
+  background:#0f172a}
+.gc-video-layer__x{position:absolute;top:-14px;right:-14px;z-index:1;width:34px;height:34px;
+  border-radius:50%;border:0;background:var(--surface);color:var(--ink);font-size:14px;
+  cursor:pointer;box-shadow:var(--shadow-hover)}
+
 /* 备注富文本排版 */
 .gc-remark{font-size:14px;line-height:1.75;color:var(--ink-2)}
 .gc-remark p{margin:0 0 10px}
@@ -250,7 +270,7 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
 .gc-print-root{display:none}
 @page{size:A4;margin:12mm}
 @media print{
-  #gc-screen,.gc-pop,.gc-toast,.gc-fighint{display:none!important}
+  #gc-screen,.gc-pop,.gc-toast,.gc-fighint,.gc-video-entry,.gc-video-layer{display:none!important}
   body{background:#fff}
   .gc-print-root{display:block!important;color:#0f172a}
 

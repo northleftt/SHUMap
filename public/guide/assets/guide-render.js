@@ -94,7 +94,7 @@ window.GuideRender = (function () {
       return {
         id: hb.id, name: hb.name, note: hb.note || null,
         color: hb.color || "#465060", order: i + 1,
-        guideFigure: null, guideVideo: null, remark: "",
+        guideFigure: null, guideVideo: null, remark: "", sceneGuide: null,
       };
     });
 
@@ -113,6 +113,23 @@ window.GuideRender = (function () {
       return out;
     });
 
+    /* 实景指引 / 换乘指南的 steps 卡属于枢纽本身：摘进 hub.sceneGuide，
+       不再作为独立卡片；「实景指引」校区随之失去卡片，一并移除。 */
+    var keptCards = [];
+    cards.forEach(function (c) {
+      if (c.kind !== "steps") { keptCards.push(c); return; }
+      var hub = null;
+      for (var i = 0; i < hubs.length; i++) if (hubs[i].id === c.hub) { hub = hubs[i]; break; }
+      if (!hub) { keptCards.push(c); return; }   // 找不到枢纽就不丢数据
+      if (!hub.sceneGuide) hub.sceneGuide = {};
+      if (c.intro) hub.sceneGuide.intro = hub.sceneGuide.intro ? hub.sceneGuide.intro + "\n" + c.intro : c.intro;
+      hub.sceneGuide.sections = (hub.sceneGuide.sections || []).concat(c.sections || []);
+      if (c.pending) hub.sceneGuide.pending = c.pending;
+    });
+    var campuses = (raw.campuses || []).filter(function (camp) {
+      return camp.id !== "scene" || keptCards.some(function (c) { return c.campus === "scene"; });
+    });
+
     return {
       schema: 2,
       meta: {
@@ -121,10 +138,10 @@ window.GuideRender = (function () {
         revisedAt: meta.revisedAt || "", revisionNote: meta.revisionNote || "",
       },
       lineColors: raw.lineColors || {},
-      campuses: raw.campuses || [],
+      campuses: campuses,
       hubs: hubs,
       icons: raw.icons,
-      cards: cards,
+      cards: keptCards,
     };
   }
 
@@ -501,6 +518,35 @@ window.GuideRender = (function () {
   /* ══════════════ 步骤卡片（实景指引 / 附表教程） ══════════════
    * sections[] 分小节，每节 steps[] 是有序步骤；section.bare = true 时不显示
    * 步骤序号。card.pending 显式声明「这部分原稿数据还没录进来」。 */
+  /* 步骤内容体：steps 卡片与枢纽 sceneGuide 共用（intro + 小节 + pending） */
+  function renderStepsBody(obj) {
+    var body = h("div", { class: "gc-steps" });
+    if (obj.intro) body.appendChild(h("div", { class: "gc-steps__intro", text: obj.intro }));
+
+    (obj.sections || []).forEach(function (sec) {
+      var box = h("section", { class: "gc-sec", dataset: { accent: sec.accent || "" } });
+      if (sec.title)
+        box.appendChild(h("h4", { class: "gc-sec__t", text: sec.title },
+          sec.accent ? h("span", { class: "gc-sec__dot", style: "--c:" + sec.accent }) : null));
+      var list = h(sec.bare ? "div" : "ol", { class: "gc-sec__list" });
+      (sec.steps || []).forEach(function (st) {
+        list.appendChild(h(sec.bare ? "div" : "li", { class: "gc-step" },
+          h("span", { class: "gc-step__t", text: st.text }),
+          st.note ? h("span", { class: "gc-step__n", text: st.note }) : null
+        ));
+      });
+      box.appendChild(list);
+      body.appendChild(box);
+    });
+
+    if (obj.pending)
+      body.appendChild(h("div", { class: "gc-pending" },
+        h("span", { class: "gc-pending__l", text: obj.pending.label }),
+        obj.pending.detail ? h("span", { class: "gc-pending__d", text: obj.pending.detail }) : null
+      ));
+    return body;
+  }
+
   function renderStepsCard(card, data, opts) {
     var o = opts || {};
     var origin = card.origin || {};
@@ -517,37 +563,12 @@ window.GuideRender = (function () {
           h("span", { class: "gc-dest-chip", text: card.toward }))
       : null;
 
-    var body = h("div", { class: "gc-steps" });
-    if (card.intro) body.appendChild(h("div", { class: "gc-steps__intro", text: card.intro }));
-
-    (card.sections || []).forEach(function (sec) {
-      var box = h("section", { class: "gc-sec", dataset: { accent: sec.accent || "" } });
-      if (sec.title)
-        box.appendChild(h("h4", { class: "gc-sec__t", text: sec.title },
-          sec.accent ? h("span", { class: "gc-sec__dot", style: "--c:" + sec.accent }) : null));
-      var list = h(sec.bare ? "div" : "ol", { class: "gc-sec__list" });
-      (sec.steps || []).forEach(function (st) {
-        list.appendChild(h(sec.bare ? "div" : "li", { class: "gc-step" },
-          h("span", { class: "gc-step__t", text: st.text }),
-          st.note ? h("span", { class: "gc-step__n", text: st.note }) : null
-        ));
-      });
-      box.appendChild(list);
-      body.appendChild(box);
-    });
-
-    if (card.pending)
-      body.appendChild(h("div", { class: "gc-pending" },
-        h("span", { class: "gc-pending__l", text: card.pending.label }),
-        card.pending.detail ? h("span", { class: "gc-pending__d", text: card.pending.detail }) : null
-      ));
-
     var el = h("article", {
       class: "gc-card gc-card--steps",
       id: "card-" + card.id,
       dataset: { cardId: card.id, kind: "steps" },
       tabindex: "0",
-    }, head, chips, body);
+    }, head, chips, renderStepsBody(card));
 
     if (o.onPickCard)
       el.addEventListener("click", function () { o.onPickCard(card.id); });
@@ -585,22 +606,57 @@ window.GuideRender = (function () {
     return h("section", { class: "gc-hub-sec" }, hubSecTitle("枢纽指引"), body);
   }
 
-  /* 实况指引：有 guideVideo.url 渲染 <video controls>，否则虚线占位 */
+  /* 实况指引：枢纽的实景引导（sceneGuide 小节图文）+ 视频入口。
+     有 sceneGuide 渲染步骤图文；有 guideVideo.url 追加「点击查看视频引导」入口，
+     点开是居中的视频弹层。两者都没有时虚线占位。 */
   function renderHubVideo(hub) {
+    var sg = hub && hub.sceneGuide;
+    var hasScene = !!(sg && ((sg.sections && sg.sections.length) || sg.intro || sg.pending));
     var gv = hub && hub.guideVideo;
-    var kids;
+    var kids = [];
+    if (hasScene) kids.push(renderStepsBody(sg));
     if (gv && gv.url) {
-      kids = [
-        h("video", {
-          class: "gc-hub-video", controls: "controls", preload: "metadata",
-          src: gv.url, poster: gv.poster || null,
-        }),
-      ];
-      if (gv.note) kids.push(h("div", { class: "gc-hub-video__note", text: gv.note }));
-    } else {
-      kids = [h("div", { class: "gc-placeholder", text: "实况指引视频待上传" })];
+      var entry = h("button", {
+        class: "gc-video-entry", type: "button",
+      },
+        h("span", { class: "gc-video-entry__icon", text: "▶" }),
+        h("span", { class: "gc-video-entry__t", text: "点击查看视频引导" }),
+        gv.note ? h("span", { class: "gc-video-entry__n", text: gv.note }) : null
+      );
+      entry.addEventListener("click", function () { openVideoLayer(gv); });
+      kids.push(entry);
     }
+    if (!kids.length) kids.push(h("div", { class: "gc-placeholder", text: "实况指引待补充" }));
     return h("section", { class: "gc-hub-sec" }, hubSecTitle("实况指引"), kids);
+  }
+
+  /* 视频弹层：遮罩 + 居中播放器，点遮罩或 ✕ 关闭（关闭即暂停） */
+  var videoLayerEl = null;
+  function openVideoLayer(gv) {
+    closeVideoLayer();
+    var video = h("video", {
+      class: "gc-video-layer__video", controls: "controls", autoplay: "autoplay",
+      src: gv.url, poster: gv.poster || null,
+    });
+    var layer = h("div", { class: "gc-video-layer" },
+      h("div", { class: "gc-video-layer__box" },
+        h("button", {
+          class: "gc-video-layer__x", type: "button", text: "✕",
+          onclick: function (e) { e.stopPropagation(); closeVideoLayer(); },
+        }),
+        video
+      )
+    );
+    layer.addEventListener("click", function (e) { if (e.target === layer) closeVideoLayer(); });
+    document.body.appendChild(layer);
+    videoLayerEl = layer;
+  }
+  function closeVideoLayer() {
+    if (!videoLayerEl) return;
+    var v = videoLayerEl.querySelector("video");
+    if (v) v.pause();
+    videoLayerEl.remove();
+    videoLayerEl = null;
   }
 
   /* 备注：hub.remark 经白名单消毒后渲染。空备注在前台返回 null（不渲染），
@@ -714,6 +770,7 @@ window.GuideRender = (function () {
         hub.note ? h("span", { class: "gc-print-hubband__note", text: hub.note }) : null
       ));
       sec.appendChild(renderHubGuide(hub));
+      sec.appendChild(renderHubVideo(hub));   /* 实况指引：步骤图文进打印稿，视频入口由打印 CSS 隐藏 */
       var remark = renderRemark(hub);
       if (remark) sec.appendChild(remark);
 
@@ -804,7 +861,7 @@ window.GuideRender = (function () {
   document.addEventListener("click", function (e) {
     if (popEl && !popEl.contains(e.target)) closePop();
   });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closePop(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closePop(); closeVideoLayer(); } });
 
   return {
     h: h, esc: esc, RAIL: RAIL, HOT_REF: HOT_REF,
@@ -814,7 +871,7 @@ window.GuideRender = (function () {
     sanitizeRichHtml: sanitizeRichHtml,
     renderCard: renderCard, renderRouteCard: renderRouteCard,
     renderFigureCard: renderFigureCard, renderStepsCard: renderStepsCard,
-    renderTimeline: renderTimeline,
+    renderTimeline: renderTimeline, renderStepsBody: renderStepsBody,
     renderHubGuide: renderHubGuide, renderHubVideo: renderHubVideo,
     renderRemark: renderRemark, renderPairView: renderPairView,
     buildPrintRoot: buildPrintRoot,
