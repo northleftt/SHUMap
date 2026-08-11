@@ -44,7 +44,7 @@ test("guide-render.js exposes the documented window.GuideRender API", () => {
   const GR = loadRender().window.GuideRender;
   assert.ok(GR, "guide-render.js 应求值出 window.GuideRender");
   for (const key of [
-    "normalizeData", "hubFigures", "appliesTo", "allIcons", "iconById", "renderIcon", "sanitizeRichHtml",
+    "normalizeData", "hubFigures", "hubVideos", "appliesTo", "allIcons", "iconById", "renderIcon", "sanitizeRichHtml",
     "renderCard", "renderRouteCard", "renderFigureCard", "renderStepsCard",
     "renderHubGuide", "renderHubVideo", "renderRemark", "renderPairView",
     "buildPrintRoot", "lineColor", "esc", "h",
@@ -137,8 +137,8 @@ test("normalizeData upgrades v1 cover/groups data to the v2 shape", () => {
   assert.equal(d.hubs.length, 2);
   assert.deepEqual(
     // 渲染层在 vm 里求值，数组原型与本域不同，JSON 过一遍再比
-    JSON.parse(JSON.stringify(d.hubs.map((h) => [h.id, h.order, h.guideFigures, h.guideVideo, h.remark]))),
-    [["hongqiao", 1, [], null, ""], ["pudong", 2, [], null, ""]],
+    JSON.parse(JSON.stringify(d.hubs.map((h) => [h.id, h.order, h.guideFigures, h.guideVideos, h.remark]))),
+    [["hongqiao", 1, [], [], ""], ["pudong", 2, [], [], ""]],
     "cover.hubs 应按顺序提升为顶层 hubs 并补空媒体/备注字段",
   );
   const route = d.cards[0];
@@ -201,6 +201,15 @@ test("hubFigures/appliesTo: 指引图按校区过滤，旧 guideFigure 字段兼
     [{ src: "a" }, { src: "b", campuses: ["jiading"] }],
   );
   assert.deepEqual(hubFigures({}).length, 0);
+
+  // 视频入口同一套逻辑：新数组 / 旧单条字段兼容，无 url 的条目不显示
+  const { hubVideos } = loadRender().window.GuideRender;
+  assert.deepEqual(plain(hubVideos({ guideVideo: { url: "u1", note: "n" } })), [{ url: "u1", note: "n" }]);
+  assert.deepEqual(
+    plain(hubVideos({ guideVideos: [{ url: "" }, { url: "u2", campuses: ["jiading"] }] })),
+    [{ url: "u2", campuses: ["jiading"] }],
+  );
+  assert.equal(hubVideos({ guideVideo: { poster: "p" } }).length, 0, "旧字段没有 url 视为无视频");
 
   // 未声明 campuses = 通用；声明了的只在对应方向显示；campusId 为 null 时不过滤
   assert.equal(appliesTo({}, "jiading"), true);

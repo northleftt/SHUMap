@@ -141,7 +141,7 @@ window.GuideRender = (function () {
       return {
         id: hb.id, name: hb.name, note: hb.note || null,
         color: hb.color || "#465060", order: i + 1,
-        guideFigures: [], guideVideo: null, remark: "", sceneGuide: null,
+        guideFigures: [], guideVideos: [], remark: "", sceneGuide: null,
       };
     });
 
@@ -191,6 +191,13 @@ window.GuideRender = (function () {
     if (Array.isArray(hub.guideFigures))
       return hub.guideFigures.filter(function (f) { return f && f.src; });
     if (hub.guideFigure) return [{ src: hub.guideFigure }];   // 旧草稿兼容
+    return [];
+  }
+  function hubVideos(hub) {
+    if (!hub) return [];
+    if (Array.isArray(hub.guideVideos))
+      return hub.guideVideos.filter(function (v) { return v && v.url; });
+    if (hub.guideVideo && hub.guideVideo.url) return [hub.guideVideo];   // 旧草稿兼容
     return [];
   }
   function appliesTo(item, campusId) {
@@ -702,31 +709,33 @@ window.GuideRender = (function () {
   }
 
   /* 实况指引：枢纽的实景引导（sceneGuide 小节图文，按校区过滤）+ 视频入口。
-     有可见小节/引言/pending 渲染步骤图文；有 guideVideo.url 追加「点击查看视频
-     引导」入口，点开是居中的视频弹层。有内容但当前方向都不适用且无视频时返回
-     null（整块不显示）；什么内容都没有时虚线占位。 */
+     有可见小节/引言/pending 渲染步骤图文；guideVideos 按校区过滤后每条渲染
+     「点击查看视频引导」入口，点开是居中的视频弹层。有内容但当前方向都不适用
+     时返回 null（整块不显示）；什么内容都没有时虚线占位。 */
   function renderHubVideo(hub, campusId, campuses) {
     var sg = hub && hub.sceneGuide;
     var secs = sg ? (sg.sections || []).filter(function (sec) { return appliesTo(sec, campusId); }) : [];
     var hasAnyScene = !!(sg && ((sg.sections && sg.sections.length) || sg.intro || sg.pending));
     var hasScene = !!(sg && (secs.length || sg.intro || sg.pending));
-    var gv = hub && hub.guideVideo;
+    var allVideos = hubVideos(hub);
+    var videos = allVideos.filter(function (v) { return appliesTo(v, campusId); });
     var kids = [];
     if (hasScene)
       kids.push(renderStepsBody({ intro: sg.intro, sections: secs, pending: sg.pending }, campusId, campuses));
-    if (gv && gv.url) {
+    videos.forEach(function (gv) {
       var entry = h("button", {
         class: "gc-video-entry", type: "button",
       },
         h("span", { class: "gc-video-entry__icon", text: "▶" }),
         h("span", { class: "gc-video-entry__t", text: "点击查看视频引导" }),
+        !campusId && gv.campuses && gv.campuses.length ? campusTag(campuses, gv.campuses) : null,
         gv.note ? h("span", { class: "gc-video-entry__n", text: gv.note }) : null
       );
       entry.addEventListener("click", function () { openVideoLayer(gv); });
       kids.push(entry);
-    }
+    });
     if (!kids.length) {
-      if (hasAnyScene) return null;   /* 有内容但都不适用这个方向：不显示 */
+      if (hasAnyScene || allVideos.length) return null;   /* 有内容但都不适用这个方向：不显示 */
       kids.push(h("div", { class: "gc-placeholder", text: "实况指引待补充" }));
     }
     return h("section", { class: "gc-hub-sec" }, hubSecTitle("实况指引"), kids);
@@ -973,7 +982,7 @@ window.GuideRender = (function () {
     h: h, esc: esc, RAIL: RAIL, HOT_REF: HOT_REF,
     lineColor: lineColor, lineIcon: lineIcon,
     normalizeData: normalizeData,
-    hubFigures: hubFigures, appliesTo: appliesTo,
+    hubFigures: hubFigures, hubVideos: hubVideos, appliesTo: appliesTo,
     allIcons: allIcons, iconById: iconById, renderIcon: renderIcon,
     sanitizeRichHtml: sanitizeRichHtml,
     renderCard: renderCard, renderRouteCard: renderRouteCard,

@@ -849,7 +849,7 @@
     var order = (data.hubs || []).length + 1;
     data.hubs.push({
       id: id, name: "新枢纽", note: null, color: "#465060", order: order,
-      guideFigures: [], guideVideo: null, remark: "",
+      guideFigures: [], guideVideos: [], remark: "",
     });
     view.open["hub:" + id] = true;
     persist();
@@ -908,19 +908,11 @@
     }
   }
 
-  /* 实况视频（预留）：三个框全空时存 null，任一非空时存对象 */
-  function videoField(hub, label, key) {
-    var input = h("input", { type: "text" });
-    input.value = (hub.guideVideo && hub.guideVideo[key]) || "";
-    input.addEventListener("input", function () {
-      var gv = hub.guideVideo ? JSON.parse(JSON.stringify(hub.guideVideo)) : {};
-      gv[key] = input.value;
-      hub.guideVideo = (gv.url || gv.poster || gv.note) ? gv : null;
-      persist();
-      renderPreview();
-    });
-    input.addEventListener("change", function () { refresh(); });
-    return h("label", { class: "ge-f" }, h("span", { class: "ge-f__l", text: label }), input);
+  /* 旧草稿的 guideVideo 单条字段在编辑时升级为 guideVideos 数组 */
+  function materializeVideos(hub) {
+    if (Array.isArray(hub.guideVideos)) return;
+    hub.guideVideos = hub.guideVideo && hub.guideVideo.url ? [hub.guideVideo] : [];
+    delete hub.guideVideo;
   }
 
   /* 备注卡片：轻量富文本。工具条用 execCommand，写回前过渲染层的白名单消毒，
@@ -1075,12 +1067,33 @@
             persist(); refresh();
           } })));
     }
+    /* —— 视频入口（预留）：可多条，每条按校区方向勾选；未勾 = 通用 —— */
+    materializeVideos(hub);
     sgBox.appendChild(h("div", { class: "ge-hint", style: "margin-top:10px",
-      text: "填了视频地址后，前台实况指引区块会出现「点击查看视频引导」入口。" }));
-    sgBox.appendChild(videoField(hub, "视频地址 url", "url"));
-    sgBox.appendChild(h("div", { class: "ge-row" },
-      videoField(hub, "封面 poster", "poster"),
-      videoField(hub, "说明 note", "note")));
+      text: "填了视频地址后，前台实况指引区块会出现「点击查看视频引导」入口；可按校区方向加多条。" }));
+    hub.guideVideos.forEach(function (gv, vi) {
+      var vb = base + ".guideVideos." + vi;
+      sgBox.appendChild(h("div", { class: "ge-item", style: "background:#fff" },
+        h("div", { class: "ge-item__h" },
+          h("span", { class: "ge-item__n", text: "视频入口 " + (vi + 1) }),
+          h("span", { class: "gc-spacer", style: "flex:1" }),
+          h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕", title: "删除视频入口",
+            onclick: function () {
+              hub.guideVideos.splice(vi, 1);
+              persist(); refresh();
+            } })),
+        field("视频地址 url", vb + ".url"),
+        h("div", { class: "ge-row" },
+          field("封面 poster", vb + ".poster", { nullable: true }),
+          field("说明 note", vb + ".note", { nullable: true })),
+        campusChips(vb + ".campuses")));
+    });
+    sgBox.appendChild(h("div", { class: "ge-adds" },
+      h("button", { class: "ge-mini", type: "button", text: "+ 视频入口",
+        onclick: function () {
+          hub.guideVideos.push({ url: "", poster: null, note: null });
+          persist(); refresh();
+        } })));
     w.appendChild(sgBox);
 
     /* —— 备注卡片 —— */

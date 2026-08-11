@@ -77,7 +77,11 @@ test("hubs have the v2 shape: id/name/color/order plus media and remark fields",
       assert.equal(typeof f.src, "string");
       assert.ok(!f.campuses || Array.isArray(f.campuses));
     }
-    assert.ok(hub.guideVideo === null || typeof hub.guideVideo === "object");
+    assert.ok(Array.isArray(hub.guideVideos), `hub ${hub.id} 应有 guideVideos 数组`);
+    for (const v of hub.guideVideos) {
+      assert.equal(typeof v.url, "string");
+      assert.ok(!v.campuses || Array.isArray(v.campuses));
+    }
     assert.equal(typeof hub.remark, "string");
     // v1 目录字段不得残留
     for (const dropped of ["entries", "page", "tail"]) {

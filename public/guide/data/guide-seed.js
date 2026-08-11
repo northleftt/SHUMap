@@ -89,7 +89,7 @@ window.GUIDE_DATA = {
       "color": "#3aa17e",
       "order": 1,
       "guideFigures": [],
-      "guideVideo": null,
+      "guideVideos": [],
       "remark": "",
       "sceneGuide": {
         "sections": [
@@ -150,7 +150,7 @@ window.GUIDE_DATA = {
       "color": "#c2a25e",
       "order": 2,
       "guideFigures": [],
-      "guideVideo": null,
+      "guideVideos": [],
       "remark": "",
       "sceneGuide": {
         "sections": [
@@ -190,7 +190,7 @@ window.GUIDE_DATA = {
       "color": "#3f6ea8",
       "order": 3,
       "guideFigures": [],
-      "guideVideo": null,
+      "guideVideos": [],
       "remark": "",
       "sceneGuide": {
         "sections": [
@@ -237,7 +237,7 @@ window.GUIDE_DATA = {
       "color": "#8cc63e",
       "order": 4,
       "guideFigures": [],
-      "guideVideo": null,
+      "guideVideos": [],
       "remark": "",
       "sceneGuide": {
         "sections": [
@@ -291,7 +291,7 @@ window.GUIDE_DATA = {
       "color": "#e8a08c",
       "order": 5,
       "guideFigures": [],
-      "guideVideo": null,
+      "guideVideos": [],
       "remark": ""
     },
     {
@@ -301,7 +301,7 @@ window.GUIDE_DATA = {
       "color": "#9aa2ac",
       "order": 6,
       "guideFigures": [],
-      "guideVideo": null,
+      "guideVideos": [],
       "remark": "",
       "sceneGuide": {
         "intro": "松江枢纽离我校较远，我们建议采用“铁路中转”，前往市内更加接近我校的铁路客站以节约时间。推荐去往宝山校区、延长校区的同学前往上海南站中转；去往嘉定校区的同学前往上海虹桥站中转。",
