@@ -230,9 +230,16 @@ export function pickSingleShape(
   return { tool, geometry: { ...blank, path: next.path } };
 }
 
-/** 校区级底图版本：ready / published 且不挂楼层。 */
+/**
+ * 校区级底图版本：ready / published 且不挂楼层，按创建时间倒序。
+ * 画布默认取结果里的第一张（.find），必须与发布中心的默认选图规则
+ * （worker/modules/releases.ts 的 created_at desc, id desc）对齐，否则同一校区
+ * 存在新旧两张校园图时，画布会把几何绑到旧图上，发布校验立刻拒掉。
+ */
 export function campusMapVersions(mapVersions: admin.MapVersionRow[]): admin.MapVersionRow[] {
-  return mapVersions.filter((map) => map.campusId && !map.floorId && ["ready", "published"].includes(map.lifecycleStatus));
+  return mapVersions
+    .filter((map) => map.campusId && !map.floorId && ["ready", "published"].includes(map.lifecycleStatus))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
 }
 
 /**

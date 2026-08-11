@@ -3,9 +3,22 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
+
+const canvasBundle = await build({
+  absWorkingDir: root,
+  entryPoints: ["src/admin/components/CampusMapCanvas.tsx"],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  target: "node22",
+  write: false,
+});
+const canvasModuleUrl = `data:text/javascript;base64,${Buffer.from(canvasBundle.outputFiles[0].contents).toString("base64")}`;
+const { campusMapVersions } = await import(canvasModuleUrl);
 
 // 校区图选点是 svg_viewbox 坐标的唯一录入口，也是楼外 POI 能不能出现在地图上的
 // 那一步。它曾经以「import 了画布但从不渲染」的形态在仓库里待着，tsconfig 没开
@@ -63,4 +76,35 @@ test("the panel heading follows the title prop", () => {
   // <Panel title="地图位置"> 会让三处标题一起失效。
   assert.match(source, /<Panel title=\{title\}/);
   assert.doesNotMatch(source, /<Panel title="地图位置"/);
+});
+
+test("the campus canvas binds to the newest campus map, matching the release default", () => {
+  // 发布中心默认选图是每校区 created_at desc, id desc 最新一张；画布曾经用列表
+  // 顺序的 .find()，旧图（campus-source-v1）建得早排在前面，画出来的轮廓全绑到
+  // 旧图上，发布校验直接拒。两处必须保持同一规则。
+  const row = (id, campusId, createdAt, overrides = {}) => ({
+    id,
+    campusId,
+    floorId: null,
+    versionLabel: id,
+    coordinateSpaceType: "svg_viewbox",
+    lifecycleStatus: "published",
+    createdAt,
+    featureCount: 0,
+    ...overrides,
+  });
+  const versions = campusMapVersions([
+    row("map_old", "campus_jiading", "2026-07-18T00:00:00.000Z"),
+    row("map_floor", "campus_jiading", "2026-08-09T00:00:00.000Z", { floorId: "floor_1" }),
+    row("map_draft", "campus_jiading", "2026-08-10T00:00:00.000Z", { lifecycleStatus: "draft" }),
+    row("map_other_campus", "campus_baoshan", "2026-08-11T00:00:00.000Z"),
+    row("map_new", "campus_jiading", "2026-08-07T00:00:00.000Z"),
+  ]);
+  assert.deepEqual(
+    versions.map((map) => map.id),
+    ["map_other_campus", "map_new", "map_old"],
+    "楼层图与草稿不参与，排序按 createdAt 倒序（与发布默认选图同规则，全局排序即可）",
+  );
+  const jiading = versions.find((map) => map.campusId === "campus_jiading");
+  assert.equal(jiading.id, "map_new", "campusMapBinding 的 .find() 必须落到最新校园图");
 });
