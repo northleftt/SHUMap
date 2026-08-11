@@ -40,7 +40,7 @@
       }
 
       .cls-16 {
-        font-family: SourceHanSansSC-Normal-GBpc-EUC-H, 'Source Han Sans SC';
+        font-family: SourceHanSansSC-Normal-GBpc-EUC-H, 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
         font-size: 15.34px;
       }
 
@@ -95,7 +95,7 @@
       }
 
       .cls-17 {
-        font-family: SourceHanSansSC-Medium-GBpc-EUC-H, 'Source Han Sans SC';
+        font-family: SourceHanSansSC-Medium-GBpc-EUC-H, 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
         font-size: 42px;
         font-weight: 500;
       }
