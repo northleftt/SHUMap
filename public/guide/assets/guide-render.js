@@ -548,7 +548,21 @@ window.GuideRender = (function () {
   /* ══════════════ 步骤卡片（实景指引 / 附表教程） ══════════════
    * sections[] 分小节，每节 steps[] 是有序步骤；section.bare = true 时不显示
    * 步骤序号。card.pending 显式声明「这部分原稿数据还没录进来」。 */
-  /* 步骤内容体：steps 卡片与枢纽 sceneGuide 共用（intro + 小节 + pending） */
+  /* 步骤内容体：steps 卡片与枢纽 sceneGuide 共用（intro + 小节 + pending）
+     图文混排：step.figure（字符串或数组）画在步骤文字上方；某一步有图时
+     整个小节的步骤列表切双列网格（对齐原稿实景指引版式）。
+     section.figures 是小节级照片（如上海站的出站口指示牌），带说明文字。 */
+  function figureSrc(ref) {
+    if (/^(https?:|data:|\/)/.test(ref)) return ref;
+    return ASSET_BASE + encodeURIComponent(ref);
+  }
+  function stepFigs(ref) {
+    var srcs = Array.isArray(ref) ? ref : [ref];
+    return h("span", { class: "gc-step__figs" }, srcs.map(function (s) {
+      return h("img", { class: "gc-step__fig", src: figureSrc(s), alt: "实景照片",
+        loading: "lazy", decoding: "async" });
+    }));
+  }
   function renderStepsBody(obj) {
     var body = h("div", { class: "gc-steps" });
     if (obj.intro) body.appendChild(h("div", { class: "gc-steps__intro", text: obj.intro }));
@@ -558,9 +572,20 @@ window.GuideRender = (function () {
       if (sec.title)
         box.appendChild(h("h4", { class: "gc-sec__t", text: sec.title },
           sec.accent ? h("span", { class: "gc-sec__dot", style: "--c:" + sec.accent }) : null));
-      var list = h(sec.bare ? "div" : "ol", { class: "gc-sec__list" });
+      if (sec.figures && sec.figures.length)
+        box.appendChild(h("div", { class: "gc-secfigs" }, sec.figures.map(function (f) {
+          return h("figure", { class: "gc-secfig" },
+            h("img", { src: figureSrc(f.src), alt: f.caption || "实景照片",
+              loading: "lazy", decoding: "async" }),
+            f.caption ? h("figcaption", { class: "gc-secfig__cap", text: f.caption }) : null);
+        })));
+      var hasFigs = (sec.steps || []).some(function (st) { return st.figure; });
+      var list = h(sec.bare && !hasFigs ? "div" : "ol", {
+        class: "gc-sec__list" + (hasFigs ? " gc-sec__list--grid" : ""),
+      });
       (sec.steps || []).forEach(function (st) {
-        list.appendChild(h(sec.bare ? "div" : "li", { class: "gc-step" },
+        list.appendChild(h(sec.bare && !hasFigs ? "div" : "li", { class: "gc-step" },
+          st.figure ? stepFigs(st.figure) : null,
           h("span", { class: "gc-step__t", text: st.text }),
           st.note ? h("span", { class: "gc-step__n", text: st.note }) : null
         ));
@@ -902,6 +927,7 @@ window.GuideRender = (function () {
     renderCard: renderCard, renderRouteCard: renderRouteCard,
     renderFigureCard: renderFigureCard, renderStepsCard: renderStepsCard,
     renderTimeline: renderTimeline, renderStepsBody: renderStepsBody,
+    figureSrc: figureSrc,
     renderHubGuide: renderHubGuide, renderHubVideo: renderHubVideo,
     renderRemark: renderRemark, renderPairView: renderPairView,
     buildPrintRoot: buildPrintRoot,

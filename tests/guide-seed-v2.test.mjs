@@ -104,6 +104,29 @@ test("scene guidance lives on hubs (sceneGuide), not as standalone steps cards",
   assert.ok(appendix?.sceneGuide?.pending, "appendix 枢纽的 sceneGuide 应保留 pending");
 });
 
+test("sceneGuide figure refs that point at /guide/figures/ exist on disk", () => {
+  // 实景照片是随站点部署的静态文件（不走 R2）。种子写了路径而文件缺失时，
+  // 前台只会静默出现裂图，所以这里把每个本地引用都钉到磁盘上。
+  const refs = [];
+  for (const hub of data.hubs) {
+    for (const sec of hub.sceneGuide?.sections || []) {
+      for (const fig of sec.figures || []) refs.push(fig.src);
+      for (const st of sec.steps || []) {
+        const figs = Array.isArray(st.figure) ? st.figure : st.figure ? [st.figure] : [];
+        refs.push(...figs);
+      }
+    }
+  }
+  assert.ok(refs.length > 0, "sceneGuide 应至少引用一张照片");
+  for (const ref of refs) {
+    if (!ref.startsWith("/")) continue; // R2 asset key 不在本测试范围
+    assert.ok(
+      fs.existsSync(path.join(root, "public", ref)),
+      `引用的图片不存在: ${ref}`,
+    );
+  }
+});
+
 test("schedule notes embedded in route legs were lifted to card-level schedule", () => {
   const west = data.cards.find((c) => c.id === "hq-jd-bus-west");
   assert.ok(west, "缺卡片 hq-jd-bus-west");

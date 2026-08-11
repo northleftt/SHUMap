@@ -163,6 +163,26 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
 .gc-step::marker{color:var(--primary);font-weight:600}
 .gc-step__t{display:block}
 .gc-step__n{display:block;font-size:11px;line-height:16px;color:var(--sub);margin-top:1px}
+
+/* 实景指引图文混排：小节级照片 + 步骤配图（双列网格，对齐原稿版式） */
+.gc-secfigs{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
+  gap:12px;margin:0 0 12px}
+.gc-secfig{margin:0}
+.gc-secfig img{width:100%;aspect-ratio:4/3;object-fit:cover;display:block;
+  border-radius:var(--r-sm);border:1px solid var(--line)}
+.gc-secfig__cap{font-size:12px;font-weight:600;line-height:17px;color:var(--ink-2);
+  margin-top:5px}
+.gc-sec__list--grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;
+  padding-left:0;list-style:none;counter-reset:gstep}
+.gc-sec__list--grid .gc-step{counter-increment:gstep}
+.gc-sec__list--grid .gc-step__t::before{content:counter(gstep) ". ";
+  color:var(--primary);font-weight:600}
+.gc-step__figs{display:flex;gap:6px;margin-bottom:6px}
+.gc-step__fig{flex:1 1 0;min-width:0;width:100%;height:auto;border-radius:var(--r-sm);
+  border:1px solid var(--line);object-fit:cover}
+@media screen and (max-width:640px){
+  .gc-sec__list--grid{grid-template-columns:1fr}
+}
 .gc-pending{display:flex;flex-direction:column;gap:3px;padding:11px 13px;
   border:1px dashed var(--warning-line);border-radius:var(--r-md);
   background:var(--warning-bg)}

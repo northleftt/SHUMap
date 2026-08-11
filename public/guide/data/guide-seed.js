@@ -98,16 +98,20 @@ window.GUIDE_DATA = {
             "accent": "#d6417f",
             "steps": [
               {
-                "text": "火车站到达层往西（虹桥商务区）方向走"
+                "text": "火车站到达层往西（虹桥商务区）方向走",
+                "figure": "/guide/figures/scene/hongqiao-west-1.jpg"
               },
               {
-                "text": "找到 P7/P10 停车场"
+                "text": "找到 P7/P10 停车场",
+                "figure": "/guide/figures/scene/hongqiao-west-2.jpg"
               },
               {
-                "text": "坐扶梯到地上 1 层"
+                "text": "坐扶梯到地上 1 层",
+                "figure": "/guide/figures/scene/hongqiao-west-3.jpg"
               },
               {
-                "text": "找到对应站台"
+                "text": "找到对应站台",
+                "figure": "/guide/figures/scene/hongqiao-west-4.jpg"
               }
             ]
           },
@@ -116,17 +120,21 @@ window.GUIDE_DATA = {
             "accent": "#e4002b",
             "steps": [
               {
-                "text": "火车站到达层往东（2号航站楼）走, 穿过地下通道"
+                "text": "火车站到达层往东（2号航站楼）走, 穿过地下通道",
+                "figure": "/guide/figures/scene/hongqiao-east-1.jpg"
               },
               {
-                "text": "一直向前走, 即可找到市域机场线车站"
+                "text": "一直向前走, 即可找到市域机场线车站",
+                "figure": "/guide/figures/scene/hongqiao-east-2.jpg"
               },
               {
                 "text": "乘坐公交需要继续往前走，直到看到圆形天井",
-                "note": "（从机场到达层出来后同样可以找到）"
+                "note": "（从机场到达层出来后同样可以找到）",
+                "figure": "/guide/figures/scene/hongqiao-east-3.jpg"
               },
               {
-                "text": "上楼，找到 2 层的 2 号候车室走进去"
+                "text": "上楼，找到 2 层的 2 号候车室走进去",
+                "figure": "/guide/figures/scene/hongqiao-east-4.jpg"
               }
             ]
           }
@@ -154,7 +162,21 @@ window.GUIDE_DATA = {
                 "text": "前往乘坐公交沪嘉专线、185路的同学，建议走西南出口出站。"
               }
             ],
-            "bare": true
+            "bare": true,
+            "figures": [
+              {
+                "src": "/guide/figures/scene/shanghai-exit-ne-1.jpg",
+                "caption": "↑ 东北、东南出口"
+              },
+              {
+                "src": "/guide/figures/scene/shanghai-exit-ne-2.jpg",
+                "caption": "↑ 东北、东南出口"
+              },
+              {
+                "src": "/guide/figures/scene/shanghai-exit-sw.jpg",
+                "caption": "↑ 西北、西南出口"
+              }
+            ]
           }
         ]
       }
@@ -174,22 +196,31 @@ window.GUIDE_DATA = {
             "title": "从上海南站去往南广场公交枢纽（上嘉线）：",
             "steps": [
               {
-                "text": "进入地下区域"
+                "text": "进入地下区域",
+                "figure": "/guide/figures/scene/south-1.jpg"
               },
               {
-                "text": "向南广场公交枢纽（郊），不要去（市）"
+                "text": "向南广场公交枢纽（郊），不要去（市）",
+                "figure": "/guide/figures/scene/south-2.jpg"
               },
               {
-                "text": "继续沿指示牌走"
+                "text": "继续沿指示牌走",
+                "figure": "/guide/figures/scene/south-3.jpg"
               },
               {
-                "text": "进入地下通道，前往南广场公交枢纽方向"
+                "text": "进入地下通道，前往南广场公交枢纽方向",
+                "figure": "/guide/figures/scene/south-4.jpg"
               },
               {
-                "text": "继续向前"
+                "text": "继续向前",
+                "figure": "/guide/figures/scene/south-5.jpg"
               },
               {
-                "text": "到达上嘉线站厅，前往站台"
+                "text": "到达上嘉线站厅，前往站台",
+                "figure": [
+                  "/guide/figures/scene/south-6a.jpg",
+                  "/guide/figures/scene/south-6b.jpg"
+                ]
               }
             ]
           }
@@ -212,13 +243,19 @@ window.GUIDE_DATA = {
             "steps": [
               {
                 "text": "机场（T1/T2 航站楼）到达后，根据指示牌往联络通道走",
-                "note": "（推荐前往中间的联络通道）"
+                "note": "（推荐前往中间的联络通道）",
+                "figure": "/guide/figures/scene/pudong-1.jpg"
               },
               {
-                "text": "到达联络通道后，继续往里"
+                "text": "到达联络通道后，继续往里",
+                "figure": "/guide/figures/scene/pudong-2.jpg"
               },
               {
-                "text": "在中间位置即可看到地铁2号线/磁浮线/市域机场线的车站入口"
+                "text": "在中间位置即可看到地铁2号线/磁浮线/市域机场线的车站入口",
+                "figure": [
+                  "/guide/figures/scene/pudong-3a.jpg",
+                  "/guide/figures/scene/pudong-3b.jpg"
+                ]
               }
             ]
           },
@@ -227,7 +264,8 @@ window.GUIDE_DATA = {
             "bare": true,
             "steps": [
               {
-                "text": "车站共有 6 个出入口"
+                "text": "车站共有 6 个出入口",
+                "figure": "/guide/figures/scene/pudong-gate.jpg"
               },
               {
                 "text": "其中 1~3 号口只有垂直电梯"

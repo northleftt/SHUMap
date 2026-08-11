@@ -84,6 +84,10 @@
   .ge-mini--ok:hover{border-color:#15803d;color:#15803d}
   .ge-mini[disabled]{opacity:.35;cursor:not-allowed}
   .ge-adds{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .ge-figrow{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .ge-figrow .ge-f{flex:1;margin:0}
+  .ge-figrow__thumb{width:56px;height:56px;object-fit:cover;border-radius:6px;
+    border:1px solid var(--line);flex:none}
 
   .ge-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
     color:var(--warning);letter-spacing:.02em;white-space:nowrap}
@@ -263,6 +267,7 @@
     <input type="file" id="ge-figfile" accept=".svg,image/svg+xml" hidden />
     <input type="file" id="ge-hubfig" accept=".svg,image/svg+xml" hidden />
     <input type="file" id="ge-noteimg" accept=".png,image/png" hidden />
+    <input type="file" id="ge-stepfig" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden />
   </div>
   <div class="ge-lock" id="ge-lock" hidden></div>
 
@@ -1408,6 +1413,39 @@
   function sectionsEditor(base, owner) {
     var wrap = h("div", null);
 
+    /* 配图行：有图显示缩略图 + 替换/清除；无图显示「+ 配图」。
+       上传目标路径暂存在 ge-stepfig 的 dataset 上，change 处理器统一完成上传与回填。 */
+    function pickFigure(targetPath) {
+      return function () {
+        if (!server.online) return R.toast("离线模式下不能上传图片");
+        var fi = document.getElementById("ge-stepfig");
+        fi.dataset.path = targetPath;
+        delete fi.dataset.figuresPath;
+        fi.click();
+      };
+    }
+    function pickSectionFigure(figuresPath) {
+      return function () {
+        if (!server.online) return R.toast("离线模式下不能上传图片");
+        var fi = document.getElementById("ge-stepfig");
+        fi.dataset.figuresPath = figuresPath;
+        delete fi.dataset.path;
+        fi.click();
+      };
+    }
+    function stepFigControl(path, cur) {
+      var first = Array.isArray(cur) ? cur[0] : cur;
+      if (!first)
+        return h("div", { class: "ge-figrow" },
+          h("button", { class: "ge-mini", type: "button", text: "+ 配图", onclick: pickFigure(path) }));
+      return h("div", { class: "ge-figrow" },
+        h("img", { class: "ge-figrow__thumb", src: R.figureSrc(first), alt: "" }),
+        h("span", { class: "ge-hint", text: Array.isArray(cur) ? cur.length + " 张图" : "已配图" }),
+        h("button", { class: "ge-mini", type: "button", text: "替换", onclick: pickFigure(path) }),
+        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "清除",
+          onclick: function () { setPath(path, null); persist(); refresh(); } }));
+    }
+
     (owner.sections || []).forEach(function (sec, si) {
       var sb = base + ".sections." + si;
       var box = h("div", { class: "ge-item" });
@@ -1451,6 +1489,25 @@
         })()
       ));
 
+      /* 小节级照片（如出站口指示牌组）：缩略图 + 说明 + 删除 */
+      (sec.figures || []).forEach(function (fig, fi2) {
+        var fb = sb + ".figures." + fi2;
+        box.appendChild(h("div", { class: "ge-figrow" },
+          h("img", { class: "ge-figrow__thumb", src: R.figureSrc(fig.src), alt: "" }),
+          field("图片说明", fb + ".caption", { nullable: true }),
+          h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕", title: "删除照片",
+            onclick: function () {
+              getPath(sb + ".figures").splice(fi2, 1);
+              if (!getPath(sb + ".figures").length) delete getPath(sb).figures;
+              persist(); refresh();
+            } })
+        ));
+      });
+      box.appendChild(h("div", { class: "ge-adds" },
+        h("button", { class: "ge-mini", type: "button", text: "+ 小节照片",
+          onclick: pickSectionFigure(sb + ".figures") })
+      ));
+
       (sec.steps || []).forEach(function (st, ti) {
         var tb2 = sb + ".steps." + ti;
         var sbox = h("div", { class: "ge-item", style: "background:#fff" });
@@ -1478,6 +1535,7 @@
         ));
         sbox.appendChild(field("内容", tb2 + ".text"));
         sbox.appendChild(field("小字备注", tb2 + ".note", { nullable: true }));
+        sbox.appendChild(stepFigControl(tb2 + ".figure", st.figure));
         box.appendChild(sbox);
       });
       box.appendChild(h("div", { class: "ge-adds" },
@@ -2075,6 +2133,41 @@
         R.toast("插图已插入备注");
       });
     }).catch(function (err) { R.toast("上传插图失败：" + err.message); });
+  });
+
+  /* 步骤配图 / 小节照片上传：dataset.path 回填字段，dataset.figuresPath 则向数组追加。
+     服务器按魔术字节嗅探 PNG/JPEG，content-type 传文件真实类型即可。 */
+  document.getElementById("ge-stepfig").addEventListener("change", function (e) {
+    var fi = e.target;
+    var f = fi.files && fi.files[0];
+    var path = fi.dataset.path || "";
+    var figuresPath = fi.dataset.figuresPath || "";
+    delete fi.dataset.path;
+    delete fi.dataset.figuresPath;
+    fi.value = "";
+    if (!f || (!path && !figuresPath)) return;
+    if (!server.online) return R.toast("离线模式下不能上传图片");
+    var key = ("scene-img-" + Date.now().toString(36))
+      .replace(/[^a-z0-9-]/g, "-").slice(0, 62);
+    fetch("/api/admin/guide/assets/" + encodeURIComponent(key) + "?kind=figure_png", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": f.type || "application/octet-stream" },
+      body: f,
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
+        if (path) {
+          setPath(path, key);
+        } else {
+          var list = getPath(figuresPath);
+          if (!list) { setPath(figuresPath, []); list = getPath(figuresPath); }
+          list.push({ src: key, caption: "" });
+        }
+        persist(); refresh(); loadAssets();
+        R.toast("图片已上传");
+      });
+    }).catch(function (err) { R.toast("上传图片失败：" + err.message); });
   });
 
   /* ══════════════ 版本管理 ══════════════

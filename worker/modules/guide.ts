@@ -148,14 +148,17 @@ function assertSafeSvg(text: string): void {
   }
 }
 
-/** PNG 魔术字节。位图快照只用于单卡 PNG 导出内联，不做别的用途。 */
-function assertPng(bytes: ArrayBuffer): void {
+/** 位图魔术字节嗅探：PNG 或 JPEG（实景照片天然是 JPEG，没必要强迫上传者转码）。 */
+function sniffRasterType(bytes: ArrayBuffer): "image/png" | "image/jpeg" {
   const view = new Uint8Array(bytes);
-  const ok =
+  const isPng =
     view.length >= 8 &&
     view[0] === 0x89 && view[1] === 0x50 && view[2] === 0x4e && view[3] === 0x47 &&
     view[4] === 0x0d && view[5] === 0x0a && view[6] === 0x1a && view[7] === 0x0a;
-  if (!ok) throw new HttpError(415, "unsupported_media_type", "Body is not a PNG file");
+  if (isPng) return "image/png";
+  const isJpeg = view.length >= 3 && view[0] === 0xff && view[1] === 0xd8 && view[2] === 0xff;
+  if (isJpeg) return "image/jpeg";
+  throw new HttpError(415, "unsupported_media_type", "Body is not a PNG or JPEG file");
 }
 
 // ---------------------------------------------------------------------------
@@ -726,13 +729,15 @@ export async function uploadGuideAsset(
   }
   const url = new URL(request.url);
   const kind = oneOf(url.searchParams.get("kind") ?? "figure_svg", "kind", ASSET_KINDS);
-  const expectedType = ASSET_CONTENT_TYPE[kind];
 
   const bytes = await readBodyLimited(request, MAX_ASSET_BYTES);
   if (bytes.byteLength === 0) throw new HttpError(400, "validation_error", "Asset body is empty");
 
+  /* figure_png 实际收 PNG 和 JPEG 两种位图（名字里的 png 是历史叫法）；
+     存进 R2 / media_assets 的 content-type 以嗅探结果为准。 */
+  let storedType: string = ASSET_CONTENT_TYPE[kind];
   const metadata: Record<string, unknown> = {};
-  if (expectedType === "image/svg+xml") {
+  if (storedType === "image/svg+xml") {
     const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
     assertSafeSvg(text);
     const viewBox = /viewbox\s*=\s*["']([^"']+)["']/i.exec(text);
@@ -742,12 +747,14 @@ export async function uploadGuideAsset(
     if (width) metadata.width = width[1].trim();
     if (height) metadata.height = height[1].trim();
   } else {
-    assertPng(bytes);
-    const view = new DataView(bytes);
-    // PNG IHDR：宽高是第 16-23 字节。渲染时给 <img> 定尺寸，避免布局跳动。
-    if (view.byteLength >= 24) {
-      metadata.pixelWidth = view.getUint32(16);
-      metadata.pixelHeight = view.getUint32(20);
+    storedType = sniffRasterType(bytes);
+    if (storedType === "image/png") {
+      const view = new DataView(bytes);
+      // PNG IHDR：宽高是第 16-23 字节。渲染时给 <img> 定尺寸，避免布局跳动。
+      if (view.byteLength >= 24) {
+        metadata.pixelWidth = view.getUint32(16);
+        metadata.pixelHeight = view.getUint32(20);
+      }
     }
   }
 
@@ -760,9 +767,10 @@ export async function uploadGuideAsset(
   );
 
   const mediaId = makeId("media");
-  const objectKey = `${GUIDE_ASSET_PREFIX}${mediaId}.${expectedType === "image/png" ? "png" : "svg"}`;
+  const ext = storedType === "image/png" ? "png" : storedType === "image/jpeg" ? "jpg" : "svg";
+  const objectKey = `${GUIDE_ASSET_PREFIX}${mediaId}.${ext}`;
   await env.SHUMAP_BUCKET.put(objectKey, bytes, {
-    httpMetadata: { contentType: expectedType, cacheControl: "public, max-age=31536000, immutable" },
+    httpMetadata: { contentType: storedType, cacheControl: "public, max-age=31536000, immutable" },
     customMetadata: { scope: "public", guideAssetKey: key, uploadedBy: principal.userId },
   });
 
@@ -770,7 +778,7 @@ export async function uploadGuideAsset(
     env.DB.prepare(
       `insert into media_assets(id,bucket_scope,object_key,original_name,content_type,byte_size,sha256,status,uploaded_by,created_at,approved_at)
        values(?,'public',?,?,?,?,?,'published',?,?,?)`,
-    ).bind(mediaId, objectKey, key, expectedType, bytes.byteLength, digest, principal.userId, now, now),
+    ).bind(mediaId, objectKey, key, storedType, bytes.byteLength, digest, principal.userId, now, now),
   ];
   if (existing) {
     statements.push(
@@ -793,7 +801,7 @@ export async function uploadGuideAsset(
     { mediaAssetId: mediaId, assetKind: kind, byteSize: bytes.byteLength, sha256: digest });
 
   return json(
-    { assetKey: key, assetKind: kind, mediaId, byteSize: bytes.byteLength, contentType: expectedType, metadata },
+    { assetKey: key, assetKind: kind, mediaId, byteSize: bytes.byteLength, contentType: storedType, metadata },
     { status: existing ? 200 : 201 },
   );
 }
