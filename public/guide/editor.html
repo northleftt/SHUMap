@@ -80,6 +80,8 @@
     min-height:30px;min-width:30px;line-height:1;white-space:nowrap}
   .ge-mini:hover{border-color:var(--primary);color:var(--primary)}
   .ge-mini--danger:hover{border-color:var(--error);color:var(--error)}
+  .ge-mini--ok{border-color:#16a34a;color:#16a34a}
+  .ge-mini--ok:hover{border-color:#15803d;color:#15803d}
   .ge-mini[disabled]{opacity:.35;cursor:not-allowed}
   .ge-adds{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 
@@ -312,11 +314,17 @@
     workingStatus: "",      // draft / in_review / approved
     assets: [],             // listGuideAssets 的素材清单
     readOnly: false,        // in_review 冻结：服务端会拒绝写入，先把原因摆出来
+    perms: [],              // /api/auth/session 返回的权限；决定复核按钮显隐
   };
   var STATUS_LABEL = {
     draft: "草稿", in_review: "送审中", approved: "已通过",
     rejected: "已退回", superseded: "旧版",
   };
+  /* 复核（通过/驳回）按钮只给有 review:content 权限的账号看；
+     服务端每个写操作仍会自己查权限，这里只是别让没权限的人面对点了才报错的按钮。 */
+  function canReview() {
+    return server.perms.indexOf("review:content") >= 0 || server.perms.indexOf("*") >= 0;
+  }
 
   var data = loadLocal();
   ensureShape();
@@ -2296,6 +2304,38 @@
           }).catch(function (err) { R.toast("回滚失败：" + err.message); });
         },
       }));
+      if (m.editorialStatus === "in_review" && canReview()) {
+        ["approve", "reject"].forEach(function (decision) {
+          acts.appendChild(h("button", {
+            class: decision === "approve" ? "ge-mini ge-mini--ok" : "ge-mini ge-mini--danger",
+            type: "button",
+            text: decision === "approve" ? "复核通过" : "驳回",
+            title: decision === "approve"
+              ? "通过后这一版可以发布上线"
+              : "驳回后这一版退回草稿状态，作者可以继续改",
+            onclick: function () {
+              var note = window.prompt(
+                (decision === "approve" ? "通过" : "驳回") + "第 " + m.revisionNo +
+                " 版。写一句复核意见（可留空）：", "");
+              if (note === null) return;
+              api("/api/admin/guide/revisions/" + m.id + "/review",
+                { json: { decision: decision, note: note || null } })
+                .then(function () {
+                  R.toast(decision === "approve"
+                    ? "第 " + m.revisionNo + " 版已通过复核"
+                    : "第 " + m.revisionNo + " 版已驳回");
+                  /* 复核的正是编辑区这一版：解冻/更新状态，让作者继续改或去发布 */
+                  if (m.id === server.workingId) {
+                    server.workingStatus = decision === "approve" ? "approved" : "rejected";
+                    setLocked(null);
+                  }
+                  refreshRevisions().then(renderVersions);
+                })
+                .catch(function (err) { R.toast("复核操作失败：" + err.message); });
+            },
+          }));
+        });
+      }
       if (m.editorialStatus === "approved" && !isLive) {
         acts.appendChild(h("button", {
           class: "ge-mini", type: "button", text: "发布上线",
@@ -2485,6 +2525,7 @@
      点了才报错的按钮。 */
   api("/api/auth/session").then(function (sess) {
     var perms = (sess && sess.permissions) || [];
+    server.perms = perms;
     if (perms.indexOf("write:content") < 0 && perms.indexOf("*") < 0) {
       gate("没有编辑权限",
         "当前账号没有 write:content 权限，改动无法写入服务器。可以离线编辑，再导出 JSON 交给有权限的人导入。",
