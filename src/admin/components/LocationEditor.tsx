@@ -217,8 +217,8 @@ const ROLE_LABELS: Record<LocationRole, string> = {
   accessible_entrance: "无障碍入口",
   navigation_target: "导航终点",
   service_position: "服务位置",
-  boarding_point: "上车点",
-  alighting_point: "下车点",
+  boarding_point: "候车点",
+  alighting_point: "下车点（旧）",
   event_location: "事件位置",
   impact_area: "影响范围",
   route_shape: "路线",
@@ -323,6 +323,7 @@ export function LocationEditor({
   isBuilding,
   disabled,
   roles,
+  maxRows,
   title = "地图位置",
 }: {
   value: LocationDraft[];
@@ -335,6 +336,8 @@ export function LocationEditor({
   disabled?: boolean;
   /** 限定「用途」下拉的可选项。省略时给出全部角色。 */
   roles?: readonly LocationRole[];
+  /** 行数上限，达到后藏起「添加位置」。校车站点只留一个候车点时会传 1。 */
+  maxRows?: number;
   title?: string;
 }) {
   const allowedRoles = roles ?? ALL_ROLES;
@@ -376,10 +379,11 @@ export function LocationEditor({
     return () => controller.abort();
   }, [featuresByVersion, requestedVersions]);
 
-  // 调用方传进来的 title 之前被硬编码的面板标题吃掉了：校车的「上车 / 下车点」、
+  // 调用方传进来的 title 之前被硬编码的面板标题吃掉了：校车的「候车点」、
   // 设施的「楼外位置」、商户的「门店位置」都显示成「地图位置」，同一页上两块位置
   // 面板还会同名。
-  return <Panel title={title} action={<GhostButton disabled={disabled} onClick={() => onChange([...value, { ...emptyLocation(allowedRoles[0]), isPrimary: value.length === 0 }])}><Plus size={14} />添加位置</GhostButton>}>
+  const full = maxRows !== undefined && value.length >= maxRows;
+  return <Panel title={title} action={full ? null : <GhostButton disabled={disabled} onClick={() => onChange([...value, { ...emptyLocation(allowedRoles[0]), isPrimary: value.length === 0 }])}><Plus size={14} />添加位置</GhostButton>}>
     {featureError ? <ErrorBanner message={featureError} /> : null}
     {value.length === 0 ? <InfoNote>还没有地图位置</InfoNote> : <div className="space-y-3">{value.map((row, index) => {
       const floors = spaces.floors.filter((floor) => !row.buildingPlaceId || floor.buildingPlaceId === row.buildingPlaceId);

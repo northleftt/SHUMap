@@ -156,6 +156,40 @@ function countsSummary(counts: Record<string, number>): string {
     .join(" · ");
 }
 
+const LOCATION_ROLE_LABEL: Record<string, string> = {
+  primary_display: "主要展示位置",
+  footprint: "建筑轮廓",
+  centroid: "中心点",
+  main_entrance: "主入口",
+  accessible_entrance: "无障碍入口",
+  navigation_target: "导航终点",
+  service_position: "服务位置",
+  boarding_point: "候车点",
+  alighting_point: "下车点（旧）",
+  event_location: "事件位置",
+  impact_area: "影响范围",
+  route_shape: "路线",
+  other: "其他位置",
+};
+
+function mapBindingEditPath(issue: admin.ReleaseMapBindingIssue): string | null {
+  if (issue.entityType === "place") return `/admin/content/places/${issue.entityId}`;
+  if (issue.entityType === "facility") return `/admin/content/facilities/${issue.entityId}`;
+  if (issue.entityType === "merchant_outlet") return `/admin/content/merchants/${issue.entityId}`;
+  if (issue.entityType === "transit_stop") return "/admin/transit";
+  return null;
+}
+
+function mapBindingIssueText(issue: admin.ReleaseMapBindingIssue): string {
+  const currentMap = [issue.currentMapCampusName, issue.currentMapVersionLabel].filter(Boolean).join(" · ")
+    || issue.currentMapVersionId
+    || "未绑定地图版本";
+  const selectedMap = [issue.selectedMapCampusName, issue.selectedMapVersionLabel].filter(Boolean).join(" · ")
+    || issue.selectedMapVersionId
+    || "本次发布未选择对应地图";
+  return `${issue.entityName} · ${LOCATION_ROLE_LABEL[issue.role] ?? issue.role}：当前绑定「${currentMap}」，本次选择「${selectedMap}」`;
+}
+
 export function ReleasesPage() {
   const { hasPermission } = useAuth();
   const canRollback = hasPermission("rollback:release");
@@ -336,6 +370,21 @@ export function ReleasesPage() {
                     {result.validation?.errors.map((e, i) => (
                       <p key={i} className="rounded-md bg-white/60 px-3 py-2 text-body text-error">✕ {e}</p>
                     ))}
+                    {result.validation?.mapBindingIssues?.length ? (
+                      <div className="space-y-1.5 rounded-md bg-white/60 px-3 py-2">
+                        <p className="text-aux font-semibold text-error">需要迁移到本次发布地图的位置</p>
+                        {result.validation.mapBindingIssues.map((issue) => {
+                          const path = mapBindingEditPath(issue);
+                          return (
+                            <div className="flex items-start gap-2 text-aux text-error" key={issue.anchorId}>
+                              <span className="mt-0.5">✕</span>
+                              <span className="min-w-0 flex-1">{mapBindingIssueText(issue)}</span>
+                              {path ? <Link className="shrink-0 font-medium text-primary hover:underline" to={path}>前往修复 ›</Link> : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                     {result.validation?.warnings.map((w, i) => (
                       <p key={i} className="flex items-center gap-1.5 px-1 text-aux text-warning">
                         <TriangleAlert size={13} /> {w}

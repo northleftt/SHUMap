@@ -23,11 +23,18 @@ const DROPOFF_TYPES = ["regular", "none"] as const;
 const BOOKING_POLICIES = ["required", "optional", "not_required"] as const;
 const STOP_STATUSES = ["active", "temporarily_closed", "retired"] as const;
 const ROUTE_STATUSES = ["active", "suspended", "retired"] as const;
-/** A stop's own anchors only describe where you board or alight. */
-const STOP_LOCATION_ROLES = ["boarding_point", "alighting_point"] as const;
+/**
+ * A stop keeps at most one anchor of its own: the waiting point. Whether a
+ * direction boards or alights here belongs to the pattern (pickup/dropoff
+ * type), not to the stop. The role value stays `boarding_point` because the
+ * role enum is a CHECK constraint on location_anchors (0001) and renaming it
+ * would mean rebuilding that table in production; legacy `alighting_point`
+ * rows remain readable but new writes only accept this single role.
+ */
+const STOP_LOCATION_ROLES = ["boarding_point"] as const;
 const MAX_PATTERN_STOPS = 40;
 const MAX_CALENDAR_EXCEPTIONS = 366;
-const MAX_STOP_LOCATIONS = 20;
+const MAX_STOP_LOCATIONS = 1;
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
 /**

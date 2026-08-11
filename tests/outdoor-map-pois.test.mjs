@@ -326,7 +326,7 @@ test("a shuttle stop with its own anchor becomes an independent pin", () => {
   assert.equal(poi.revisionId, null);
   assert.deepEqual(poi.detail.facts, [
     { label: "站点代码", value: "N1" },
-    { label: "上车位置", value: "北门东侧" },
+    { label: "候车点", value: "北门东侧" },
   ]);
 });
 
@@ -336,6 +336,37 @@ test("a stop without a marked anchor produces no pin", () => {
 
   const pois = buildMapPointPois(value, [campus]);
   assert.equal(pois.some((poi) => poi.entityType === "transit_stop"), false);
+});
+
+test("a stop without its own anchor falls back to the bound place for the pin and navigation", () => {
+  // 站点坐标不必再维护一遍：没标候车点时，图钉落在绑定地点的点位上，
+  // 导航也直接用绑定地点的导航终点（这条回退同时修掉了站点导航恒为 null 的旧问题）。
+  const value = manifest();
+  value.transit.stops.push(stop({ place_id: "place_free" }));
+  value.locations.push(location("place", "place_free", "nav_place_free", {
+    role: "navigation_target",
+    isPrimary: 0,
+    crs: "GCJ02",
+    map_version_id: null,
+    geometry_json: '{"type":"Point","coordinates":[121.4,31.3]}',
+  }));
+
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.ok(poi, "绑定地点有点位时，未标候车点的站点也要出图钉");
+  assert.deepEqual(poi.markerPoint, { x: 25, y: 40 }, "图钉落在绑定地点的点位上");
+  assert.ok(poi.navigationUrls, "导航回退到绑定地点的导航终点");
+});
+
+test("a stop's own waiting point wins over the bound place fallback", () => {
+  const value = manifest();
+  value.transit.stops.push(stop({ place_id: "place_free" }));
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.deepEqual(poi.markerPoint, { x: 60, y: 70 }, "标了候车点就用候车点，不回退");
 });
 
 test("a stop bound to a building place still gets its own pin", () => {

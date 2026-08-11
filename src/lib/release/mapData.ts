@@ -236,13 +236,13 @@ function merchantDetail(merchant: MerchantSummary): PoiDetailData {
 }
 
 /**
- * 校车站点没有修订，也没有 content_json，能展示的就是站点代码与上/下车点说明。
+ * 校车站点没有修订，也没有 content_json，能展示的就是站点代码与候车点说明。
  * 时刻表照旧走实时接口（GET /api/public/transit/journeys），不冻进快照。
  */
 function transitStopDetail(stop: TransitStop, location: ReleaseLocation): PoiDetailData {
   const facts = [
     stop.code ? { label: "站点代码", value: stop.code } : null,
-    location.location_hint ? { label: "上车位置", value: location.location_hint } : null,
+    location.location_hint ? { label: "候车点", value: location.location_hint } : null,
   ].filter((fact): fact is { label: string; value: string } => fact !== null);
   return { summary: "", description: "", media: [], facts };
 }
@@ -344,8 +344,9 @@ function primaryPointLocations(manifest: ReleaseManifest): Map<string, ReleaseLo
     list.push(location);
     candidates.set(key, list);
   }
-  // 校车站点的锚点只有上车 / 下车两种角色（LocationEditor 里就是这么限定的），
-  // 上车点优先：站牌图钉指的是候车的地方。
+  // 校车站点现在只保留一种自有锚点——候车点（role 沿用 boarding_point），
+  // 上 / 下车语义由线路方向的 pickup/dropoff 表达；历史 alighting_point 行
+  // 仍可读，只作低优先级兜底。
   const rolePriority = new Map([
     ["primary_display", 0],
     ["service_position", 1],
@@ -804,13 +805,15 @@ export function buildMapPointPois(
     });
   }
 
-  // 校车站点：标过上/下车点就自己出图钉，不必再依附一个地点。
+  // 校车站点：自己标了候车点就用它出图钉；没标则回退到绑定地点的点位，
+  // 导航同样回退到绑定地点的导航终点——站点不必把地点的坐标再维护一遍。
   //
   // 这里刻意不像上面三种那样「绑到楼宇就跳过」。地点/设施/商户绑楼宇意味着它在
   // 楼内，已经由楼宇详情呈现；而站点绑地点只是借用照片与联系方式，候车位置本身
   // 仍是楼外一个独立的点。管理员既然在校区图上标了它，就是要这个图钉。
   for (const stop of manifest.transit.stops) {
-    const location = points.get(`transit_stop:${stop.id}`);
+    const location = points.get(`transit_stop:${stop.id}`)
+      ?? (stop.place_id ? points.get(`place:${stop.place_id}`) : undefined);
     if (!location) continue;
     const campus = campusOfPoint(
       location,
@@ -819,7 +822,10 @@ export function buildMapPointPois(
       campusByMapVersion,
       `transit stop ${stop.id}`,
     );
-    const nav = navigation.get(`transit_stop:${stop.id}`);
+    // 站点的自有锚点不是 GCJ02 导航终点，导航一律来自绑定地点；这条回退同时
+    // 兜住「站点没标候车点」的情形。
+    const nav = navigation.get(`transit_stop:${stop.id}`)
+      ?? (stop.place_id ? navigation.get(`place:${stop.place_id}`) : undefined);
     result.push({
       id: `transit_stop:${stop.id}`,
       poiKey: `transit_stop:${stop.id}`,

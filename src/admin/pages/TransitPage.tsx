@@ -66,8 +66,8 @@ const TABS: Array<{ key: Tab; label: string }> = [
 const WEEK_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
 const WEEK_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
-/** 站点自身的锚点只描述在哪上车、在哪下车。 */
-const STOP_LOCATION_ROLES: readonly LocationRole[] = ["boarding_point", "alighting_point"];
+/** 站点自身最多一个锚点：候车点。上 / 下车安排归线路方向（pickup/dropoff），不归站点。 */
+const STOP_LOCATION_ROLES: readonly LocationRole[] = ["boarding_point"];
 
 const DIRECTION_LABELS: Record<number, string> = { 0: "去程", 1: "回程" };
 
@@ -802,8 +802,9 @@ function StopsPanel({
       >
         <div className="space-y-4">
           <InfoNote>
-            站点的照片、联系方式、开放时间等信息来自它绑定的地点，在「内容管理」里维护；这里维护站点本身的名称、
-            停靠状态，以及上车 / 下车点的具体坐标。
+            站点绑定一处地点后，名称、照片、联系方式、地图图钉与导航都默认跟随那条地点（地点在「内容管理」里维护）；
+            这里只需要维护停靠状态。实际候车点不在地点那里时，才需要单独标一个候车点；
+            哪个方向上车、哪个方向下车在线路方向里维护。
           </InfoNote>
 
           {editing === "new" ? (
@@ -881,7 +882,7 @@ function StopsPanel({
                       {stop.campusId ? campusName(stop.campusId) : "—"}
                     </span>
                     <span className="w-28 shrink-0 text-aux text-sub">
-                      {anchors.length ? `${anchors.length} 个上下车点` : "未标坐标"}
+                      {anchors.length ? "已标候车点" : stop.placeId ? "跟随地点位置" : "未标坐标"}
                     </span>
                     <span className="w-20 shrink-0 text-aux text-sub">{usage ? `${usage} 处停靠` : "未被停靠"}</span>
                     <Pill tone={statusMeta.tone}>{statusMeta.label}</Pill>
@@ -908,7 +909,7 @@ function StopsPanel({
                   {confirmDelete === stop.id ? (
                     <div className="mb-3 rounded-lg bg-error-bg px-4 py-3">
                       <p className="text-body font-medium text-error">
-                        确认删除站点「{stop.name}」？它的上下车点坐标会一并删除，且不可恢复。
+                        确认删除站点「{stop.name}」？它的候车点坐标会一并删除，且不可恢复。
                       </p>
                       <div className="mt-2.5 flex gap-2">
                         <button
@@ -959,6 +960,8 @@ function StopEditor({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
+  // 名称默认跟随绑定地点：用户没手动改过名称时，换绑地点就把名称一起带过去。
+  const [nameEdited, setNameEdited] = useState(Boolean(initial?.name));
   const [code, setCode] = useState(initial?.code ?? "");
   const [placeId, setPlaceId] = useState(initial?.placeId ?? "");
   const [campusId, setCampusId] = useState(initial?.campusId ?? "");
@@ -966,7 +969,8 @@ function StopEditor({
   const [locations, setLocations] = useState<LocationDraft[]>(initial?.locations ?? []);
   const [formError, setFormError] = useState("");
 
-  // 站点通常就是一处校园地点，绑定后照片 / 联系方式 / 导航直接复用那条地点。
+  // 站点通常就是一处校园地点，绑定后名称 / 照片 / 联系方式 / 图钉 / 导航默认都
+  // 复用那条地点；只有实际候车点不在地点那里时才需要单独标点。
   //
   // 楼宇与楼外地点都能带：楼宇按建筑轮廓上图，楼外地点按自己的校区图点位上图
   // （buildMapPointPois），校车详情页顺着 release.pois 取导航链接，两种都在里面。
@@ -979,28 +983,42 @@ function StopEditor({
   }));
   const boundPlace = placeId ? data.places.find((place) => place.id === placeId) ?? null : null;
 
+  function patchPlace(nextPlaceId: string) {
+    setPlaceId(nextPlaceId);
+    if (nameEdited) return;
+    const place = nextPlaceId ? data.places.find((candidate) => candidate.id === nextPlaceId) : null;
+    setName(place?.displayName ?? "");
+  }
+
   function submit() {
     if (!name.trim()) { setFormError("请填写站点名称"); return; }
     const kept = locations.filter((row) => !isLocationDraftBlank(row));
-    if (kept.length > 0 && kept.filter((row) => row.isPrimary).length !== 1) {
-      setFormError("上下车点里需要且只能有一个主要位置");
+    if (kept.length > 1) {
+      setFormError("站点最多标一个候车点；缺省不标时图钉与导航跟随绑定地点");
       return;
     }
+    // 唯一的候车点就是主要位置，不再让管理员操心 primary 勾选。
+    const normalized = kept.map((row) => ({ ...row, isPrimary: true }));
     try {
       // locationInput 会校验经纬度成对、不与地图图形冲突等，先跑一遍再提交。
-      kept.map(locationInput);
+      normalized.map(locationInput);
     } catch (err) {
-      setFormError(errorMessage(err, "上下车点填写有误"));
+      setFormError(errorMessage(err, "候车点填写有误"));
       return;
     }
     setFormError("");
-    void onSave({ name: name.trim(), code: code.trim(), placeId, campusId, status, locations: kept });
+    void onSave({ name: name.trim(), code: code.trim(), placeId, campusId, status, locations: normalized });
   }
 
   return (
     <div className="space-y-3 rounded-xl bg-page p-4">
       <div className="grid grid-cols-3 gap-3">
-        <Field label="站点名称" onChange={setName} placeholder="如 宝山校区南大门" value={name} />
+        <Field
+          label="站点名称"
+          onChange={(value) => { setName(value); setNameEdited(true); }}
+          placeholder="默认跟随绑定地点"
+          value={name}
+        />
         <Field label="站点代码（可选）" onChange={setCode} placeholder="如 baoshan-south" value={code} />
         <SelectField
           label="停靠状态"
@@ -1009,8 +1027,8 @@ function StopEditor({
           value={status}
         />
         <SelectField
-          label="绑定地点（照片 / 联系方式 / 导航来源）"
-          onChange={setPlaceId}
+          label="绑定地点（名称 / 照片 / 联系方式 / 导航来源）"
+          onChange={patchPlace}
           options={placeOptions}
           placeholder="不绑定"
           value={placeId}
@@ -1026,12 +1044,12 @@ function StopEditor({
 
       {boundPlace === null ? (
         <InfoNote tone="warning">
-          未绑定地点时，用户端只能看到站点名称与坐标，没有照片、联系方式，也点不出「导航到这里」。
+          未绑定地点时，用户端只能看到站点名称与候车点坐标，没有照片、联系方式，也点不出「导航到这里」。
         </InfoNote>
       ) : (
         <InfoNote tone="info">
           这个站点的照片与联系方式跟随地点「{boundPlace.displayName ?? boundPlace.id}」，
-          在「内容管理 → 地点」里编辑即可同步。
+          在「内容管理 → 地点」里编辑即可同步；不标候车点时，图钉与导航也直接用那条地点的位置。
           {boundPlace.isBuilding
             ? "该地点作为楼宇维护，需要有建筑轮廓才会出现在地图上。"
             : "这是一处楼外地点，需要在它的编辑页于校区图上标过点位，才会出现在地图上。"}
@@ -1041,10 +1059,11 @@ function StopEditor({
       <LocationEditor
         disabled={busy}
         mapVersions={meta.mapVersions}
+        maxRows={1}
         onChange={setLocations}
         roles={STOP_LOCATION_ROLES}
         spaces={meta.spaces}
-        title="上车 / 下车点"
+        title="候车点（可选，缺省跟随绑定地点）"
         value={locations}
       />
 
@@ -1058,7 +1077,7 @@ function StopEditor({
             disabled={busy}
             onClick={() => setLocations([{ ...emptyLocation("boarding_point"), isPrimary: true }])}
           >
-            <Plus size={14} />标一个上车点
+            <Plus size={14} />标一个候车点
           </GhostButton>
         ) : null}
       </div>

@@ -63,3 +63,23 @@ test("the client renders and labels the new POI kind", () => {
   // 运营事件本来就能以站点为对象，详情页要认这种命中。
   assert.match(read("src/pages/map/PoiDetailSheet.tsx"), /target\.targetType === "transit_stop"/);
 });
+
+test("a stop keeps one waiting point; boarding vs alighting belongs to the pattern", () => {
+  const worker = read("worker/modules/transit.ts");
+  assert.match(worker, /STOP_LOCATION_ROLES = \["boarding_point"\]/);
+  assert.match(worker, /MAX_STOP_LOCATIONS = 1/);
+  // 上 / 下车语义由线路方向的 pickup/dropoff 表达，不在站点的锚点上。
+  assert.match(read("migrations-v2/0001_architecture_v2.sql"), /pickup_type/);
+  // 管理端编辑器与 worker 同一份约束。
+  const admin = read("src/admin/pages/TransitPage.tsx");
+  assert.match(admin, /STOP_LOCATION_ROLES: readonly LocationRole\[\] = \["boarding_point"\]/);
+  assert.match(admin, /maxRows=\{1\}/);
+});
+
+test("a stop without its own anchor falls back to the bound place on both clients", () => {
+  for (const file of ["src/lib/release/mapData.ts", "miniprogram/miniprogram/lib/release/mapData.ts"]) {
+    const source = read(file);
+    assert.match(source, /points\.get\(`transit_stop:\$\{stop\.id\}`\)\s*\?\? \(stop\.place_id \? points\.get\(`place:\$\{stop\.place_id\}`\) : undefined\)/, file);
+    assert.match(source, /navigation\.get\(`transit_stop:\$\{stop\.id\}`\)\s*\?\? \(stop\.place_id \? navigation\.get\(`place:\$\{stop\.place_id\}`\) : undefined\)/, file);
+  }
+});
