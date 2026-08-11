@@ -44,7 +44,7 @@ test("guide-render.js exposes the documented window.GuideRender API", () => {
   const GR = loadRender().window.GuideRender;
   assert.ok(GR, "guide-render.js 应求值出 window.GuideRender");
   for (const key of [
-    "normalizeData", "allIcons", "iconById", "renderIcon", "sanitizeRichHtml",
+    "normalizeData", "hubFigures", "appliesTo", "allIcons", "iconById", "renderIcon", "sanitizeRichHtml",
     "renderCard", "renderRouteCard", "renderFigureCard", "renderStepsCard",
     "renderHubGuide", "renderHubVideo", "renderRemark", "renderPairView",
     "buildPrintRoot", "lineColor", "esc", "h",
@@ -60,6 +60,7 @@ test("guide-styles.js exports window.GUIDE_CSS with the v2 class vocabulary", ()
   assert.equal(typeof css, "string", "guide-styles.js 应导出 window.GUIDE_CSS 字符串");
   for (const cls of [".gc-card", ".gc-grid", ".gc-dest-chip", ".gc-mode-badge", ".gc-meta-chip",
     ".gc-flag", ".gc-sched", ".gc-note", ".gc-hub-sec", ".gc-placeholder", ".gc-remark",
+    ".gc-camptag", ".gc-hubfigs",
     ".gc-hot", ".gc-pop", ".gc-print-root", "#gc-screen", "@media print", "@page"]) {
     assert.ok(css.includes(cls), `CSS 缺少 ${cls}`);
   }
@@ -135,8 +136,9 @@ test("normalizeData upgrades v1 cover/groups data to the v2 shape", () => {
   assert.ok(!("cover" in d) && !("groups" in d));
   assert.equal(d.hubs.length, 2);
   assert.deepEqual(
-    d.hubs.map((h) => [h.id, h.order, h.guideFigure, h.guideVideo, h.remark]),
-    [["hongqiao", 1, null, null, ""], ["pudong", 2, null, null, ""]],
+    // 渲染层在 vm 里求值，数组原型与本域不同，JSON 过一遍再比
+    JSON.parse(JSON.stringify(d.hubs.map((h) => [h.id, h.order, h.guideFigures, h.guideVideo, h.remark]))),
+    [["hongqiao", 1, [], null, ""], ["pudong", 2, [], null, ""]],
     "cover.hubs 应按顺序提升为顶层 hubs 并补空媒体/备注字段",
   );
   const route = d.cards[0];
@@ -186,6 +188,26 @@ test("normalizeData lifts steps cards into hub.sceneGuide (intermediate v2 draft
   // 已是当前形态（无 steps 卡）的 v2 仍原样返回
   const current = { schema: 2, hubs: [{ id: "h", sceneGuide: { sections: [] } }], cards: [] };
   assert.equal(normalizeData(current), current);
+});
+
+test("hubFigures/appliesTo: 指引图按校区过滤，旧 guideFigure 字段兼容", () => {
+  const { hubFigures, appliesTo } = loadRender().window.GuideRender;
+  const plain = (v) => JSON.parse(JSON.stringify(v));   // vm 域数组摊平成本域再比
+  // 旧草稿的单图字段升级读取
+  assert.deepEqual(plain(hubFigures({ guideFigure: "guidefig-hq" })), [{ src: "guidefig-hq" }]);
+  // 新数组字段优先，空项被滤掉
+  assert.deepEqual(
+    plain(hubFigures({ guideFigures: [{ src: "a" }, null, { src: "b", campuses: ["jiading"] }], guideFigure: "legacy" })),
+    [{ src: "a" }, { src: "b", campuses: ["jiading"] }],
+  );
+  assert.deepEqual(hubFigures({}).length, 0);
+
+  // 未声明 campuses = 通用；声明了的只在对应方向显示；campusId 为 null 时不过滤
+  assert.equal(appliesTo({}, "jiading"), true);
+  assert.equal(appliesTo({ campuses: [] }, "baoshan"), true);
+  assert.equal(appliesTo({ campuses: ["jiading"] }, "jiading"), true);
+  assert.equal(appliesTo({ campuses: ["jiading"] }, "baoshan"), false);
+  assert.equal(appliesTo({ campuses: ["jiading"] }, null), true);
 });
 
 test("icon registry: data.icons override the factory seed by id", () => {

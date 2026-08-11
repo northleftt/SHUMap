@@ -141,7 +141,7 @@ window.GuideRender = (function () {
       return {
         id: hb.id, name: hb.name, note: hb.note || null,
         color: hb.color || "#465060", order: i + 1,
-        guideFigure: null, guideVideo: null, remark: "", sceneGuide: null,
+        guideFigures: [], guideVideo: null, remark: "", sceneGuide: null,
       };
     });
 
@@ -179,6 +179,33 @@ window.GuideRender = (function () {
     var list = (data && data.hubs) || [];
     for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
     return null;
+  }
+
+  /* ══════════════ 校区适用性 ══════════════
+   * 枢纽指引图（hub.guideFigures）与实况指引小节（section.campuses）都可声明
+   * 适用校区：只在选中这些校区方向时显示；不声明（或空数组）= 通用，所有方向
+   * 都显示。campusId 传 null（打印稿 / 全量视图）时不过滤，由调用方给声明了
+   * campuses 的项补「XX 方向」标签。 */
+  function hubFigures(hub) {
+    if (!hub) return [];
+    if (Array.isArray(hub.guideFigures))
+      return hub.guideFigures.filter(function (f) { return f && f.src; });
+    if (hub.guideFigure) return [{ src: hub.guideFigure }];   // 旧草稿兼容
+    return [];
+  }
+  function appliesTo(item, campusId) {
+    if (!campusId) return true;
+    var cs = item && item.campuses;
+    return !cs || !cs.length || cs.indexOf(campusId) !== -1;
+  }
+  function campusTag(campuses, campusIds) {
+    var names = (campusIds || []).map(function (id) {
+      var c = null;
+      (campuses || []).forEach(function (x) { if (x.id === id) c = x; });
+      return c ? (c.short || c.label || c.id) : id;
+    });
+    if (!names.length) return null;
+    return h("span", { class: "gc-camptag", text: names.join(" / ") + " 方向" });
   }
 
   /* ══════════════ 图标库 ══════════════
@@ -563,15 +590,18 @@ window.GuideRender = (function () {
         loading: "lazy", decoding: "async" });
     }));
   }
-  function renderStepsBody(obj) {
+  function renderStepsBody(obj, campusId, campuses) {
     var body = h("div", { class: "gc-steps" });
     if (obj.intro) body.appendChild(h("div", { class: "gc-steps__intro", text: obj.intro }));
 
-    (obj.sections || []).forEach(function (sec) {
+    (obj.sections || []).filter(function (sec) { return appliesTo(sec, campusId); })
+      .forEach(function (sec) {
       var box = h("section", { class: "gc-sec", dataset: { accent: sec.accent || "" } });
       if (sec.title)
         box.appendChild(h("h4", { class: "gc-sec__t", text: sec.title },
-          sec.accent ? h("span", { class: "gc-sec__dot", style: "--c:" + sec.accent }) : null));
+          sec.accent ? h("span", { class: "gc-sec__dot", style: "--c:" + sec.accent }) : null,
+          !campusId && sec.campuses && sec.campuses.length
+            ? campusTag(campuses, sec.campuses) : null));
       if (sec.figures && sec.figures.length)
         box.appendChild(h("div", { class: "gc-secfigs" }, sec.figures.map(function (f) {
           return h("figure", { class: "gc-secfig" },
@@ -642,34 +672,48 @@ window.GuideRender = (function () {
     return h("h3", { class: "gc-hub-sec__t", text: text });
   }
 
-  /* 枢纽指引：有 guideFigure 渲染素材图（SVG 走接口），否则虚线占位 */
-  function renderHubGuide(hub) {
-    var body;
-    if (hub && hub.guideFigure) {
-      body = h("img", {
+  /* 枢纽指引：guideFigures 按校区过滤后渲染（SVG 走素材接口）。枢纽一张图
+     都没有时给虚线占位；有图但当前方向不适用时返回 null（整块不显示）。
+     campusId 为 null（打印稿）时全部显示，带「XX 方向」标签。 */
+  function renderHubGuide(hub, campusId, campuses) {
+    var all = hubFigures(hub);
+    if (!all.length) {
+      return h("section", { class: "gc-hub-sec" }, hubSecTitle("枢纽指引"),
+        h("div", { class: "gc-placeholder", text: "枢纽指引图待上传" }));
+    }
+    var shown = all.filter(function (f) { return appliesTo(f, campusId); });
+    if (!shown.length) return null;
+    var body = h("div", { class: "gc-hubfigs" }, shown.map(function (f) {
+      var img = h("img", {
         class: "gc-hub-fig",
-        src: ASSET_BASE + encodeURIComponent(hub.guideFigure),
+        src: figureSrc(f.src),
         alt: (hub.name || "") + " 枢纽指引图",
         loading: "lazy", decoding: "async",
       });
-      body.addEventListener("error", function () {
-        body.replaceWith(h("div", { class: "gc-placeholder", text: "枢纽指引图加载失败：" + hub.guideFigure }));
+      var fig = h("figure", { class: "gc-hubfig" },
+        !campusId && f.campuses && f.campuses.length ? campusTag(campuses, f.campuses) : null,
+        img);
+      img.addEventListener("error", function () {
+        fig.replaceWith(h("div", { class: "gc-placeholder", text: "枢纽指引图加载失败：" + f.src }));
       });
-    } else {
-      body = h("div", { class: "gc-placeholder", text: "枢纽指引图待上传" });
-    }
+      return fig;
+    }));
     return h("section", { class: "gc-hub-sec" }, hubSecTitle("枢纽指引"), body);
   }
 
-  /* 实况指引：枢纽的实景引导（sceneGuide 小节图文）+ 视频入口。
-     有 sceneGuide 渲染步骤图文；有 guideVideo.url 追加「点击查看视频引导」入口，
-     点开是居中的视频弹层。两者都没有时虚线占位。 */
-  function renderHubVideo(hub) {
+  /* 实况指引：枢纽的实景引导（sceneGuide 小节图文，按校区过滤）+ 视频入口。
+     有可见小节/引言/pending 渲染步骤图文；有 guideVideo.url 追加「点击查看视频
+     引导」入口，点开是居中的视频弹层。有内容但当前方向都不适用且无视频时返回
+     null（整块不显示）；什么内容都没有时虚线占位。 */
+  function renderHubVideo(hub, campusId, campuses) {
     var sg = hub && hub.sceneGuide;
-    var hasScene = !!(sg && ((sg.sections && sg.sections.length) || sg.intro || sg.pending));
+    var secs = sg ? (sg.sections || []).filter(function (sec) { return appliesTo(sec, campusId); }) : [];
+    var hasAnyScene = !!(sg && ((sg.sections && sg.sections.length) || sg.intro || sg.pending));
+    var hasScene = !!(sg && (secs.length || sg.intro || sg.pending));
     var gv = hub && hub.guideVideo;
     var kids = [];
-    if (hasScene) kids.push(renderStepsBody(sg));
+    if (hasScene)
+      kids.push(renderStepsBody({ intro: sg.intro, sections: secs, pending: sg.pending }, campusId, campuses));
     if (gv && gv.url) {
       var entry = h("button", {
         class: "gc-video-entry", type: "button",
@@ -681,7 +725,10 @@ window.GuideRender = (function () {
       entry.addEventListener("click", function () { openVideoLayer(gv); });
       kids.push(entry);
     }
-    if (!kids.length) kids.push(h("div", { class: "gc-placeholder", text: "实况指引待补充" }));
+    if (!kids.length) {
+      if (hasAnyScene) return null;   /* 有内容但都不适用这个方向：不显示 */
+      kids.push(h("div", { class: "gc-placeholder", text: "实况指引待补充" }));
+    }
     return h("section", { class: "gc-hub-sec" }, hubSecTitle("实况指引"), kids);
   }
 
@@ -763,8 +810,10 @@ window.GuideRender = (function () {
     }
 
     if (hub) {
-      container.appendChild(renderHubGuide(hub));
-      container.appendChild(renderHubVideo(hub));
+      var hg = renderHubGuide(hub, campusId, d.campuses);
+      if (hg) container.appendChild(hg);
+      var hv = renderHubVideo(hub, campusId, d.campuses);
+      if (hv) container.appendChild(hv);
       var remark = renderRemark(hub, o);
       if (remark) container.appendChild(remark);
     }
@@ -824,8 +873,10 @@ window.GuideRender = (function () {
         h("span", { class: "gc-print-hubband__n", text: hub.name }),
         hub.note ? h("span", { class: "gc-print-hubband__note", text: hub.note }) : null
       ));
-      sec.appendChild(renderHubGuide(hub));
-      sec.appendChild(renderHubVideo(hub));   /* 实况指引：步骤图文进打印稿，视频入口由打印 CSS 隐藏 */
+      var phg = renderHubGuide(hub, null, campuses);   /* 打印稿全量显示，带方向标签 */
+      if (phg) sec.appendChild(phg);
+      var phv = renderHubVideo(hub, null, campuses);   /* 实况指引：步骤图文进打印稿，视频入口由打印 CSS 隐藏 */
+      if (phv) sec.appendChild(phv);
       var remark = renderRemark(hub);
       if (remark) sec.appendChild(remark);
 
@@ -922,6 +973,7 @@ window.GuideRender = (function () {
     h: h, esc: esc, RAIL: RAIL, HOT_REF: HOT_REF,
     lineColor: lineColor, lineIcon: lineIcon,
     normalizeData: normalizeData,
+    hubFigures: hubFigures, appliesTo: appliesTo,
     allIcons: allIcons, iconById: iconById, renderIcon: renderIcon,
     sanitizeRichHtml: sanitizeRichHtml,
     renderCard: renderCard, renderRouteCard: renderRouteCard,

@@ -72,7 +72,11 @@ test("hubs have the v2 shape: id/name/color/order plus media and remark fields",
     assert.equal(typeof hub.order, "number");
     assert.ok(!orders.has(hub.order), `hub order ${hub.order} 重复`);
     orders.add(hub.order);
-    assert.ok(hub.guideFigure === null || typeof hub.guideFigure === "string");
+    assert.ok(Array.isArray(hub.guideFigures), `hub ${hub.id} 应有 guideFigures 数组`);
+    for (const f of hub.guideFigures) {
+      assert.equal(typeof f.src, "string");
+      assert.ok(!f.campuses || Array.isArray(f.campuses));
+    }
     assert.ok(hub.guideVideo === null || typeof hub.guideVideo === "object");
     assert.equal(typeof hub.remark, "string");
     // v1 目录字段不得残留
@@ -102,6 +106,30 @@ test("scene guidance lives on hubs (sceneGuide), not as standalone steps cards",
   // 松江站换乘指南的 pending（车次表待录入）要跟着迁过去
   const appendix = data.hubs.find((h) => h.id === "appendix");
   assert.ok(appendix?.sceneGuide?.pending, "appendix 枢纽的 sceneGuide 应保留 pending");
+});
+
+test("sceneGuide section campus tags reference real campuses and match route coverage", () => {
+  // 实况指引小节可声明 campuses（只在该校区方向显示），不声明 = 通用。
+  // 打错校区 id 会让小节在任何方向都看不见；只通公交的枢纽小节漏打标签，
+  // 会让乘地铁的学生看到一段用不上的指引。
+  const campusIds = new Set(data.campuses.map((c) => c.id));
+  for (const hub of data.hubs) {
+    for (const sec of hub.sceneGuide?.sections || []) {
+      for (const id of sec.campuses || []) {
+        assert.ok(campusIds.has(id), `hub ${hub.id} 小节「${sec.title}」引用了不存在的校区 ${id}`);
+      }
+    }
+  }
+  const secOf = (hubId, titlePart) =>
+    data.hubs.find((h) => h.id === hubId).sceneGuide.sections.find((s) => s.title.includes(titlePart));
+  // 嘉虹1线 / 虹桥枢纽9路 / 上嘉线都只到嘉定：这三个小节必须只标嘉定
+  //（种子在 vm 里求值，数组原型与本域不同，先摊平成本域数组再比）
+  assert.deepEqual([...secOf("hongqiao", "嘉虹1线").campuses], ["jiading"]);
+  assert.deepEqual([...secOf("hongqiao", "虹桥枢纽9路").campuses], ["jiading"]);
+  assert.deepEqual([...secOf("shanghai-south", "上嘉线").campuses], ["jiading"]);
+  // 上海站出站口选择、浦东机场、松江换乘指南是各方向通用：不得打标签
+  assert.ok(!secOf("shanghai-railway", "出站口选择").campuses, "出站口选择应通用");
+  assert.ok(!secOf("pudong-airport", "磁浮").campuses, "浦东机场小节应通用");
 });
 
 test("sceneGuide figure refs that point at /guide/figures/ exist on disk", () => {

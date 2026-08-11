@@ -224,6 +224,12 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   background:var(--surface)}
 .gc-hub-fig{width:100%;height:auto;display:block;border-radius:var(--r-md);
   background:var(--surface);border:1px solid var(--line)}
+.gc-hubfigs{display:flex;flex-direction:column;gap:14px}
+.gc-hubfig{margin:0}
+.gc-camptag{display:inline-block;font-size:11px;font-weight:600;line-height:16px;
+  color:var(--primary);background:var(--primary-container);border-radius:999px;
+  padding:2px 9px;margin:0 0 6px;vertical-align:middle}
+.gc-sec__t .gc-camptag{margin:0 0 0 8px}
 .gc-hub-video{width:100%;max-width:100%;display:block;border-radius:var(--r-md);
   background:#0f172a}
 .gc-hub-video__note{margin-top:8px;font-size:12px;line-height:18px;color:var(--sub)}

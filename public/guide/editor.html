@@ -88,6 +88,14 @@
   .ge-figrow .ge-f{flex:1;margin:0}
   .ge-figrow__thumb{width:56px;height:56px;object-fit:cover;border-radius:6px;
     border:1px solid var(--line);flex:none}
+  .ge-chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:6px 0}
+  .ge-chips__l{font-size:12px;font-weight:600;color:var(--sub);flex:none}
+  .ge-chips__hint{font-size:11px;color:var(--faint)}
+  .ge-chip{border:1px solid var(--line);background:var(--surface);font:inherit;
+    font-size:12px;font-weight:600;color:#4d5865;border-radius:999px;
+    padding:4px 11px;cursor:pointer;line-height:1.2;min-height:28px}
+  .ge-chip.is-on{border-color:var(--primary);background:var(--primary-container);
+    color:var(--primary)}
 
   .ge-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;
     color:var(--warning);letter-spacing:.02em;white-space:nowrap}
@@ -714,6 +722,40 @@
     return h("label", { class: "ge-f" }, h("span", { class: "ge-f__l", text: label }), input);
   }
 
+  function clearPath(path) {
+    var keys = path.split(".");
+    var last = keys.pop();
+    var host = keys.reduce(function (o, k) { return o[/^\d+$/.test(k) ? Number(k) : k]; }, data);
+    delete host[/^\d+$/.test(last) ? Number(last) : last];
+  }
+
+  /* 适用校区勾选 chips：指引图条目与实况指引小节共用。全不勾 = 通用
+     （所有校区方向都显示，直接删除 campuses 字段）。「各校区通用」(all)
+     是路线卡专用的虚拟校区，不出现在勾选里。 */
+  function campusChips(path) {
+    var list = (data.campuses || []).filter(function (c) { return c.id !== "all"; });
+    var cur = getPath(path) || [];
+    return h("div", { class: "ge-chips" },
+      h("span", { class: "ge-chips__l", text: "适用校区" }),
+      list.map(function (c) {
+        var on = cur.indexOf(c.id) !== -1;
+        var b = h("button", {
+          class: "ge-chip" + (on ? " is-on" : ""), type: "button",
+          text: c.short || c.label || c.id,
+        });
+        b.addEventListener("click", function () {
+          var arr = (getPath(path) || []).slice();
+          var i = arr.indexOf(c.id);
+          if (i === -1) arr.push(c.id); else arr.splice(i, 1);
+          if (arr.length) setPath(path, arr); else clearPath(path);
+          persist(); refresh();
+        });
+        return b;
+      }),
+      cur.length ? null : h("span", { class: "ge-chips__hint", text: "未勾选 = 所有方向通用" })
+    );
+  }
+
   function section(key, title, tag, selected, bodyFn) {
     var open = !!view.open[key];
     var sec = h("div", {
@@ -807,17 +849,29 @@
     var order = (data.hubs || []).length + 1;
     data.hubs.push({
       id: id, name: "新枢纽", note: null, color: "#465060", order: order,
-      guideFigure: null, guideVideo: null, remark: "",
+      guideFigures: [], guideVideo: null, remark: "",
     });
     view.open["hub:" + id] = true;
     persist();
     refresh();
   }
 
-  /* 指引图上传：PUT 到指南素材库，key 固定为 guidefig-<hubId>（服务端做 SVG 消毒） */
-  function uploadHubFigure(hub, file) {
+  /* 旧草稿的 guideFigure 单图字段在编辑时升级为 guideFigures 数组 */
+  function materializeFigures(hub) {
+    if (Array.isArray(hub.guideFigures)) return;
+    hub.guideFigures = hub.guideFigure ? [{ src: hub.guideFigure }] : [];
+    delete hub.guideFigure;
+  }
+
+  /* 指引图上传：PUT 到指南素材库（服务端做 SVG 消毒）。
+     idx 为 null 时新增一张（生成新 key）；否则替换该张并沿用原 key ——
+     已发布内容引用同一个 key，替换后线上同步更新。 */
+  function uploadHubFigure(hub, file, idx) {
     if (!server.online) return R.toast("离线模式下不能上传素材");
-    var key = "guidefig-" + hub.id;
+    materializeFigures(hub);
+    var key = idx == null
+      ? ("guidefig-" + hub.id + "-" + Date.now().toString(36)).replace(/[^a-z0-9-]/g, "-").slice(0, 62)
+      : hub.guideFigures[idx].src;
     var fr = new FileReader();
     fr.onerror = function () { R.toast("读取文件失败"); };
     fr.onload = function () {
@@ -829,7 +883,7 @@
       }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (body) {
           if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
-          hub.guideFigure = key;
+          if (idx == null) hub.guideFigures.push({ src: key });
           persist();
           refresh();
           loadAssets();
@@ -840,9 +894,10 @@
     fr.readAsText(file);
   }
 
-  function clearHubFigure(hub) {
-    var key = hub.guideFigure;
-    hub.guideFigure = null;
+  function clearHubFigure(hub, idx) {
+    materializeFigures(hub);
+    var key = hub.guideFigures[idx] && hub.guideFigures[idx].src;
+    hub.guideFigures.splice(idx, 1);
     persist();
     refresh();
     if (server.online && key &&
@@ -956,37 +1011,42 @@
     ));
     w.appendChild(field("括注", base + ".note", { nullable: true }));
 
-    /* —— 指引图 —— */
+    /* —— 指引图：可按校区方向传多张，未勾校区的所有方向通用 —— */
+    materializeFigures(hub);
+    var pickHubFig = function (idx) {
+      return function () {
+        if (!server.online) return R.toast("离线模式下不能上传素材");
+        var fi = document.getElementById("ge-hubfig");
+        fi.dataset.hubId = hub.id;
+        if (idx == null) delete fi.dataset.figIdx;
+        else fi.dataset.figIdx = String(idx);
+        fi.click();
+      };
+    };
     var figBox = h("div", { class: "ge-item" },
       h("div", { class: "ge-item__h" },
-        h("span", { class: "ge-item__n", text: "指引图（SVG，存素材库）" })));
-    if (hub.guideFigure) {
-      figBox.appendChild(h("div", { class: "ge-figprev" },
-        h("img", {
-          src: "/api/public/guide-assets/" + encodeURIComponent(hub.guideFigure),
-          alt: hub.guideFigure,
-          onerror: function () { this.style.display = "none"; },
-        }),
-        h("span", { class: "ge-figprev__k", text: hub.guideFigure })));
-      figBox.appendChild(h("div", { class: "ge-adds", style: "margin:0" },
-        h("button", { class: "ge-mini", type: "button", text: "替换",
-          onclick: function () {
-            var fi = document.getElementById("ge-hubfig");
-            fi.dataset.hubId = hub.id;
-            fi.click();
-          } }),
-        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "清除",
-          onclick: function () { clearHubFigure(hub); } })));
-    } else {
-      figBox.appendChild(h("div", { class: "ge-adds", style: "margin:0" },
-        h("button", { class: "gc-btn", type: "button", text: "上传指引图（SVG）",
-          onclick: function () {
-            if (!server.online) return R.toast("离线模式下不能上传素材");
-            var fi = document.getElementById("ge-hubfig");
-            fi.dataset.hubId = hub.id;
-            fi.click();
-          } })));
-    }
+        h("span", { class: "ge-item__n", text: "指引图（SVG，存素材库；按校区方向可多张）" })));
+    hub.guideFigures.forEach(function (fig, fidx) {
+      var fbase = base + ".guideFigures." + fidx;
+      figBox.appendChild(h("div", { class: "ge-item", style: "background:#fff" },
+        h("div", { class: "ge-figprev" },
+          h("img", {
+            src: "/api/public/guide-assets/" + encodeURIComponent(fig.src),
+            alt: fig.src,
+            onerror: function () { this.style.display = "none"; },
+          }),
+          h("span", { class: "ge-figprev__k", text: fig.src })),
+        campusChips(fbase + ".campuses"),
+        h("div", { class: "ge-adds", style: "margin:0" },
+          h("button", { class: "ge-mini", type: "button", text: "替换",
+            onclick: pickHubFig(fidx) }),
+          h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "删除",
+            onclick: function () { clearHubFigure(hub, fidx); } }))));
+    });
+    figBox.appendChild(h("div", { class: "ge-adds", style: "margin:0" },
+      h("button", { class: hub.guideFigures.length ? "ge-mini" : "gc-btn", type: "button",
+        text: hub.guideFigures.length ? "+ 再传一张（按校区方向区分）" : "上传指引图（SVG）",
+        onclick: pickHubFig(null) })));
     w.appendChild(figBox);
 
     /* —— 实况指引：实景引导图文（sceneGuide）+ 视频入口（guideVideo） —— */
@@ -1488,6 +1548,7 @@
             h("span", { class: "ge-f__l", text: "不显示步骤序号" }), cb);
         })()
       ));
+      box.appendChild(campusChips(sb + ".campuses"));
 
       /* 小节级照片（如出站口指示牌组）：缩略图 + 说明 + 删除 */
       (sec.figures || []).forEach(function (fig, fi2) {
@@ -2094,17 +2155,19 @@
     fr.readAsText(f);
   });
 
-  /* 枢纽指引图上传：key 固定 guidefig-<hubId>，由 hubBody 里的按钮触发 */
+  /* 枢纽指引图上传：dataset.hubId 定位枢纽，dataset.figIdx 存在时替换该张，否则新增 */
   document.getElementById("ge-hubfig").addEventListener("change", function (e) {
     var fi = e.target;
     var f = fi.files && fi.files[0];
     var hubId = fi.dataset.hubId || "";
+    var figIdx = fi.dataset.figIdx;
     delete fi.dataset.hubId;
+    delete fi.dataset.figIdx;
     fi.value = "";
     if (!f || !hubId) return;
     var hub = hubById(hubId);
     if (!hub) return;
-    uploadHubFigure(hub, f);
+    uploadHubFigure(hub, f, figIdx === undefined ? null : Number(figIdx));
   });
 
   /* 备注插图上传（figure_png）：成功后把 <img> 插回备注编辑器光标处 */

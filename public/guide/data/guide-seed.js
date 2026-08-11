@@ -88,7 +88,7 @@ window.GUIDE_DATA = {
       "note": "（铁路上海虹桥站, 虹桥机场）",
       "color": "#3aa17e",
       "order": 1,
-      "guideFigure": null,
+      "guideFigures": [],
       "guideVideo": null,
       "remark": "",
       "sceneGuide": {
@@ -96,6 +96,7 @@ window.GUIDE_DATA = {
           {
             "title": "从虹桥站去往虹桥枢纽西综合交通中心（嘉虹1线）：",
             "accent": "#d6417f",
+            "campuses": ["jiading"],
             "steps": [
               {
                 "text": "火车站到达层往西（虹桥商务区）方向走",
@@ -118,6 +119,7 @@ window.GUIDE_DATA = {
           {
             "title": "从虹桥站/虹桥机场去往市域线/虹桥枢纽东综合交通中心（虹桥枢纽9路）：",
             "accent": "#e4002b",
+            "campuses": ["jiading"],
             "steps": [
               {
                 "text": "火车站到达层往东（2号航站楼）走, 穿过地下通道",
@@ -147,7 +149,7 @@ window.GUIDE_DATA = {
       "note": "（上海长途客运总站）",
       "color": "#c2a25e",
       "order": 2,
-      "guideFigure": null,
+      "guideFigures": [],
       "guideVideo": null,
       "remark": "",
       "sceneGuide": {
@@ -187,13 +189,14 @@ window.GUIDE_DATA = {
       "note": null,
       "color": "#3f6ea8",
       "order": 3,
-      "guideFigure": null,
+      "guideFigures": [],
       "guideVideo": null,
       "remark": "",
       "sceneGuide": {
         "sections": [
           {
             "title": "从上海南站去往南广场公交枢纽（上嘉线）：",
+            "campuses": ["jiading"],
             "steps": [
               {
                 "text": "进入地下区域",
@@ -233,7 +236,7 @@ window.GUIDE_DATA = {
       "note": null,
       "color": "#8cc63e",
       "order": 4,
-      "guideFigure": null,
+      "guideFigures": [],
       "guideVideo": null,
       "remark": "",
       "sceneGuide": {
@@ -287,7 +290,7 @@ window.GUIDE_DATA = {
       "note": null,
       "color": "#e8a08c",
       "order": 5,
-      "guideFigure": null,
+      "guideFigures": [],
       "guideVideo": null,
       "remark": ""
     },
@@ -297,7 +300,7 @@ window.GUIDE_DATA = {
       "note": "（上海松江站换乘指南）",
       "color": "#9aa2ac",
       "order": 6,
-      "guideFigure": null,
+      "guideFigures": [],
       "guideVideo": null,
       "remark": "",
       "sceneGuide": {
