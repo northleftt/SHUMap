@@ -118,8 +118,9 @@ function parseMerchantEditorRevision(response: MerchantDetailResponse): Merchant
  * 开在楼里的店靠上面的「所在地点 / 楼层 / 室内空间」定位，这里补的是另一半：
  * 摆在楼外的摊位、快闪车、集市档口，它们没有楼宇可挂，只能在校区图上点一个点。
  * 面积与路径类用途（impact_area / route_shape）属于运营事件，不给门店。
+ * navigation_target 供导航终点用，画布选点后自动换算成 GCJ-02 经纬度。
  */
-const MERCHANT_LOCATION_ROLES = ["primary_display", "main_entrance", "service_position", "other"] as const;
+const MERCHANT_LOCATION_ROLES = ["primary_display", "main_entrance", "service_position", "navigation_target", "other"] as const;
 
 export function MerchantEditorPage() {
   const { id = "" } = useParams();

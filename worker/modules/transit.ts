@@ -24,17 +24,20 @@ const BOOKING_POLICIES = ["required", "optional", "not_required"] as const;
 const STOP_STATUSES = ["active", "temporarily_closed", "retired"] as const;
 const ROUTE_STATUSES = ["active", "suspended", "retired"] as const;
 /**
- * A stop keeps at most one anchor of its own: the waiting point. Whether a
- * direction boards or alights here belongs to the pattern (pickup/dropoff
- * type), not to the stop. The role value stays `boarding_point` because the
- * role enum is a CHECK constraint on location_anchors (0001) and renaming it
- * would mean rebuilding that table in production; legacy `alighting_point`
- * rows remain readable but new writes only accept this single role.
+ * A stop keeps at most two anchors of its own: the waiting point (`boarding_point`,
+ * an svg_viewbox canvas pin) and optionally a navigation destination
+ * (`navigation_target`, a GCJ-02 point filled from canvas picking) for the
+ * "navigate here" link. Whether a direction boards or alights here belongs to
+ * the pattern (pickup/dropoff type), not to the stop. The waiting-point role
+ * value stays `boarding_point` because the role enum is a CHECK constraint on
+ * location_anchors (0001) and renaming it would mean rebuilding that table in
+ * production; legacy `alighting_point` rows remain readable but new writes only
+ * accept `boarding_point`.
  */
-const STOP_LOCATION_ROLES = ["boarding_point"] as const;
+const STOP_LOCATION_ROLES = ["boarding_point", "navigation_target"] as const;
 const MAX_PATTERN_STOPS = 40;
 const MAX_CALENDAR_EXCEPTIONS = 366;
-const MAX_STOP_LOCATIONS = 1;
+const MAX_STOP_LOCATIONS = 2;
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
 /**
@@ -58,10 +61,17 @@ async function assertCodeAvailable(
 /** Validate the `locations` field of a stop create / update payload. */
 function stopLocations(value: unknown) {
   const locations = normalizeLocationInputs(value, "locations", MAX_STOP_LOCATIONS);
+  const seenRoles = new Set<string>();
   for (const [index, location] of locations.entries()) {
     if (!STOP_LOCATION_ROLES.includes(location.role as (typeof STOP_LOCATION_ROLES)[number])) {
       throw new HttpError(400, "validation_error", `locations[${index}].role is not supported for transit stops`);
     }
+    // 候车点与导航终点各最多一个：两个 navigation_target 会让发布端的
+    // buildMapPointPois 直接抛「multiple navigation locations」，整张地图打不开。
+    if (seenRoles.has(location.role)) {
+      throw new HttpError(400, "validation_error", `locations[${index}].role can appear at most once for a transit stop`);
+    }
+    seenRoles.add(location.role);
   }
   return locations;
 }

@@ -64,16 +64,18 @@ test("the client renders and labels the new POI kind", () => {
   assert.match(read("src/pages/map/PoiDetailSheet.tsx"), /target\.targetType === "transit_stop"/);
 });
 
-test("a stop keeps one waiting point; boarding vs alighting belongs to the pattern", () => {
+test("a stop keeps a waiting point plus an optional navigation target", () => {
   const worker = read("worker/modules/transit.ts");
-  assert.match(worker, /STOP_LOCATION_ROLES = \["boarding_point"\]/);
-  assert.match(worker, /MAX_STOP_LOCATIONS = 1/);
-  // 上 / 下车语义由线路方向的 pickup/dropoff 表达，不在站点的锚点上。
+  assert.match(worker, /STOP_LOCATION_ROLES = \["boarding_point", "navigation_target"\]/);
+  // 候车点与导航终点各一个，两个都允许；上 / 下车语义由线路方向的 pickup/dropoff 表达。
+  assert.match(worker, /MAX_STOP_LOCATIONS = 2/);
+  assert.match(worker, /seenRoles\.has\(location\.role\)/);
   assert.match(read("migrations-v2/0001_architecture_v2.sql"), /pickup_type/);
   // 管理端编辑器与 worker 同一份约束。
   const admin = read("src/admin/pages/TransitPage.tsx");
-  assert.match(admin, /STOP_LOCATION_ROLES: readonly LocationRole\[\] = \["boarding_point"\]/);
-  assert.match(admin, /maxRows=\{1\}/);
+  assert.match(admin, /STOP_LOCATION_ROLES: readonly LocationRole\[\] = \["boarding_point", "navigation_target"\]/);
+  assert.match(admin, /maxRows=\{2\}/);
+  assert.match(admin, /hasBoardingPoint/);
 });
 
 test("a stop without its own anchor falls back to the bound place on both clients", () => {

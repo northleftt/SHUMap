@@ -32,8 +32,8 @@ export interface CanvasGeometry {
   path: CanvasVert[] | null;
 }
 
-/** 已取到底图的校区；id / mapVersionId 供调用方拼位置载荷。 */
-export type CanvasCampus = CampusConfig;
+/** 已取到底图的校区；id / mapVersionId 供调用方拼位置载荷。后台画布不做地理定位，不含 geoTransform。 */
+export type CanvasCampus = Omit<CampusConfig, "geoTransform">;
 
 const AREA_COLOR = "#f59e0b";
 const POINT_COLOR = "#1e80c1";
@@ -121,7 +121,7 @@ export function campusKeyOfRow(row: { code: string }): CampusKey {
   return code;
 }
 
-export const CAMPUS_DISPLAY: Record<CampusKey, Omit<CampusConfig, "id" | "key" | "label" | "mapVersionId" | "svgRaw">> = {
+export const CAMPUS_DISPLAY: Record<CampusKey, Omit<CampusConfig, "id" | "key" | "label" | "mapVersionId" | "svgRaw" | "geoTransform">> = {
   baoshan: { focusPoint: { x: 0.48, y: 0.43 }, scaleMultiplier: 1.78, minScaleMultiplier: 1, edgePaddingRatio: 0.18, selectionEdgePaddingRatio: 0.3, selectionScaleMultiplier: 2.15 },
   jiading: { focusPoint: { x: 0.37, y: 0.5 }, scaleMultiplier: 3.05, minScaleMultiplier: 1, edgePaddingRatio: 0.3, selectionEdgePaddingRatio: 0.4, selectionScaleMultiplier: 2.4 },
   yanchang: { focusPoint: { x: 0.52, y: 0.46 }, scaleMultiplier: 0.8, minScaleMultiplier: 1, edgePaddingRatio: 0.2, selectionEdgePaddingRatio: 0.32, selectionScaleMultiplier: 1.35 },

@@ -13,6 +13,7 @@ import type {
   CampusConfig,
   CampusKey,
   FilterKey,
+  GeoTransform,
   MapBuilding,
   MapPoi,
   MapPoiPoint,
@@ -29,6 +30,8 @@ type CampusDisplayConfig = Omit<
   "id" | "key" | "label" | "mapVersionId" | "svgRaw"
 >;
 
+// geoTransform 由 scripts/generate_geo_transform.mjs 用楼栋控制点拟合
+// （gcj02 → viewBox；输入坐标一律 gcj02，wgs84 先经 wgs84ToGcj02 转换）。
 const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
   baoshan: {
     focusPoint: { x: 0.48, y: 0.43 },
@@ -37,6 +40,14 @@ const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
     edgePaddingRatio: 0.18,
     selectionEdgePaddingRatio: 0.3,
     selectionScaleMultiplier: 2.15,
+    geoTransform: {
+      a: 58096.587722,
+      b: -1364.896087,
+      c: -7009407.677732,
+      d: 74.665324,
+      e: -67597.596591,
+      f: 2108281.408994,
+    },
   },
   jiading: {
     focusPoint: { x: 0.37, y: 0.5 },
@@ -45,6 +56,14 @@ const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
     edgePaddingRatio: 0.3,
     selectionEdgePaddingRatio: 0.4,
     selectionScaleMultiplier: 2.4,
+    geoTransform: {
+      a: 36919.351777,
+      b: 25314.285944,
+      c: -5270501.322346,
+      d: 22478.179486,
+      e: -43768.154359,
+      f: -1351983.930295,
+    },
   },
   yanchang: {
     focusPoint: { x: 0.52, y: 0.46 },
@@ -53,7 +72,26 @@ const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
     edgePaddingRatio: 0.2,
     selectionEdgePaddingRatio: 0.32,
     selectionScaleMultiplier: 1.35,
+    geoTransform: {
+      a: 136825.701326,
+      b: 45497.163485,
+      c: -18040910.834178,
+      d: 43328.717962,
+      e: -158309.577506,
+      f: -310665.751538,
+    },
   },
+};
+
+/**
+ * 各校区 gcj02 ↔ viewBox 仿射参数。管理端画布选点（navigation_target 逆变换回填
+ * 经纬度，见 src/admin/components/LocationEditor.tsx）与发布端共用这一份拟合结果，
+ * 不要在 admin 侧再复制一份参数。
+ */
+export const CAMPUS_GEO_TRANSFORMS: Record<CampusKey, GeoTransform> = {
+  baoshan: CAMPUS_DISPLAY.baoshan.geoTransform,
+  jiading: CAMPUS_DISPLAY.jiading.geoTransform,
+  yanchang: CAMPUS_DISPLAY.yanchang.geoTransform,
 };
 
 function contractError(message: string): Error {

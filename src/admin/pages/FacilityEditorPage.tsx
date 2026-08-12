@@ -46,10 +46,11 @@ import type { FacilityContent } from "../../../shared/revision-contract";
  *
  * 不含 service_position：那一条由下面的「服务位置」面板独占（楼层平面图点选），
  * 两处都能编同一行会互相覆盖。楼外的设施（露天充电桩、快递柜、自助售货机）
- * 在校区图上点，用 primary_display / centroid 这些角色。
+ * 在校区图上点，用 primary_display / centroid 这些角色。navigation_target 供
+ * 导航终点用，画布选点后自动换算成 GCJ-02 经纬度。
  */
 const FACILITY_LOCATION_ROLES = [
-  "primary_display", "centroid", "main_entrance", "accessible_entrance", "other",
+  "primary_display", "centroid", "main_entrance", "accessible_entrance", "navigation_target", "other",
 ] as const;
 
 interface PlanPoint {

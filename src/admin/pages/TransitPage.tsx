@@ -66,8 +66,8 @@ const TABS: Array<{ key: Tab; label: string }> = [
 const WEEK_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
 const WEEK_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
-/** 站点自身最多一个锚点：候车点。上 / 下车安排归线路方向（pickup/dropoff），不归站点。 */
-const STOP_LOCATION_ROLES: readonly LocationRole[] = ["boarding_point"];
+/** 站点自身的锚点：候车点，外加可选的导航终点。上 / 下车安排归线路方向（pickup/dropoff），不归站点。 */
+const STOP_LOCATION_ROLES: readonly LocationRole[] = ["boarding_point", "navigation_target"];
 
 const DIRECTION_LABELS: Record<number, string> = { 0: "去程", 1: "回程" };
 
@@ -993,12 +993,22 @@ function StopEditor({
   function submit() {
     if (!name.trim()) { setFormError("请填写站点名称"); return; }
     const kept = locations.filter((row) => !isLocationDraftBlank(row));
-    if (kept.length > 1) {
-      setFormError("站点最多标一个候车点；缺省不标时图钉与导航跟随绑定地点");
+    if (kept.length > 2) {
+      setFormError("站点最多标一个候车点和一个导航终点；都不标时图钉与导航跟随绑定地点");
       return;
     }
-    // 唯一的候车点就是主要位置，不再让管理员操心 primary 勾选。
-    const normalized = kept.map((row) => ({ ...row, isPrimary: true }));
+    const roles = kept.map((row) => row.role);
+    if (new Set(roles).size !== roles.length) {
+      setFormError("候车点与导航终点各只能标一个");
+      return;
+    }
+    // 候车点是主要位置（决定地图图钉）；只有导航终点时才让它顶替主要位置。
+    // 管理员不必操心 primary 勾选。
+    const hasBoardingPoint = roles.includes("boarding_point");
+    const normalized = kept.map((row) => ({
+      ...row,
+      isPrimary: hasBoardingPoint ? row.role === "boarding_point" : true,
+    }));
     try {
       // locationInput 会校验经纬度成对、不与地图图形冲突等，先跑一遍再提交。
       normalized.map(locationInput);
@@ -1059,11 +1069,11 @@ function StopEditor({
       <LocationEditor
         disabled={busy}
         mapVersions={meta.mapVersions}
-        maxRows={1}
+        maxRows={2}
         onChange={setLocations}
         roles={STOP_LOCATION_ROLES}
         spaces={meta.spaces}
-        title="候车点（可选，缺省跟随绑定地点）"
+        title="候车点 / 导航终点（可选，缺省跟随绑定地点）"
         value={locations}
       />
 

@@ -1,8 +1,15 @@
-import { Crosshair, Layers, Maximize2, Minimize2, X } from "lucide-react";
+import { Crosshair, Layers, LocateFixed, Maximize2, Minimize2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { applyGeoTransform, wgs84ToGcj02 } from "../../../shared/geo-transform.mjs";
+import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
+import { campusKeyForGcj02Point, type CampusGeoEntry } from "../../../shared/user-location.mjs";
 import { MapCanvas, type MapViewWindow } from "../../components/map/MapCanvas";
 import { MapEventOverlay, buildEventOverlayItems } from "../../components/map/MapEventOverlay";
 import { MapPoiOverlay } from "../../components/map/MapPoiOverlay";
+import {
+  MapUserLocationOverlay,
+  type UserLocationPosition,
+} from "../../components/map/MapUserLocationOverlay";
 import { GuideBanner } from "../../components/layout/GuideBanner";
 import { useSheetDrag } from "../../components/sheet/useSheetDrag";
 import { SearchInput } from "../../components/ui/SearchInput";
@@ -10,6 +17,7 @@ import { LoadingState } from "../../components/ui/EmptyState";
 import { SeverityIcon, severityOf } from "../../components/ui/SeverityBanner";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useOperations } from "../../lib/hooks/useOperations";
+import type { CampusKey } from "../../lib/types";
 import { CampusSwitcher } from "./CampusSwitcher";
 import { DesktopMapPanel, PoiMapCard } from "./DesktopMapPanel";
 import { LayerPanel } from "./LayerPanel";
@@ -47,6 +55,14 @@ export function MapPage() {
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
   const [viewWindow, setViewWindow] = useState<MapViewWindow | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  // 用户定位 dot：watchPosition 持续更新；定位按钮点击后的居中请求（nonce 递增触发）
+  const [userPosition, setUserPosition] = useState<UserLocationPosition | null>(null);
+  const [locationFocusRequest, setLocationFocusRequest] = useState<{
+    point: { x: number; y: number };
+    nonce: number;
+  } | null>(null);
+  // 定位失败的用户可见提示（数秒后自动消失）
+  const [locationHint, setLocationHint] = useState<string | null>(null);
   // 事件详情卡（摘要卡「查看详情」入口）；存 id 而非布尔，换事件后不会残留展开态
   const [detailEventId, setDetailEventId] = useState<string | null>(null);
   // 几何坐标是各校区的 svg_viewbox，只渲染当前校区的事件（campusId 为空视为通用）
@@ -171,6 +187,105 @@ export function MapPage() {
     [state.campusPois],
   );
 
+  // 三校区 geoTransform + viewBox 索引（viewBox 解析在此缓存，定位回调不重复解析 SVG）
+  const campusGeoIndex = useMemo<CampusGeoEntry[]>(
+    () =>
+      (state.campuses ?? []).map((campus) => ({
+        key: campus.key,
+        geoTransform: campus.geoTransform,
+        viewBox: parseSvgViewBox(campus.svgRaw),
+      })),
+    [state.campuses],
+  );
+  // watchPosition 回调在挂载时闭包固定，校区索引/当前校区/切校区动作走 ref 读最新值
+  const campusGeoIndexRef = useRef(campusGeoIndex);
+  const activeCampusKeyRef = useRef<string | null>(null);
+  const resetForCampusRef = useRef(state.resetForCampus);
+  useEffect(() => {
+    campusGeoIndexRef.current = campusGeoIndex;
+  }, [campusGeoIndex]);
+  useEffect(() => {
+    activeCampusKeyRef.current = state.campus?.key ?? null;
+  }, [state.campus?.key]);
+  useEffect(() => {
+    resetForCampusRef.current = state.resetForCampus;
+  });
+
+  // 持续定位：挂载即 watchPosition，卸载 clearWatch。
+  // 非 secure context / 用户拒绝授权时 error 回调静默处理——只是不显示 dot。
+  // 首次定位回调自动选校区（落在某校区 viewBox 内且非当前选中校区则切换）；
+  // 之后的持续回调不再自动切，尊重用户手动切校区。校区数据未就绪时不消耗首次机会。
+  const autoCampusDoneRef = useRef(false);
+  useEffect(() => {
+    if (!("geolocation" in navigator)) return;
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setUserPosition({
+          longitude: position.coords.longitude,
+          latitude: position.coords.latitude,
+          accuracy: position.coords.accuracy,
+        });
+        if (!autoCampusDoneRef.current && campusGeoIndexRef.current.length > 0) {
+          autoCampusDoneRef.current = true;
+          const gcj = wgs84ToGcj02(position.coords.longitude, position.coords.latitude);
+          const campusKey = campusKeyForGcj02Point(
+            campusGeoIndexRef.current,
+            gcj.longitude,
+            gcj.latitude,
+          );
+          if (campusKey && campusKey !== activeCampusKeyRef.current) {
+            resetForCampusRef.current(campusKey as CampusKey);
+          }
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true },
+    );
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, []);
+
+  // 定位提示自动消失
+  useEffect(() => {
+    if (!locationHint) return;
+    const timer = setTimeout(() => setLocationHint(null), 4000);
+    return () => clearTimeout(timer);
+  }, [locationHint]);
+
+  // 定位按钮：立即取一次当前位置；落在哪个校区就切到哪个校区并居中聚焦 dot
+  // （缩放档位同 POI 选中聚焦）；不在任何校区内给出提示。
+  function handleLocate() {
+    if (!("geolocation" in navigator)) {
+      setLocationHint("当前环境不支持定位");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserPosition({
+          longitude: position.coords.longitude,
+          latitude: position.coords.latitude,
+          accuracy: position.coords.accuracy,
+        });
+        const gcj = wgs84ToGcj02(position.coords.longitude, position.coords.latitude);
+        const campusKey = campusKeyForGcj02Point(campusGeoIndex, gcj.longitude, gcj.latitude);
+        if (!campusKey) {
+          setLocationHint("当前位置不在校区范围内");
+          return;
+        }
+        if (campusKey !== state.campus?.key) {
+          // 先切校区；同一次渲染里 MapCanvas 拿到新 campus + 新 focusRequest
+          state.resetForCampus(campusKey as CampusKey);
+        }
+        const target = campusGeoIndex.find((campus) => campus.key === campusKey);
+        if (!target) return;
+        const point = applyGeoTransform(target.geoTransform, gcj.longitude, gcj.latitude);
+        setLocationFocusRequest((current) => ({ point, nonce: (current?.nonce ?? 0) + 1 }));
+        setLocationHint(null);
+      },
+      () => setLocationHint("定位失败，请检查浏览器定位权限后重试"),
+      { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 },
+    );
+  }
+
   if (state.releaseStatus === "loading") {
     return (
       <div className="h-full bg-map-ground">
@@ -214,6 +329,7 @@ export function MapPage() {
           }}
           viewResetNonce={viewResetNonce}
           onViewWindowChange={setViewWindow}
+          focusRequest={locationFocusRequest}
           zoomControlPosition={isMobile ? "center-right" : "bottom-right"}
           overlay={
             <>
@@ -231,6 +347,11 @@ export function MapPage() {
                   onSelect={setSelectedEventId}
                 />
               ) : null}
+              <MapUserLocationOverlay
+                viewWindow={viewWindow}
+                campus={state.campus}
+                position={userPosition}
+              />
             </>
           }
         />
@@ -246,6 +367,22 @@ export function MapPage() {
             <GuideBanner />
           </div>
           <div className="flex flex-col items-end gap-2">
+            <button
+              type="button"
+              aria-label="定位到我的位置"
+              className="grid h-11 w-11 place-items-center rounded-full bg-surface text-primary shadow-floating"
+              onClick={handleLocate}
+            >
+              <LocateFixed size={19} />
+            </button>
+            {locationHint ? (
+              <div
+                role="status"
+                className="max-w-44 rounded-xl bg-surface px-3 py-2 text-center text-aux text-ink shadow-floating"
+              >
+                {locationHint}
+              </div>
+            ) : null}
             <button
               type="button"
               aria-label="回到校区中心"

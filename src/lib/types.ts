@@ -63,6 +63,16 @@ export interface NavigationUrls {
   system: string;
 }
 
+/** gcj02 → SVG viewBox 仿射变换参数（scripts/generate_geo_transform.mjs 拟合）。 */
+export interface GeoTransform {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+}
+
 export interface CampusConfig {
   id: string;
   key: CampusKey;
@@ -70,6 +80,7 @@ export interface CampusConfig {
   mapVersionId: string;
   svgRaw: string;
   focusPoint: { x: number; y: number };
+  geoTransform: GeoTransform;
   scaleMultiplier: number;
   minScaleMultiplier: number;
   edgePaddingRatio: number;

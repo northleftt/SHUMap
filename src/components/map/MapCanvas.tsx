@@ -231,6 +231,8 @@ interface MapCanvasProps {
   onTapOverlayPoi?: (poiKey: string) => void;
   /** 视口 viewBox 窗口变化回调（叠加层同步用） */
   onViewWindowChange?: (window: MapViewWindow) => void;
+  /** 外部聚焦请求（定位按钮）：nonce 变化时居中到 point，缩放档位同 POI 选中聚焦 */
+  focusRequest?: { point: Point; nonce: number } | null;
   /** 缩放控件位置：移动端右中，桌面端右下 */
   zoomControlPosition?: "center-right" | "bottom-right";
   /** 变化时将视野重置为校区初始视野（定位/回中按钮用） */
@@ -252,6 +254,7 @@ export function MapCanvas({
   onViewWindowChange,
   zoomControlPosition = "center-right",
   viewResetNonce,
+  focusRequest,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const svgHostRef = useRef<HTMLDivElement | null>(null);
@@ -558,6 +561,27 @@ export function MapCanvas({
     selectionFocusBounds,
     viewBox,
   ]);
+
+  // 外部聚焦请求（定位按钮）：nonce 变化时居中到指定点，复用与 selectedPoint
+  // 相同的 focusPointWindow（缩放档位 = POI 选中聚焦）。只依赖 focusRequest：
+  // 切校区时 campus/viewBox 变化不应让旧坐标在新校区坐标系里再聚焦一次；
+  // 定位按钮的跨校区切换在同一次渲染里换 campus + 递增 nonce，effect 用新值跑。
+  useEffect(() => {
+    if (!focusRequest) return;
+    setViewWindow(
+      focusPointWindow({
+        point: focusRequest.point,
+        currentWindow: viewWindowRef.current,
+        viewBox,
+        container: containerSize,
+        selectionScaleMultiplier: campus.selectionScaleMultiplier,
+        selectionEdgePaddingRatio: campus.selectionEdgePaddingRatio,
+        selectionFocusBounds,
+      }),
+    );
+  // viewWindow 通过 ref 读取，不列入依赖，避免每次平移/缩放都重新触发定位
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest]);
 
   function zoomAt(point: Point, nextScale: number) {
     setViewWindow((current) => {

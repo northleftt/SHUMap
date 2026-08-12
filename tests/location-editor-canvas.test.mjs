@@ -43,9 +43,10 @@ test("canvas geometry is written with the canvas CRS and its map version", () =>
 test("a canvas point and typed coordinates cannot both survive on one row", () => {
   const source = read("src/admin/components/LocationEditor.tsx");
   // 两者落到同一处几何：locationInput 里手填经纬度优先，留着能同时改必然有一个
-  // 被静默丢弃。画布写回时清空经纬度，反之锁住画布。
+  // 被静默丢弃。画布写回时清空经纬度，反之锁住画布。navigation_target 例外：它的
+  // 存库形态就是经纬度，画布选点逆变换回填，因此经纬度已填时画布照常展示。
   assert.match(source, /longitude: "",\n\s+latitude: "",\n\s+origin: \{\n\s+geometryType: shape\.geometryType/);
-  assert.match(source, /typedPoint \? \([\s\S]*?已手填经纬度/);
+  assert.match(source, /typedPoint && row\.role !== "navigation_target" \? \([\s\S]*?已手填经纬度/);
   assert.match(source, /disabled=\{disabled \|\| Boolean\(row\.mapFeatureId\) \|\| drawn\}/);
 });
 
@@ -64,9 +65,11 @@ test("roles the storage contract forbids drawing are absent from the canvas tabl
     source.indexOf("/** 该行是否已经存着画布画出来的几何。 */"),
   );
   assert.ok(table.length > 0, "找不到 CANVAS_TOOLS_BY_ROLE");
-  // 0015 的触发器要求 navigation_target 必须是 GCJ02 Point，而仓库里没有
-  // svg_viewbox → GCJ-02 的换算；footprint 必须 geometry 为空并绑已导入 feature。
-  assert.doesNotMatch(table, /navigation_target/);
+  // 0015 的触发器要求 navigation_target 必须是 GCJ02 Point：画布选点经
+  // viewBoxToGcj02 逆变换回填经纬度后仍以 GCJ02 Point 存库，因此它允许点画，
+  // 但只允许点，且这一行不存画布几何（见 navTargetCanvasValue / applyCanvas）。
+  assert.match(table, /navigation_target: \["point"\]/);
+  // footprint 必须 geometry 为空并绑已导入 feature，自由绘制仍写不进去。
   assert.doesNotMatch(table, /footprint/);
 });
 

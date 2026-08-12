@@ -24,6 +24,8 @@ import type {
   RevisionLocationInput,
 } from "../../../shared/revision-contract";
 import { NAVIGATION_CRS } from "../../../shared/revision-contract";
+import { applyGeoTransform, viewBoxToGcj02 } from "../../../shared/geo-transform.mjs";
+import { CAMPUS_GEO_TRANSFORMS } from "../../lib/release/mapData";
 
 /** 多边形、折线与平面图坐标在 origin 中无损回写；地图要素由显式字段编辑。 */
 interface LocationOrigin {
@@ -228,8 +230,9 @@ const ROLE_LABELS: Record<LocationRole, string> = {
 /**
  * 哪些用途能在校园图上画，以及各自允许的图形。
  *
- * navigation_target 缺席：0015 的触发器要求它是 GCJ02 Point，而仓库里没有
- * svg_viewbox → GCJ-02 的换算，画出来的坐标必被拒；它只能继续手填经纬度。
+ * navigation_target 存库仍是 GCJ02 Point（0015 触发器不变）：画布点选的
+ * svg_viewbox 坐标经该校区的 geoTransform 逆变换成经纬度回填输入框，画布上的
+ * 图钉再由经纬度正向投影回来，所以它的行永远不存画布几何。
  * footprint 缺席：触发器要求 geometry 为空并绑定已导入的 map_feature，
  * 自由绘制的几何写不进去，只能走「地图图形」下拉。
  */
@@ -238,6 +241,7 @@ const CANVAS_TOOLS_BY_ROLE: Partial<Record<LocationRole, readonly CanvasTool[]>>
   centroid: ["point"],
   main_entrance: ["point"],
   accessible_entrance: ["point"],
+  navigation_target: ["point"],
   service_position: ["point"],
   boarding_point: ["point"],
   alighting_point: ["point"],
@@ -246,6 +250,19 @@ const CANVAS_TOOLS_BY_ROLE: Partial<Record<LocationRole, readonly CanvasTool[]>>
   route_shape: ["path"],
   other: ["point", "area", "path"],
 };
+
+/**
+ * navigation_target 的画布图钉不从 origin 读（它不存画布几何），而是把手填/回填的
+ * GCJ-02 经纬度正向投回 viewBox：管理员微调经纬度时图钉跟着动，两边永远一致。
+ */
+function navTargetCanvasValue(row: LocationDraft, campusKey: CampusKey): CanvasGeometry | null {
+  if (row.longitude.trim() === "" || row.latitude.trim() === "") return null;
+  const longitude = Number(row.longitude);
+  const latitude = Number(row.latitude);
+  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return null;
+  const { x, y } = applyGeoTransform(CAMPUS_GEO_TRANSFORMS[campusKey], longitude, latitude);
+  return { campusKey, point: [x, y], area: null, path: null };
+}
 
 /** 该行是否已经存着画布画出来的几何。 */
 function hasCanvasGeometry(row: LocationDraft): boolean {
@@ -336,7 +353,7 @@ export function LocationEditor({
   disabled?: boolean;
   /** 限定「用途」下拉的可选项。省略时给出全部角色。 */
   roles?: readonly LocationRole[];
-  /** 行数上限，达到后藏起「添加位置」。校车站点只留一个候车点时会传 1。 */
+  /** 行数上限，达到后藏起「添加位置」。校车站点候车点 + 导航终点时会传 2。 */
   maxRows?: number;
   title?: string;
 }) {
@@ -429,11 +446,32 @@ export function LocationEditor({
       const patchCampus = (campusId: string) => patch(index, drawn
         ? { campusId, mapFeatureId: "", ...withoutCanvasGeometry(row) }
         : { campusId, mapVersionId: "", mapFeatureId: "" });
-      const canvasValue = canvasTools && campusKey ? canvasValueOf(row, campusKey, canvasTools) : null;
+      const canvasValue = canvasTools && campusKey
+        ? row.role === "navigation_target"
+          ? navTargetCanvasValue(row, campusKey)
+          : canvasValueOf(row, campusKey, canvasTools)
+        : null;
       /** 画布产出 → 这一行的 origin。画布坐标必须与它所属的地图版本同时写库。 */
       const applyCanvas = (next: CanvasGeometry | null) => {
-        if (!canvasBinding) return;
+        if (!canvasBinding || !campusKey) return;
         const picked = pickSingleShape(canvasValue, next);
+        // navigation_target 不落画布几何：viewBox 点逆变换成 GCJ-02 回填经纬度输入框，
+        // 保持 0015 触发器要求的 GCJ02 Point 存储形态；清除点则同时清空经纬度。
+        if (row.role === "navigation_target") {
+          if (!picked || !picked.geometry.point) {
+            patch(index, { longitude: "", latitude: "" });
+            return;
+          }
+          const [x, y] = picked.geometry.point;
+          const gcj02 = viewBoxToGcj02(CAMPUS_GEO_TRANSFORMS[campusKey], x, y);
+          patch(index, {
+            campusId: canvasBinding.campusId,
+            mapFeatureId: "",
+            longitude: String(gcj02.longitude),
+            latitude: String(gcj02.latitude),
+          });
+          return;
+        }
         const shape = picked ? geoJsonOfCanvas(picked.geometry, picked.tool) : null;
         if (!shape) {
           patch(index, withoutCanvasGeometry(row));
@@ -467,8 +505,12 @@ export function LocationEditor({
               const next = oneOf(role, "location.role", ALL_ROLES);
               // 换了用途，图上已画的形状可能不再是这个用途允许的类型（影响范围→
               // 主要展示位置就是面变点）。留着它会把一个多边形当成展示点存出去。
+              // navigation_target 虽然允许点，但它不存画布几何（只存换算后的 GCJ-02
+              // 经纬度），所以切到它时一律清掉已画的画布几何，避免 svg_viewbox 坐标
+              // 被当成导航终点写出去。
               const tool = row.origin ? canvasToolOfGeometryType(row.origin.geometryType) : null;
-              const stillAllowed = tool !== null && (CANVAS_TOOLS_BY_ROLE[next] ?? []).includes(tool);
+              const stillAllowed = next !== "navigation_target"
+                && tool !== null && (CANVAS_TOOLS_BY_ROLE[next] ?? []).includes(tool);
               patch(index, drawn && !stillAllowed ? { role: next, ...withoutCanvasGeometry(row) } : { role: next });
             }}
             options={roleOptions}
@@ -538,18 +580,22 @@ export function LocationEditor({
 
         {/* 校区图选点：这是唯一能产出 svg_viewbox 坐标的入口，也就是让这处位置
             真正出现在用户端地图上的那一步。手填的 GCJ-02 经纬度只喂导航链接，
-            渲染层不认，所以两者并列摆着而不是互相替代。 */}
+            渲染层不认，所以两者并列摆着而不是互相替代。
+            navigation_target 例外：它的存库形态就是 GCJ-02 经纬度，画布选点逆变换
+            后直接回填经纬度输入框，因此经纬度已填时画布照常展示（图钉由经纬度投影）。 */}
         {canvasTools === null ? null : !campusKey ? (
           <InfoNote>先选校区，才能在校园图上标点。</InfoNote>
         ) : canvasBlocked ? (
           <InfoNote tone="warning">{canvasBlocked}</InfoNote>
-        ) : typedPoint ? (
+        ) : typedPoint && row.role !== "navigation_target" ? (
           <InfoNote>已手填经纬度。清空经纬度后可改为在校园图上标点，那样才会在地图上出现图钉。</InfoNote>
         ) : row.mapFeatureId ? (
           <InfoNote>已绑定导入的地图图形，不需要再标点。</InfoNote>
         ) : (
           <div className="space-y-2 rounded-lg bg-page p-3">
-            <p className="text-aux text-sub">在校园图上标点（决定是否在地图上出现）</p>
+            <p className="text-aux text-sub">{row.role === "navigation_target"
+              ? "在校园图上选导航终点（自动换算为 GCJ-02 经纬度，可再微调）"
+              : "在校园图上标点（决定是否在地图上出现）"}</p>
             <CampusMapCanvas
               campuses={spaces.campuses}
               campusKey={campusKey}
