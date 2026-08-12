@@ -308,25 +308,25 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
     color:#334155;margin-top:4mm}
   .gc-print-title__e{font-size:12px;line-height:18px;color:#64748b;margin-top:6mm;
     padding-bottom:8mm;border-bottom:2px solid #1e80c1}
-  .gc-print-matrix__cap{font-size:13px;font-weight:600;margin:12mm 0 4mm}
+  .gc-print-matrix__cap{font-size:15px;font-weight:600;margin:12mm 0 4mm}
   .gc-print-matrix{border-collapse:collapse;width:100%}
   .gc-print-matrix th,.gc-print-matrix td{border:1px solid #cbd5e1;
-    padding:5px 8px;font-size:11px;line-height:16px;text-align:center}
+    padding:6px 8px;font-size:13px;line-height:19px;text-align:center}
   .gc-print-matrix th{background:#f1f5f9;font-weight:600}
   .gc-print-matrix__hub{text-align:left;font-weight:600}
 
   /* 每个枢纽一页起（紧跟标题页的第一个枢纽不再强制分页） */
   .gc-print-hub{break-before:page;page-break-before:always}
   .gc-print-title+.gc-print-hub{break-before:auto;page-break-before:auto}
-  .gc-print-hubband{color:#fff;padding:8px 14px;border-radius:8px;
-    font-size:16px;font-weight:600;line-height:22px;margin-bottom:5mm;
+  .gc-print-hubband{color:#fff;padding:9px 15px;border-radius:8px;
+    font-size:18px;font-weight:600;line-height:25px;margin-bottom:5mm;
     print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .gc-print-hubband__note{font-size:11px;font-weight:500;opacity:.85;margin-left:8px}
-  .gc-print-subhead{font-size:13px;font-weight:600;line-height:19px;
+  .gc-print-hubband__note{font-size:13px;font-weight:500;opacity:.85;margin-left:8px}
+  .gc-print-subhead{font-size:15px;font-weight:600;line-height:22px;
     margin:5mm 0 3mm;break-after:avoid;page-break-after:avoid}
   .gc-print-root .gc-hub-sec{margin-top:0;margin-bottom:5mm}
-  .gc-print-root .gc-hub-sec__t{font-size:13px;margin-bottom:3mm}
-  .gc-print-root .gc-remark{font-size:11px}
+  .gc-print-root .gc-hub-sec__t{font-size:15px;margin-bottom:3mm}
+  .gc-print-root .gc-remark{font-size:13px}
 
   /* 卡片双列 */
   .gc-print-cards{column-count:2;column-gap:6mm}
@@ -336,28 +336,28 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
     border-radius:8px;padding:12px 13px;transform:none}
   .gc-print-root .gc-card:hover{transform:none;box-shadow:none}
 
-  /* 窄栏字号整体收一档，卡片才不会在 A4 半栏里溢出 */
-  .gc-print-root .gc-origin__name{font-size:14px;line-height:20px}
-  .gc-print-root .gc-origin__note{font-size:10px;line-height:14px}
-  .gc-print-root .gc-card-chips{margin-bottom:8px;padding-bottom:8px;gap:6px}
-  .gc-print-root .gc-dest-chip{font-size:10px;line-height:15px;padding:2px 8px}
-  .gc-print-root .gc-mode-badge{font-size:10px;line-height:15px;padding:2px 9px}
-  .gc-print-root .gc-meta-chip{font-size:10px;line-height:15px;padding:2px 8px}
-  .gc-print-root .gc-flag{font-size:9px;line-height:14px;padding:2px 7px}
-  .gc-print-root .gc-stop__name{font-size:13px;line-height:19px}
-  .gc-print-root .gc-stop__exit{font-size:10px;line-height:14px}
-  .gc-print-root .gc-leg{grid-template-columns:30px minmax(0,1fr)}
-  .gc-print-root .gc-body{padding:1px 0 7px}
-  .gc-print-root .gc-walk,.gc-print-root .gc-lnote{font-size:10px;line-height:15px}
+  /* 卡片字号按纸质阅读距离取（≈9–12pt）；窄栏溢出靠卡片增高吸收，不压字号 */
+  .gc-print-root .gc-origin__name{font-size:17px;line-height:24px}
+  .gc-print-root .gc-origin__note{font-size:12px;line-height:17px}
+  .gc-print-root .gc-card-chips{margin-bottom:9px;padding-bottom:9px;gap:6px}
+  .gc-print-root .gc-dest-chip{font-size:12px;line-height:18px;padding:2px 9px}
+  .gc-print-root .gc-mode-badge{font-size:12px;line-height:18px;padding:2px 10px}
+  .gc-print-root .gc-meta-chip{font-size:12px;line-height:18px;padding:2px 9px}
+  .gc-print-root .gc-flag{font-size:11px;line-height:16px;padding:2px 8px}
+  .gc-print-root .gc-stop__name{font-size:16px;line-height:23px}
+  .gc-print-root .gc-stop__exit{font-size:12px;line-height:17px}
+  .gc-print-root .gc-leg{grid-template-columns:34px minmax(0,1fr)}
+  .gc-print-root .gc-body{padding:1px 0 8px}
+  .gc-print-root .gc-walk,.gc-print-root .gc-lnote{font-size:12px;line-height:18px}
   .gc-print-root .gc-toward-t,.gc-print-root .gc-suffix,
-  .gc-print-root .gc-busline{font-size:11px;line-height:16px}
-  .gc-print-root .gc-lnum{font-size:11px;line-height:16px}
-  .gc-print-root .gc-note{font-size:10px;line-height:15px}
-  .gc-print-root .gc-sched__t,.gc-print-root .gc-sched__row{font-size:10px}
-  .gc-print-root .gc-figcard__t{font-size:14px;line-height:20px}
-  .gc-print-root .gc-figcard__cap{font-size:10px;line-height:15px;margin:6px 0 8px}
-  .gc-print-root .gc-steps__intro,.gc-print-root .gc-step{font-size:11px;line-height:17px}
-  .gc-print-root .gc-sec__t{font-size:12px;line-height:18px}
+  .gc-print-root .gc-busline{font-size:13px;line-height:19px}
+  .gc-print-root .gc-lnum{font-size:13px;line-height:19px}
+  .gc-print-root .gc-note{font-size:12px;line-height:18px}
+  .gc-print-root .gc-sched__t,.gc-print-root .gc-sched__row{font-size:12px;line-height:18px}
+  .gc-print-root .gc-figcard__t{font-size:17px;line-height:24px}
+  .gc-print-root .gc-figcard__cap{font-size:12px;line-height:18px;margin:6px 0 8px}
+  .gc-print-root .gc-steps__intro,.gc-print-root .gc-step{font-size:13px;line-height:20px}
+  .gc-print-root .gc-sec__t{font-size:14px;line-height:21px}
 
   /* 打印不出现交互元素与空态提示 */
   .gc-print-root .gc-hot{display:none}

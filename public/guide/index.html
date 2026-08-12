@@ -6,7 +6,8 @@
 <title>上海大学新生入校交通指南 · 电子版</title>
 <script src="assets/guide-styles.js"></script>
 <script src="data/guide-icons.js"></script>
-<!-- 离线兜底种子：接口不可用时才用它，正式内容来自 D1 -->
+<!-- 离线校对种子：仅在接口够不着（断网 / file://）时兜底并明确标注；
+     接口回答 404（管理端未发布 / 已下线）时不使用它。正式内容来自 D1 -->
 <script src="data/guide-seed.js"></script>
 <script src="assets/guide-render.js"></script>
 <style>
@@ -102,7 +103,6 @@
     <span class="gc-srcbadge" id="src-badge" hidden></span>
     <span class="gc-spacer"></span>
     <button type="button" class="gc-btn gc-btn--primary" id="btn-pdf">导出 PDF</button>
-    <a class="gc-btn" href="editor.html">打开编辑器</a>
   </header>
 
   <main>
@@ -131,11 +131,13 @@
 /*
  * 外壳启动分两步：先取内容，再渲染。
  *
- * 内容来自 GET /api/public/guide/:slug（D1 里已审核通过并发布的那一版）。
- * 取不到时回落到 data/guide-seed.js —— 那是随页面打包的出厂稿，用于
- * 后端不可用、离线校对、以及本地直接打开文件的场景。回落时在顶栏标出来，
- * 免得看到旧数据却以为是线上内容。无论哪条路径，数据都先过 normalizeData
- * 再使用（线上可能还躺着 v1 旧修订）。
+ * 内容来自 GET /api/public/guide/:slug（管理端审核通过并发布的那一版）——
+ * 标题、版次、第几版这些「标识」也一律以接口返回为准，不用页面里写死的文案。
+ *
+ * 种子文件 data/guide-seed.js 只是出厂校对稿：只在「接口根本够不着」
+ * （断网、file:// 直接打开）时兜底，且顶栏必须标出「离线稿」。
+ * 接口能到达但回答 404 —— 那是管理端说「未发布 / 已下线」，必须照办，
+ * 不能拿种子冒充线上内容。无论哪条路径，数据都先过 normalizeData 再使用。
  */
 (function () {
   "use strict";
@@ -167,15 +169,26 @@
 
   fetch('/api/public/guide/' + encodeURIComponent(SLUG), { credentials: 'same-origin' })
     .then(function (res) {
+      if (res.status === 404) {
+        /* 管理端未发布 / 已下线：尊重发布状态，不回落种子 */
+        var err = new Error('unpublished');
+        err.unpublished = true;
+        throw err;
+      }
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.json();
     })
     .then(function (payload) {
       if (!payload || !payload.content || !payload.content.cards) throw new Error('内容为空');
       setStatus('', '');
-      boot(payload.content, { edition: payload.edition });
+      boot(payload.content, {
+        title: payload.title,
+        edition: payload.edition,
+        revisionNo: payload.revisionNo,
+      });
     })
     .catch(function (err) {
+      if (err && err.unpublished) return splash('该指南暂未发布或已下线');
       var seed = window.GUIDE_DATA;
       if (!seed || !seed.cards) return splash('无法载入指南内容：' + err.message);
       setStatus('离线稿', 'warn');
@@ -191,16 +204,21 @@
     D = R.normalizeData(raw);
     if (!D || !(D.cards || []).length) return splash('指南数据为空或格式不正确');
 
+    /* 标题与版次标识：线上以管理端发布记录为准，种子兜底才用内容里的 meta */
     var meta = D.meta || {};
-    document.getElementById('meta-title').textContent = meta.title || '上海大学';
-    document.getElementById('meta-subtitle').textContent = meta.subtitle || '';
-    document.getElementById('edition').textContent =
-      (info && info.edition) || meta.edition || '';
+    var title = (info && info.title) || meta.title || '上海大学';
+    var subtitle = meta.subtitle || '';
+    var edition = (info && info.edition) || meta.edition || '';
+    document.getElementById('meta-title').textContent = title;
+    document.getElementById('meta-subtitle').textContent = subtitle;
+    document.getElementById('edition').textContent = edition;
+    document.title = title + subtitle + (edition ? ' ' + edition : '') + ' · 电子版';
 
-    /* 页脚版本行：有数据才显示 */
+    /* 页脚版本行：有数据才显示；线上内容带上发布版次 */
     var footBits = [];
     if (meta.version) footBits.push('版本 ' + meta.version);
     if (meta.revisedAt) footBits.push('修订于 ' + meta.revisedAt);
+    if (info && typeof info.revisionNo === 'number') footBits.push('第 ' + info.revisionNo + ' 版发布稿');
     var foot = document.getElementById('foot');
     foot.textContent = footBits.join(' · ');
     foot.hidden = !footBits.length;
