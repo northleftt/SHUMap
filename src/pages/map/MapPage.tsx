@@ -197,13 +197,9 @@ export function MapPage() {
       })),
     [state.campuses],
   );
-  // watchPosition 回调在挂载时闭包固定，校区索引/当前校区/切校区动作走 ref 读最新值
-  const campusGeoIndexRef = useRef(campusGeoIndex);
+  // 首次自动选校区需要读最新的当前校区与切校区动作，走 ref 避免依赖不稳定函数。
   const activeCampusKeyRef = useRef<string | null>(null);
   const resetForCampusRef = useRef(state.resetForCampus);
-  useEffect(() => {
-    campusGeoIndexRef.current = campusGeoIndex;
-  }, [campusGeoIndex]);
   useEffect(() => {
     activeCampusKeyRef.current = state.campus?.key ?? null;
   }, [state.campus?.key]);
@@ -211,11 +207,9 @@ export function MapPage() {
     resetForCampusRef.current = state.resetForCampus;
   });
 
-  // 持续定位：挂载即 watchPosition，卸载 clearWatch。
-  // 非 secure context / 用户拒绝授权时 error 回调静默处理——只是不显示 dot。
-  // 首次定位回调自动选校区（落在某校区 viewBox 内且非当前选中校区则切换）；
-  // 之后的持续回调不再自动切，尊重用户手动切校区。校区数据未就绪时不消耗首次机会。
-  const autoCampusDoneRef = useRef(false);
+  // 持续定位：挂载即 watchPosition，卸载 clearWatch。非 secure context / 用户拒绝
+  // 授权时 error 回调静默处理——只是不显示 dot。maximumAge 允许先拿缓存位置，
+  // 随后 watchPosition 再用高精度位置覆盖，避免首次定位等 GPS 冷启动太久。
   useEffect(() => {
     if (!("geolocation" in navigator)) return;
     const watchId = navigator.geolocation.watchPosition(
@@ -225,24 +219,27 @@ export function MapPage() {
           latitude: position.coords.latitude,
           accuracy: position.coords.accuracy,
         });
-        if (!autoCampusDoneRef.current && campusGeoIndexRef.current.length > 0) {
-          autoCampusDoneRef.current = true;
-          const gcj = wgs84ToGcj02(position.coords.longitude, position.coords.latitude);
-          const campusKey = campusKeyForGcj02Point(
-            campusGeoIndexRef.current,
-            gcj.longitude,
-            gcj.latitude,
-          );
-          if (campusKey && campusKey !== activeCampusKeyRef.current) {
-            resetForCampusRef.current(campusKey as CampusKey);
-          }
-        }
       },
       () => {},
-      { enableHighAccuracy: true },
+      { enableHighAccuracy: true, maximumAge: 30000 },
     );
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
+
+  // 首次自动选校区：等「位置」和「校区数据」都就绪后触发一次，与两者到达顺序无关。
+  // （watchPosition 可能先于 release 数据返回，若把判定塞进回调、且回调只触发一次，
+  // 就会错过这次机会，永远停在默认宝山校区。）之后不再自动切，尊重用户手动切校区。
+  const autoCampusDoneRef = useRef(false);
+  useEffect(() => {
+    if (autoCampusDoneRef.current) return;
+    if (!userPosition || campusGeoIndex.length === 0) return;
+    autoCampusDoneRef.current = true;
+    const gcj = wgs84ToGcj02(userPosition.longitude, userPosition.latitude);
+    const campusKey = campusKeyForGcj02Point(campusGeoIndex, gcj.longitude, gcj.latitude);
+    if (campusKey && campusKey !== activeCampusKeyRef.current) {
+      resetForCampusRef.current(campusKey as CampusKey);
+    }
+  }, [userPosition, campusGeoIndex]);
 
   // 定位提示自动消失
   useEffect(() => {
