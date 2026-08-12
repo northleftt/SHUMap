@@ -832,8 +832,9 @@ window.GuideRender = (function () {
   /* ══════════════ 打印 / PDF 文档树 ══════════════
    * 离屏构建，viewer 把它 append 一次，用打印 CSS 切换显隐：
    * 屏幕 UI 包在 #gc-screen 里，打印时隐藏 #gc-screen、显示 .gc-print-root。
-   * 第 1 页是标题页（标题 + 枢纽 × 校区路线数矩阵），之后每个枢纽一页起：
-   * 色带页眉 → 枢纽指引 → 备注 → 各校区的「枢纽 → 校区」小标题 + 卡片（双列）。 */
+   * 第 1 页是标题页（标题 + 枢纽 × 校区路线数矩阵），之后枢纽用色带衔接、
+   * 自然分页：色带页眉 → 枢纽指引 → 备注 → 各校区的「枢纽 → 校区」小标题
+   * + 卡片（双列 inline-block 逐行填充）。 */
   function buildPrintRoot(data) {
     var d = normalizeData(data);
     var meta = d.meta || {};

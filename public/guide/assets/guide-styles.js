@@ -292,7 +292,8 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
 /* ══════════════ 打印 / PDF ══════════════
  * 屏幕 UI 包在 #gc-screen 里；.gc-print-root 由 buildPrintRoot 离屏构建、
  * viewer append 一次。打印时隐藏屏幕树、显示打印树，版式：A4 纵向，
- * 标题页单独一页，之后每个枢纽一页起，卡片双列。 */
+ * 标题页单独一页，之后枢纽之间用色带自然衔接（不强制每枢纽一页，
+ * 否则一卡枢纽会留下大半页空白），卡片双列 inline-block 逐行填充。 */
 .gc-print-root{display:none}
 @page{size:A4;margin:12mm}
 @media print{
@@ -315,11 +316,14 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   .gc-print-matrix th{background:#f1f5f9;font-weight:600}
   .gc-print-matrix__hub{text-align:left;font-weight:600}
 
-  /* 每个枢纽一页起（紧跟标题页的第一个枢纽不再强制分页） */
-  .gc-print-hub{break-before:page;page-break-before:always}
-  .gc-print-title+.gc-print-hub{break-before:auto;page-break-before:auto}
+  /* 枢纽之间色带衔接、自然分页：不强制每枢纽一页起 —— 内容少的枢纽
+     （一两张卡）曾经一枢纽占一整页，空白比内容多。色带自身不跨页，
+     且不许分页器把它和紧随的内容拆开 */
+  .gc-print-hub{margin-top:8mm}
   .gc-print-hubband{color:#fff;padding:9px 15px;border-radius:8px;
     font-size:18px;font-weight:600;line-height:25px;margin-bottom:5mm;
+    break-inside:avoid;page-break-inside:avoid;
+    break-after:avoid;page-break-after:avoid;
     print-color-adjust:exact;-webkit-print-color-adjust:exact}
   .gc-print-hubband__note{font-size:13px;font-weight:500;opacity:.85;margin-left:8px}
   .gc-print-subhead{font-size:15px;font-weight:600;line-height:22px;
@@ -328,10 +332,15 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   .gc-print-root .gc-hub-sec__t{font-size:15px;margin-bottom:3mm}
   .gc-print-root .gc-remark{font-size:13px}
 
-  /* 卡片双列 */
-  .gc-print-cards{column-count:2;column-gap:6mm}
-  .gc-print-cards>.gc-card{break-inside:avoid;page-break-inside:avoid;
-    margin:0 0 4mm}
+  /* 卡片双列：inline-block 逐行填充。之前用 CSS 多栏（column-count:2），
+     分页时先把整页灌进左栏再灌右栏，break-inside:avoid 的卡片稍微超高
+     就整栏留白；逐行填充在 A4 分页下稳定得多。font-size:0 消除行内缝隙，
+     卡片自身恢复基准字号（子元素在下方均有显式字号） */
+  .gc-print-cards{font-size:0;margin:0 0 2mm}
+  .gc-print-cards>.gc-card{display:inline-block;width:calc(50% - 2mm);
+    vertical-align:top;margin:0 4mm 4mm 0;font-size:13px;line-height:19px;
+    break-inside:avoid;page-break-inside:avoid}
+  .gc-print-cards>.gc-card:nth-child(2n){margin-right:0}
   .gc-print-root .gc-card{box-shadow:none;border:1px solid #d8dde3;
     border-radius:8px;padding:12px 13px;transform:none}
   .gc-print-root .gc-card:hover{transform:none;box-shadow:none}
