@@ -904,6 +904,12 @@ window.GuideRender = (function () {
       root.appendChild(sec);
     });
 
+    /* 屏幕端图片都是 loading=lazy，但打印树平时 display:none、离屏无滚动，
+       lazy 图永远不会触发加载 —— PDF 里只剩标题没有图。打印稿强制立即加载，
+       append 后浏览器就会在后台拉取，调起打印时基本已就绪 */
+    var lazyImgs = root.querySelectorAll("img[loading]");
+    for (var li = 0; li < lazyImgs.length; li++) lazyImgs[li].removeAttribute("loading");
+
     return root;
   }
 
@@ -979,6 +985,27 @@ window.GuideRender = (function () {
   });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closePop(); closeVideoLayer(); } });
 
+  /* 调起打印前等打印树里的图片就绪（load/error 都算了结，4s 超时兜底）。
+     buildPrintRoot 已把 lazy 摘掉，正常情况下 append 后很快就全部 complete，
+     这个等待只兜住「数据刚加载完就点打印」和编辑器里现建打印树的情况。 */
+  function whenPrintReady(root, cb) {
+    var imgs = root ? root.querySelectorAll("img") : [];
+    var left = imgs.length, fired = false;
+    if (!left) return cb();
+    var timer = setTimeout(finish, 4000);
+    function finish() {
+      if (fired) return;
+      fired = true; clearTimeout(timer); cb();
+    }
+    function tick() { if (--left === 0) finish(); }
+    for (var i = 0; i < imgs.length; i++) {
+      var im = imgs[i];
+      if (im.complete) { tick(); continue; }
+      im.addEventListener("load", tick, { once: true });
+      im.addEventListener("error", tick, { once: true });
+    }
+  }
+
   return {
     h: h, esc: esc, RAIL: RAIL, HOT_REF: HOT_REF,
     lineColor: lineColor, lineIcon: lineIcon,
@@ -992,7 +1019,7 @@ window.GuideRender = (function () {
     figureSrc: figureSrc,
     renderHubGuide: renderHubGuide, renderHubVideo: renderHubVideo,
     renderRemark: renderRemark, renderPairView: renderPairView,
-    buildPrintRoot: buildPrintRoot,
+    buildPrintRoot: buildPrintRoot, whenPrintReady: whenPrintReady,
     toast: toast, closePop: closePop, openPop: openPop,
   };
 })();

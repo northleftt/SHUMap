@@ -425,7 +425,7 @@
   /* ── 导出 PDF：打印输出完全来自 buildPrintRoot 的离屏树，直接调起打印 ── */
   document.getElementById('btn-pdf').addEventListener('click', function () {
     R.toast('在打印对话框中选择「另存为 PDF」');
-    setTimeout(function () { window.print(); }, 250);
+    R.whenPrintReady(printRoot, function () { window.print(); });
   });
 })();
 </script>

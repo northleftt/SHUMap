@@ -2160,9 +2160,10 @@
   document.getElementById("ge-pdf").addEventListener("click", function () {
     var old = document.querySelector(".gc-print-root");
     if (old) old.remove();
-    document.body.appendChild(R.buildPrintRoot(data));
+    var root = R.buildPrintRoot(data);
+    document.body.appendChild(root);
     R.toast("打印对话框里选「另存为 PDF」，卡片不会被切断");
-    setTimeout(function () { window.print(); }, 320);
+    R.whenPrintReady(root, function () { window.print(); });
   });
 
   document.getElementById("ge-reset").addEventListener("click", function () {
