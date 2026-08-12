@@ -1776,10 +1776,48 @@
     { value: "misc", label: "其它" },
   ];
 
+  /* 小程序的 <image> 不支持 SVG：给 SVG 图标派生一份 PNG data URI（ic.png），
+     随内容一起进修订，小程序端优先用它渲染。网页端仍用 svg 矢量，不受影响。
+     懒补策略：ensureIcons 发现缺 png 的 SVG 图标就异步光栅化补齐并保存一次；
+     位图图标（ic.uri 本身就是 data URI）小程序可直接用，不需要派生。 */
+  function rasterizeIconPng(ic) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var hgt = 96;                       // 显示高度约 15–34px，96 够 3x 屏
+          var ratio = ic.ratio ||
+            (img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1) || 1;
+          var cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.round(hgt * ratio));
+          cv.height = hgt;
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          resolve(cv.toDataURL("image/png"));
+        } catch (e) { resolve(null); }
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(ic.svg);
+    });
+  }
+  var iconPngFilling = false;
+  function backfillIconPngs(list) {
+    if (iconPngFilling) return;
+    var pending = list.filter(function (ic) { return ic && ic.svg && !ic.png; });
+    if (!pending.length) return;
+    iconPngFilling = true;
+    Promise.all(pending.map(function (ic) {
+      return rasterizeIconPng(ic).then(function (png) { if (png) ic.png = png; });
+    })).then(function () {
+      iconPngFilling = false;
+      persist();
+    });
+  }
+
   function ensureIcons() {
     if (!Array.isArray(data.icons)) {
       data.icons = JSON.parse(JSON.stringify(window.GUIDE_ICON_SEED || []));
     }
+    backfillIconPngs(data.icons);
     return data.icons;
   }
 
@@ -2082,6 +2120,7 @@
         if (!keep) throw new Error("图标已不存在");
         /* 只换图形，保留 id / 名称 / 分组，避免引用断掉 */
         delete keep.svg; delete keep.uri; delete keep.ratio;
+        delete keep.png;   // 派生位图随图形一起失效，ensureIcons 会懒补新的
         if (ic.svg) keep.svg = ic.svg;
         if (ic.uri) keep.uri = ic.uri;
         if (ic.ratio) keep.ratio = ic.ratio;
