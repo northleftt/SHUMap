@@ -888,6 +888,7 @@
           refresh();
           loadAssets();
           R.toast("已上传「" + key + "」");
+          uploadSvgPngCompanion(key, String(fr.result));   // 小程序端 PNG 副本
         });
       }).catch(function (err) { R.toast("上传失败：" + err.message); });
     };
@@ -2174,6 +2175,47 @@
     R.toast("已还原出厂稿数据");
   });
 
+  /* 小程序 <image> 不支持 SVG：每张 SVG 素材上传成功后，浏览器里光栅化一份
+     PNG 副本传到「{key}-png」键（超长按 60 位截断再接 -png），小程序端优先取它，
+     失败时回落原键。副本失败不阻塞主流程 —— 网页端用 SVG 原件，下次重传可再补。 */
+  function figurePngKey(key) {
+    return (key.length > 60 ? key.slice(0, 60).replace(/-+$/, "") : key) + "-png";
+  }
+  function uploadSvgPngCompanion(key, svgText) {
+    var img = new Image();
+    img.onload = function () {
+      try {
+        /*  intrinsic 尺寸优先取 width/height 属性，其次 viewBox，最后浏览器默认 */
+        var wm = /<svg[^>]*\swidth\s*=\s*["']([\d.]+)/i.exec(svgText);
+        var hm = /<svg[^>]*\sheight\s*=\s*["']([\d.]+)/i.exec(svgText);
+        var vm = /viewBox\s*=\s*["']([^"']+)/i.exec(svgText);
+        var vb = vm ? vm[1].trim().split(/\s+/).map(Number) : null;
+        var w0 = (wm ? +wm[1] : 0) || (vb && vb[2]) || img.naturalWidth || 800;
+        var h0 = (hm ? +hm[1] : 0) || (vb && vb[3]) || img.naturalHeight || 600;
+        /* 矢量图放大重绘没有质量损失：至少 1200px 宽，2x 更大就用 2x，封顶 2048 */
+        var scale = Math.min(Math.max(1200 / w0, 2), 2048 / w0);
+        var cv = document.createElement("canvas");
+        cv.width = Math.max(1, Math.round(w0 * scale));
+        cv.height = Math.max(1, Math.round(h0 * scale));
+        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        cv.toBlob(function (blob) {
+          if (!blob) return;
+          fetch("/api/admin/guide/assets/" + encodeURIComponent(figurePngKey(key)) + "?kind=figure_png", {
+            method: "PUT",
+            credentials: "same-origin",
+            headers: { "content-type": "image/png" },
+            body: blob,
+          }).then(function (res) {
+            if (res.ok) loadAssets();
+            else R.toast("PNG 副本上传失败（不影响 SVG 本体，小程序端会回落占位）");
+          }).catch(function () { /* 副本失败不阻塞 */ });
+        }, "image/png");
+      } catch (e) { /* 光栅化失败不阻塞 */ }
+    };
+    img.onerror = function () { /* 解析失败不阻塞 */ };
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgText);
+  }
+
   /* 图示卡的图片素材上传（figure_svg，服务端消毒）。同 key 重传就是替换。 */
   document.getElementById("ge-figfile").addEventListener("change", function (e) {
     var fi = e.target;
@@ -2201,6 +2243,7 @@
           if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
           R.toast("已上传「" + key + "」");
           loadAssets();
+          uploadSvgPngCompanion(key, String(fr.result));   // 小程序端 PNG 副本
         });
       }).catch(function (err) { R.toast("上传失败：" + err.message); });
     };
