@@ -199,16 +199,166 @@ const content = guide.normalizeGuideContent(fixture.content);
   assert.equal(busLine.noStyle, "");
   assert.equal(busView.modeBadgeClass, "mode-badge mode-bus");
 
-  // 非 route 卡：占位视图，页面跳过渲染（留给 figure/steps 切片）
+  // 非 route 卡：figure 完整构建（第 7 节详测），其余 kind 占位跳过
   const figure = fixture.content.cards.find((c) => c.kind === "figure");
-  assert.deepEqual(guide.buildCardView(figure, content), {
-    kind: "figure",
-    id: figure.id,
+  assert.equal(guide.buildCardView(figure, content).kind, "figure");
+}
+
+// ---------------------------------------------------------------------------
+// 5. 图标注册表：png 优先 / uri 回落 / svg-only 与缺省映射按无图标处理
+// ---------------------------------------------------------------------------
+{
+  // 夹具图标只有 svg（小程序用不了）→ 线路图标一律 null，不造出厂种子
+  assert.equal(guide.lineIcon(content, { kind: "metro" }), null);
+  const raw = fixture.content.cards.find((c) => c.id === "hq-bs-metro-a");
+  const view = guide.buildCardView(raw, content);
+  assert.equal(view.legs[1].rideLines[0].icon, null, "svg-only 图标应渲染为无图标");
+
+  const withIcons = {
+    ...content,
+    icons: [
+      { id: "metro-sh", name: "上海地铁", png: "data:image/png;base64,AAA", ratio: 1.5 },
+      { id: "rail-sh", name: "市域铁路", uri: "data:image/gif;base64,BBB" },
+      { id: "custom", name: "自定义", png: "data:image/png;base64,CCC", ratio: 0.8 },
+      { id: "svg-only", name: "矢量", svg: "<svg/>" },
+    ],
+  };
+  // png 优先 + ratio 推算宽度（高度固定 30rpx）
+  const metroIcon = guide.lineIcon(withIcons, { kind: "metro" });
+  assert.equal(metroIcon.src, "data:image/png;base64,AAA");
+  assert.equal(metroIcon.ratio, 1.5);
+  // uri 回落
+  assert.equal(guide.lineIcon(withIcons, { kind: "rail" }).src, "data:image/gif;base64,BBB");
+  // ln.icon 指定优先于 KIND_ICON 映射
+  assert.equal(
+    guide.lineIcon(withIcons, { kind: "metro", icon: "custom" }).src,
+    "data:image/png;base64,CCC",
+  );
+  // bus 无默认图标；svg-only 视为无图标；未知 id 为 null
+  assert.equal(guide.lineIcon(withIcons, { kind: "bus" }), null);
+  assert.equal(guide.lineIcon(withIcons, { kind: "metro", icon: "svg-only" }), null);
+  assert.equal(guide.lineIcon(withIcons, { kind: "metro", icon: "missing" }), null);
+
+  // buildCardView rideLines.icon 宽度 = round(30 × ratio)
+  const iconCardView = guide.buildCardView(raw, withIcons);
+  assert.deepEqual(iconCardView.legs[1].rideLines[0].icon, {
+    src: "data:image/png;base64,AAA",
+    width: 45,
   });
 }
 
 // ---------------------------------------------------------------------------
-// 5. 源码断言：app.json 注册 + openGuide 改跳原生页（webview 保留给预约乘车）
+// 6. figure 图示卡：-png 键规则 + 热区透传与链接分类
+// ---------------------------------------------------------------------------
+{
+  // guideAssetImage：assetKey → -png 优先、原键回落；http/data: 透传；"/" 拼 base
+  const img = guide.guideAssetImage("route-hongqiao-jiading");
+  assert.match(img.src, /\/api\/public\/guide-assets\/route-hongqiao-jiading-png$/);
+  assert.match(img.fallbackSrc, /\/api\/public\/guide-assets\/route-hongqiao-jiading$/);
+  assert.equal(img.src, `${img.fallbackSrc}-png`);
+  assert.deepEqual(guide.guideAssetImage("https://a.b/c.png"), {
+    src: "https://a.b/c.png",
+    fallbackSrc: "https://a.b/c.png",
+  });
+  assert.match(guide.guideAssetImage("/x/y.svg").src, /\/x\/y\.svg$/);
+
+  const figCard = fixture.content.cards.find((c) => c.id === "hq-jd-fig-route");
+  const figView = guide.buildCardView(figCard, content);
+  assert.equal(figView.kind, "figure");
+  assert.equal(figView.title, "示意图");
+  assert.ok(figView.caption.length > 0);
+  assert.match(figView.src, /guide-assets\/route-hongqiao-jiading-png$/);
+  assert.ok(figView.hotspots.length >= 5);
+
+  // 热区坐标：x/y 直接百分比；w/h 按 HOT_REF=728 换算（78/728 → 10.714%）
+  const first = figView.hotspots.find((h) => h.id === "h-jdb");
+  assert.match(first.style, /left: 29%; top: 13%;/);
+  assert.match(first.style, /width: 10\.714%;/);
+  assert.equal(first.title, "嘉定北站");
+  assert.ok(first.body.length > 0);
+  // 链接分类：#shumap / https / #card / #wechat
+  assert.equal(first.links[0].kind, "shumap");
+  assert.equal(first.links[1].kind, "external");
+  const nm = figView.hotspots.find((h) => h.id === "h-nmgj");
+  assert.deepEqual(
+    { kind: nm.links[0].kind, cardId: nm.links[0].cardId },
+    { kind: "card", cardId: "hq-jd-bus-west" },
+  );
+  const hubFig = guide.buildCardView(
+    fixture.content.cards.find((c) => c.id === "hq-jd-fig-hub"),
+    content,
+  );
+  const wechatHot = hubFig.hotspots.find((h) => h.id === "h-bus1");
+  assert.equal(wechatHot.links[0].kind, "wechat");
+}
+
+// ---------------------------------------------------------------------------
+// 7. sceneGuide 实景指引：校区过滤 / pending / 图文混排标记 / 占位
+// ---------------------------------------------------------------------------
+{
+  // 夹具：虹桥枢纽 2 个小节（无 campuses 声明 → 通用）
+  const hongqiao = guide.hubById(content, "hongqiao");
+  const sgView = guide.buildSceneGuideView(hongqiao, "baoshan");
+  assert.equal(sgView.placeholder, "");
+  assert.equal(sgView.sections.length, 2);
+  assert.equal(sgView.sections[0].accent, "#d6417f");
+  assert.equal(sgView.sections[0].numbered, true, "非 bare 应显示序号");
+  assert.equal(sgView.sections[0].grid, false, "无配图不切网格");
+  assert.equal(sgView.sections[0].steps.length, 4);
+  assert.equal(sgView.pending, null);
+
+  // 枢纽什么内容都没有 → 占位文案（对齐网页版「实况指引待补充」）
+  const appendix = guide.hubById(content, "appendix");
+  assert.equal(guide.buildSceneGuideView(appendix, "baoshan").placeholder, "实况指引待补充");
+
+  // 构造：校区过滤 + 全部不适用返回 null + pending + bare/网格 + 配图 -png 键
+  const constructedHub = {
+    id: "t",
+    name: "测试枢纽",
+    sceneGuide: {
+      intro: "先读我",
+      sections: [
+        { title: "嘉定专用", campuses: ["jiading"], steps: [{ text: "A" }] },
+        { title: "通用 bare", bare: true, steps: [{ text: "B", note: "注" }] },
+        {
+          title: "带图小节",
+          campuses: ["jiading"],
+          steps: [{ text: "C", figure: ["photo-1", "photo-2"] }],
+          figures: [{ src: "sec-photo", caption: "指示牌" }],
+        },
+      ],
+      pending: { label: "待补充", detail: "原稿还没录" },
+    },
+  };
+  const forJiading = guide.buildSceneGuideView(constructedHub, "jiading");
+  assert.equal(forJiading.intro, "先读我");
+  assert.deepEqual(forJiading.sections.map((s) => s.title), ["嘉定专用", "通用 bare", "带图小节"]);
+  assert.equal(forJiading.sections[1].numbered, false, "bare 无图不显示序号");
+  assert.deepEqual(forJiading.pending, { label: "待补充", detail: "原稿还没录" });
+  const gridSec = forJiading.sections[2];
+  assert.equal(gridSec.grid, true, "有步骤配图应切双列网格");
+  assert.equal(gridSec.numbered, true, "有图时 bare 也显示序号");
+  assert.equal(gridSec.steps[0].figures.length, 2);
+  assert.match(gridSec.steps[0].figures[0].src, /guide-assets\/photo-1-png$/);
+  assert.equal(gridSec.figures[0].caption, "指示牌");
+  assert.match(gridSec.figures[0].src, /guide-assets\/sec-photo-png$/);
+
+  // 校区过滤：宝山只剩通用小节
+  const forBaoshan = guide.buildSceneGuideView(constructedHub, "baoshan");
+  assert.deepEqual(forBaoshan.sections.map((s) => s.title), ["通用 bare"]);
+
+  // 有内容但都不适用当前方向 → null（整块不显示，对齐 renderHubVideo）
+  const jiadingOnly = {
+    id: "t2",
+    name: "测试枢纽2",
+    sceneGuide: { sections: [{ title: "嘉定专用", campuses: ["jiading"], steps: [{ text: "A" }] }] },
+  };
+  assert.equal(guide.buildSceneGuideView(jiadingOnly, "baoshan"), null);
+  assert.ok(guide.buildSceneGuideView(jiadingOnly, "jiading") !== null);
+}
+
+// ---------------------------------------------------------------------------
+// 8. 源码断言：app.json 注册 + openGuide 改跳原生页（webview 保留给预约乘车）
 // ---------------------------------------------------------------------------
 {
   const app = JSON.parse(readFileSync(join(repoRoot, "miniprogram/miniprogram/app.json"), "utf8"));
@@ -238,6 +388,9 @@ const content = guide.normalizeGuideContent(fixture.content);
   assert.deepEqual(missing, [], `指南 WXML 事件缺少处理器：${missing.join(", ")}`);
   assert.match(guideWxml, /该指南暂未发布或已下线/);
   assert.match(guideSource, /statusCode === 404/);
+  assert.match(guideWxml, /binderror="onFigureImageError"/, "figure 图应有 -png 回落");
+  assert.match(guideWxml, /实况指引/, "应渲染 sceneGuide 区块");
+  assert.match(guideWxml, /pop-mask/, "应有热点说明弹层");
 }
 
 console.log("miniprogram-guide-page: all assertions passed");
