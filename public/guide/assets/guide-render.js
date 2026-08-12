@@ -883,10 +883,16 @@ window.GuideRender = (function () {
         h("span", { class: "gc-print-hubband__n", text: hub.name }),
         hub.note ? h("span", { class: "gc-print-hubband__note", text: hub.note }) : null
       ));
+      /* 打印稿剔除编辑态占位：「图待上传」「实况待补充」是给编辑者看的提示，
+         不是内容。段落里没有图/步骤/小节等实质内容就整段不印 —— 否则占位框
+         会在纸上占掉整段空间，还会把色带页眉孤立在页尾 */
+      function hasRealContent(node) {
+        return !!(node && node.querySelector("img, .gc-step, .gc-sec, .gc-card"));
+      }
       var phg = renderHubGuide(hub, null, campuses);   /* 打印稿全量显示，带方向标签 */
-      if (phg) sec.appendChild(phg);
+      if (hasRealContent(phg)) sec.appendChild(phg);
       var phv = renderHubVideo(hub, null, campuses);   /* 实况指引：步骤图文进打印稿，视频入口由打印 CSS 隐藏 */
-      if (phv) sec.appendChild(phv);
+      if (hasRealContent(phv)) sec.appendChild(phv);
       var remark = renderRemark(hub);
       if (remark) sec.appendChild(remark);
 
@@ -901,7 +907,8 @@ window.GuideRender = (function () {
         cards.forEach(function (c) { box.appendChild(renderCard(c, d)); });
         sec.appendChild(box);
       });
-      root.appendChild(sec);
+      /* 只有色带、没有任何实质内容的枢纽（如未维护的附录）整节不印 */
+      if (sec.childElementCount > 1) root.appendChild(sec);
     });
 
     /* 屏幕端图片都是 loading=lazy，但打印树平时 display:none、离屏无滚动，
