@@ -1,4 +1,4 @@
-import { Crosshair, Layers, LocateFixed, Maximize2, Minimize2, X } from "lucide-react";
+import { Layers, LocateFixed, Maximize2, Minimize2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { applyGeoTransform, wgs84ToGcj02 } from "../../../shared/geo-transform.mjs";
 import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
@@ -41,7 +41,6 @@ export function MapPage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerHeight, setContainerHeight] = useState(760);
   const [mobileTabBarHeight, setMobileTabBarHeight] = useState(TAB_BAR_PX);
-  const [viewResetNonce, setViewResetNonce] = useState(0);
 
   // D1 桌面端详情面板（移动端走底部抽屉）
   const [desktopDetailOpen, setDesktopDetailOpen] = useState(false);
@@ -324,7 +323,6 @@ export function MapPage() {
             setSelectedEventId(eventId);
             setLayerPanelOpen(false);
           }}
-          viewResetNonce={viewResetNonce}
           onViewWindowChange={setViewWindow}
           focusRequest={locationFocusRequest}
           zoomControlPosition={isMobile ? "center-right" : "bottom-right"}
@@ -380,14 +378,6 @@ export function MapPage() {
                 {locationHint}
               </div>
             ) : null}
-            <button
-              type="button"
-              aria-label="回到校区中心"
-              className="grid h-11 w-11 place-items-center rounded-full bg-surface text-primary shadow-floating"
-              onClick={() => setViewResetNonce((nonce) => nonce + 1)}
-            >
-              <Crosshair size={19} />
-            </button>
             <button
               type="button"
               aria-label="图层"

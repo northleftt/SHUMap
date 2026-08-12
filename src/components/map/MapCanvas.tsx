@@ -235,8 +235,6 @@ interface MapCanvasProps {
   focusRequest?: { point: Point; nonce: number } | null;
   /** 缩放控件位置：移动端右中，桌面端右下 */
   zoomControlPosition?: "center-right" | "bottom-right";
-  /** 变化时将视野重置为校区初始视野（定位/回中按钮用） */
-  viewResetNonce?: number;
 }
 
 export function MapCanvas({
@@ -253,7 +251,6 @@ export function MapCanvas({
   onTapOverlayPoi,
   onViewWindowChange,
   zoomControlPosition = "center-right",
-  viewResetNonce,
   focusRequest,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -287,7 +284,6 @@ export function MapCanvas({
   });
   const previousContainerRef = useRef<Size | null>(null);
   const previousCampusKeyRef = useRef(campus.key);
-  const lastResetNonceRef = useRef(viewResetNonce ?? 0);
   const viewBox = useMemo(() => parseViewBox(campus.svgRaw), [campus.svgRaw]);
   const [containerSize, setContainerSize] = useState<Size>(DEFAULT_CONTAINER_SIZE);
   const [viewWindow, setViewWindowState] = useState<ViewWindow>({
@@ -400,10 +396,8 @@ export function MapCanvas({
       !previousContainer ||
       previousContainer.width <= 0 ||
       previousContainer.height <= 0 ||
-      campusChanged ||
-      viewResetNonce !== lastResetNonceRef.current
+      campusChanged
     ) {
-      lastResetNonceRef.current = viewResetNonce ?? 0;
       setViewWindow(createInitialWindow(campus, viewBox, containerSize));
     } else if (
       previousContainer.width !== containerSize.width ||
@@ -448,7 +442,7 @@ export function MapCanvas({
 
     previousContainerRef.current = containerSize;
     previousCampusKeyRef.current = campus.key;
-  }, [campus, containerSize, viewBox, viewResetNonce]);
+  }, [campus, containerSize, viewBox]);
 
   useEffect(() => {
     if (!svgRef.current) return;
