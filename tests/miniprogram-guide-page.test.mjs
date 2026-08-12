@@ -358,7 +358,93 @@ const content = guide.normalizeGuideContent(fixture.content);
 }
 
 // ---------------------------------------------------------------------------
-// 8. 源码断言：app.json 注册 + openGuide 改跳原生页（webview 保留给预约乘车）
+// 8. 枢纽级区块：guideFigures / guideVideos / remark 预处理
+// ---------------------------------------------------------------------------
+{
+  // hubFigures：数组优先；数组缺失/全空时旧单图字段 guideFigure 兜底
+  assert.equal(guide.hubFigures(null).length, 0);
+  assert.deepEqual(guide.hubFigures({ id: "h", guideFigure: "old-single" }), [
+    { src: "old-single" },
+  ]);
+  assert.deepEqual(
+    guide.hubFigures({ id: "h", guideFigure: "old-single", guideFigures: [] }),
+    [{ src: "old-single" }],
+    "空数组应回落单图字段",
+  );
+  assert.deepEqual(
+    guide.hubFigures({ id: "h", guideFigure: "old-single", guideFigures: [{ src: "new-1" }] }).map((f) => f.src),
+    ["new-1"],
+    "有数组时不用单图字段",
+  );
+
+  // buildHubGuideView：校区过滤；都不适用 → null；无图 → 占位；-png 键
+  const guideHub = {
+    id: "h",
+    name: "测试枢纽",
+    guideFigures: [
+      { src: "hub-map-a", caption: "全向图" },
+      { src: "hub-map-jd", campuses: ["jiading"] },
+    ],
+  };
+  const bsGuide = guide.buildHubGuideView(guideHub, "baoshan");
+  assert.equal(bsGuide.placeholder, "");
+  assert.deepEqual(bsGuide.figures.map((f) => f.caption), ["全向图"]);
+  assert.match(bsGuide.figures[0].src, /guide-assets\/hub-map-a-png$/);
+  assert.equal(bsGuide.figures[0].fallbackSrc.endsWith("/hub-map-a"), true);
+  assert.equal(guide.buildHubGuideView(guideHub, "jiading").figures.length, 2);
+  const jdOnly = { id: "h", guideFigures: [{ src: "x", campuses: ["jiading"] }] };
+  assert.equal(guide.buildHubGuideView(jdOnly, "baoshan"), null, "有图但都不适用应隐藏整块");
+  assert.equal(
+    guide.buildHubGuideView({ id: "h" }, "baoshan").placeholder,
+    "枢纽指引图待上传",
+  );
+
+  // hubVideos / buildHubVideosView：数组优先、旧单条兜底、校区过滤、默认不播放
+  assert.equal(guide.hubVideos(null).length, 0);
+  assert.equal(guide.hubVideos({ id: "h", guideVideo: { url: "https://v.example/old.mp4" } })[0].url, "https://v.example/old.mp4");
+  const videoHub = {
+    id: "h",
+    guideVideos: [
+      { url: "https://v.example/a.mp4", note: "3 分钟" },
+      { url: "https://v.example/jd.mp4", campuses: ["jiading"] },
+    ],
+  };
+  const bsVideos = guide.buildHubVideosView(videoHub, "baoshan");
+  assert.equal(bsVideos.length, 1);
+  assert.deepEqual(bsVideos[0], {
+    url: "https://v.example/a.mp4",
+    note: "3 分钟",
+    poster: "",
+    playing: false,
+  });
+  assert.equal(guide.buildHubVideosView(videoHub, "jiading").length, 2);
+  assert.equal(guide.buildHubVideosView({ id: "h" }, "baoshan").length, 0);
+
+  // preprocessRemarkHtml：空 → ""；img 站内路径补 base；<a> 剥壳留文本
+  assert.equal(guide.preprocessRemarkHtml(""), "");
+  assert.equal(guide.preprocessRemarkHtml(null), "");
+  assert.equal(guide.preprocessRemarkHtml("   "), "");
+  const remarked = guide.preprocessRemarkHtml(
+    '<p>看<b>这里</b>，<a href="https://example.com">链接文字</a>。' +
+      '<img src="/api/public/guide-assets/remark-photo" alt="照片">' +
+      "<img src='https://cdn.example/x.png'>" +
+      '<img src="data:image/png;base64,AAA"></p>',
+  );
+  assert.match(remarked, /<b>这里<\/b>/, "白名单标签应保留");
+  assert.ok(!/<\/?a\b/.test(remarked), "<a> 应剥壳");
+  assert.match(remarked, /链接文字/, "链接文字应保留");
+  assert.match(remarked, /src="https:\/\/[^"]*\/api\/public\/guide-assets\/remark-photo"/, "站内 img 应补全 base");
+  assert.match(remarked, /src='https:\/\/cdn\.example\/x\.png'/, "外链 img 不动");
+  assert.match(remarked, /src="data:image\/png;base64,AAA"/, "data URI 不动");
+
+  // 夹具枢纽：hongqiao 无 guideFigures → 占位；remark 有内容时应能预处理（当前 fixture remark="测试"）
+  const hongqiaoHub = guide.hubById(content, "hongqiao");
+  assert.equal(guide.buildHubGuideView(hongqiaoHub, "baoshan").placeholder, "枢纽指引图待上传");
+  assert.equal(guide.preprocessRemarkHtml(hongqiaoHub.remark), "测试");
+}
+
+// ---------------------------------------------------------------------------
+// 9. 源码断言：app.json 注册 + openGuide 改跳原生页（webview 保留给预约乘车）
 // ---------------------------------------------------------------------------
 {
   const app = JSON.parse(readFileSync(join(repoRoot, "miniprogram/miniprogram/app.json"), "utf8"));
@@ -391,6 +477,9 @@ const content = guide.normalizeGuideContent(fixture.content);
   assert.match(guideWxml, /binderror="onFigureImageError"/, "figure 图应有 -png 回落");
   assert.match(guideWxml, /实况指引/, "应渲染 sceneGuide 区块");
   assert.match(guideWxml, /pop-mask/, "应有热点说明弹层");
+  assert.match(guideWxml, /枢纽指引/, "应渲染 guideFigures 区块");
+  assert.match(guideWxml, /rich-text/, "备注应用 rich-text 渲染");
+  assert.match(guideSource, /preprocessRemarkHtml/);
 }
 
 console.log("miniprogram-guide-page: all assertions passed");
