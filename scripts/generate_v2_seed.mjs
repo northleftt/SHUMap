@@ -150,8 +150,6 @@ for (const [index, item] of campusPlaces.entries()) {
   const placeId = `place_${campus.key}_${code}`;
   const revisionId = `prev_${hash(placeId).slice(0, 24)}`;
   const nameId = `pname_${hash(`${placeId}:${item.name}`).slice(0, 24)}`;
-  const navigationAnchorId = `anchor_${hash(`${placeId}:navigation`).slice(0, 24)}`;
-  const navigationBindingId = `eloc_${hash(`${placeId}:navigation`).slice(0, 24)}`;
   const footprintAnchorId = `anchor_footprint_${campus.key}_${item.svgElementId}`;
   const footprintBindingId = `entity_location_footprint_${campus.key}_${item.svgElementId}`;
   const mapVersionId = `map_version_campus_${campus.key}`;
@@ -161,21 +159,18 @@ for (const [index, item] of campusPlaces.entries()) {
     managingOrganizationId: null,
     publicAccessLevel: "unknown",
   };
+  // 这里刻意不产出 navigation_target。
+  //
+  // picked.json 里的 navigation 经纬度是早期随手标的（多在楼角/围墙上，不是入口），
+  // 已由 scripts/generate_navigation_purge.mjs 从库里清除。种子若继续产出，
+  // 下次 db:seed:v2 会把 121 个锚点原样插回来（锚点 id 是 placeId 的确定性哈希、
+  // insert or ignore），而 structure_json 因 revision 已存在被跳过，
+  // 两处就此长期不一致 —— 关系表有导航点、编辑器里没有。
+  //
+  // 新的导航终点改由管理端在校区图上标（LocationEditor 逆变换回填 GCJ-02），
+  // 前提是先用「开发工具 → 坐标校准器」重建仿射参数。
+  // navigation.address 仍然使用：地址是文字资料，与坐标准确性无关。
   const locations = [];
-  if (Number.isFinite(item.navigation?.longitude) && Number.isFinite(item.navigation?.latitude)) {
-    locations.push({
-      campusId: campus.id,
-      buildingPlaceId: placeId,
-      role: "navigation_target",
-      geometryType: "Point",
-      geometry: { type: "Point", coordinates: [item.navigation.longitude, item.navigation.latitude] },
-      crs: String(item.navigation.coordSystem).toUpperCase(),
-      locationHint: item.navigation.address ?? null,
-      precisionLevel: "exact",
-      sourceId: "source_campus_maps",
-      isPrimary: true,
-    });
-  }
   locations.push({
     campusId: campus.id,
     buildingPlaceId: placeId,
@@ -213,12 +208,6 @@ for (const [index, item] of campusPlaces.entries()) {
     `insert or ignore into location_anchors(id,campus_id,building_place_id,role,geometry_type,map_version_id,map_feature_id,precision_level,source_id,verification_status,verified_at,created_at,updated_at) values(${q(footprintAnchorId)},${q(campus.id)},${q(placeId)},'footprint',${q(footprintGeometryType)},${q(mapVersionId)},${q(mapFeatureId)},'exact','source_campus_maps','verified',${now},${now},${now});`,
     `insert or ignore into entity_locations(id,entity_type,entity_id,anchor_id,role,is_primary,created_at) values(${q(footprintBindingId)},'place',${q(placeId)},${q(footprintAnchorId)},'footprint',0,${now});`,
   );
-  if (Number.isFinite(item.navigation?.longitude) && Number.isFinite(item.navigation?.latitude)) {
-    lines.push(
-      `insert or ignore into location_anchors(id,campus_id,building_place_id,role,geometry_type,geometry_json,crs,location_hint,precision_level,source_id,verification_status,verified_at,created_at,updated_at) values(${q(navigationAnchorId)},${q(campus.id)},${q(placeId)},'navigation_target','Point',${j({ type: "Point", coordinates: [item.navigation.longitude, item.navigation.latitude] })},${q(String(item.navigation.coordSystem).toUpperCase())},${q(item.navigation.address ?? null)},'exact','source_campus_maps','verified',${q(item.navigation.pickedAt ?? null)},${now},${now});`,
-      `insert or ignore into entity_locations(id,entity_type,entity_id,anchor_id,role,is_primary,created_at) values(${q(navigationBindingId)},'place',${q(placeId)},${q(navigationAnchorId)},'navigation_target',1,${now});`,
-    );
-  }
 }
 
 const stops = new Set(shuttle.routes.flatMap((route) => [

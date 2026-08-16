@@ -14,6 +14,7 @@ import {
   SquareCheckBig,
   Tags,
   Users,
+  Wrench,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
@@ -37,6 +38,7 @@ import { UsersPage } from "./pages/UsersPage";
 import { TaxonomyPage } from "./pages/TaxonomyPage";
 import { FloorsPage } from "./pages/FloorsPage";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
+import { DevToolsPage } from "./pages/DevToolsPage";
 
 // ===========================================================================
 // v2 管理后台（A1-A14）。深蓝侧边栏 + 顶栏 + 嵌套路由；
@@ -80,6 +82,9 @@ const NAV_GROUPS = [
     items: [
       { to: "/admin", end: true, label: "概览", icon: LayoutGrid },
       { to: "/admin/users", end: false, label: "账户管理", icon: Users, permission: "manage:users" },
+      // 开发工具：一次性 / 低频的调试与标定工具集，不是日常运营入口。
+      // 挂 write:maps 而不是新造权限——里面的工具都在改地图坐标系。
+      { to: "/admin/dev-tools", end: false, label: "开发工具", icon: Wrench, permission: "write:maps" },
     ],
   },
 ] as const;
@@ -103,6 +108,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/submissions")) return "用户提交 · 处理";
   if (pathname.startsWith("/admin/releases")) return "发布中心";
   if (pathname.startsWith("/admin/users")) return "账户管理";
+  if (pathname.startsWith("/admin/dev-tools")) return "开发工具";
   return "概览";
 }
 
@@ -317,6 +323,7 @@ export function AdminPage() {
         <Route path="submissions" element={hasPermission("review:content") ? <SubmissionsPage /> : <Navigate to="/admin" replace />} />
         <Route path="releases" element={hasPermission("publish:release") ? <ReleasesPage /> : <Navigate to="/admin" replace />} />
         <Route path="users" element={hasPermission("manage:users") ? <UsersPage /> : <Navigate to="/admin" replace />} />
+        <Route path="dev-tools" element={hasPermission("write:maps") ? <DevToolsPage /> : <Navigate to="/admin" replace />} />
         <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
     ),

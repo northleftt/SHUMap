@@ -30,8 +30,20 @@ type CampusDisplayConfig = Omit<
   "id" | "key" | "label" | "mapVersionId" | "svgRaw"
 >;
 
-// geoTransform 由 scripts/generate_geo_transform.mjs 用楼栋控制点拟合
-// （gcj02 → viewBox；输入坐标一律 gcj02，wgs84 先经 wgs84ToGcj02 转换）。
+// geoTransform 由 scripts/generate_geo_transform.mjs 拟合（gcj02 → viewBox；
+// 输入坐标一律 gcj02，wgs84 先经 wgs84ToGcj02 转换）。
+//
+// 参数**绑定某一个 map_version 的 viewBox**：配准必须用发版里的底图，
+// 也就是这里 svgRaw 实际渲染的那一份（data/published-maps）。曾经用仓库里的
+// 地图/*.svg 拟合，而宝山两者 viewBox 不同（856×842 vs 921.6×1019.7，整体
+// 平移约 65 单位≈107m），导致线上定位蓝点系统性偏约 100m，且所有自检都过
+// ——它们用的是同一份错底图，自洽。tests/geo-transform.test.mjs 现在会比对
+// data/geo-transform.json 记录的 mapVersionId/viewBox 与当前发版是否一致。
+//
+// 换底图或重标控制点后：
+//   node scripts/fetch_published_maps.mjs && node scripts/generate_geo_transform.mjs
+// 然后把下面三处同步（tests/geo-transform-params-in-sync.test.mjs 会校验一致性）：
+//   1. 本文件  2. miniprogram/miniprogram/lib/release/mapData.ts  3. data/geo-transform.json
 const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
   baoshan: {
     focusPoint: { x: 0.48, y: 0.43 },
@@ -41,12 +53,12 @@ const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
     selectionEdgePaddingRatio: 0.3,
     selectionScaleMultiplier: 2.15,
     geoTransform: {
-      a: 58096.587722,
-      b: -1364.896087,
-      c: -7009407.677732,
-      d: 74.665324,
-      e: -67597.596591,
-      f: 2108281.408994,
+      a: 57870.544765,
+      b: -500.500912,
+      c: -7008973.362112,
+      d: 298.426944,
+      e: -68036.383694,
+      f: 2094863.561335,
     },
   },
   jiading: {
@@ -57,12 +69,12 @@ const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
     selectionEdgePaddingRatio: 0.4,
     selectionScaleMultiplier: 2.4,
     geoTransform: {
-      a: 36919.351777,
-      b: 25314.285944,
-      c: -5270501.322346,
-      d: 22478.179486,
-      e: -43768.154359,
-      f: -1351983.930295,
+      a: 36184.114252,
+      b: 26650.692067,
+      c: -5223290.478750,
+      d: 21126.051518,
+      e: -42297.949781,
+      f: -1234168.403812,
     },
   },
   yanchang: {
@@ -73,12 +85,12 @@ const CAMPUS_DISPLAY: Record<CampusKey, CampusDisplayConfig> = {
     selectionEdgePaddingRatio: 0.32,
     selectionScaleMultiplier: 1.35,
     geoTransform: {
-      a: 136825.701326,
-      b: 45497.163485,
-      c: -18040910.834178,
-      d: 43328.717962,
-      e: -158309.577506,
-      f: -310665.751538,
+      a: 137462.094483,
+      b: 46048.388754,
+      c: -18135449.011918,
+      d: 41441.499919,
+      e: -162736.490688,
+      f: 57019.439156,
     },
   },
 };

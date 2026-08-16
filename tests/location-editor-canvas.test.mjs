@@ -111,3 +111,47 @@ test("the campus canvas binds to the newest campus map, matching the release def
   const jiading = versions.find((map) => map.campusId === "campus_jiading");
   assert.equal(jiading.id, "map_new", "campusMapBinding 的 .find() 必须落到最新校园图");
 });
+
+const editorBundle = await build({
+  absWorkingDir: root,
+  entryPoints: ["src/admin/components/LocationEditor.tsx"],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  target: "node22",
+  write: false,
+  external: ["react", "react-dom", "react/jsx-runtime", "lucide-react", "react-router-dom"],
+});
+const editorFile = path.join(root, "tests", ".cache", "LocationEditor.bundle.mjs");
+fs.mkdirSync(path.dirname(editorFile), { recursive: true });
+fs.writeFileSync(editorFile, editorBundle.outputFiles[0].contents);
+const { locationDraftFromApi } = await import(editorFile);
+
+function rebuildNavLocation(isPrimary) {
+  return {
+    campusId: "campus_baoshan",
+    buildingPlaceId: "place_baoshan_1st-canteen",
+    role: "navigation_target",
+    geometryType: "Point",
+    geometry: { type: "Point", coordinates: [121.3892323, 31.3163785] },
+    crs: "GCJ02",
+    precisionLevel: "building",
+    sourceId: "source_navigation_rebuild_calibrated_v1",
+    isPrimary,
+  };
+}
+
+test("locationDraftFromApi accepts the 0/1 isPrimary written by navigation rebuild", () => {
+  // 生产库被 rebuild SQL 写成 "isPrimary":1。编辑器若只认 boolean，地点页
+  // 一打开就是「locations[0].isPrimary must be a boolean」，全部地点都打不开。
+  const fromOne = locationDraftFromApi(rebuildNavLocation(1), 0);
+  const fromZero = locationDraftFromApi(rebuildNavLocation(0), 0);
+  const fromTrue = locationDraftFromApi(rebuildNavLocation(true), 0);
+  assert.equal(fromOne.isPrimary, true);
+  assert.equal(fromZero.isPrimary, false);
+  assert.equal(fromTrue.isPrimary, true);
+  assert.throws(
+    () => locationDraftFromApi(rebuildNavLocation("yes"), 0),
+    /locations\[0\]\.isPrimary must be a boolean/,
+  );
+});

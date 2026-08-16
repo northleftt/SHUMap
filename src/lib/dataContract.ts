@@ -63,6 +63,16 @@ export function requiredBoolean(value: unknown, field: string): boolean {
   return value;
 }
 
+/**
+ * 修订 JSON 里的布尔位。管理端写入 true/false，但 SQLite 整数列和一次性
+ * 迁移脚本常把同一语义写成 0/1。编辑器读两边都要认，否则整页打不开。
+ */
+export function requiredBooleanFlag(value: unknown, field: string): boolean {
+  if (typeof value === "boolean") return value;
+  if (value === 0 || value === 1) return value === 1;
+  throw violation(field, "must be a boolean");
+}
+
 export function nullablePositiveInteger(value: unknown, field: string): number | null {
   if (value === null) return null;
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {

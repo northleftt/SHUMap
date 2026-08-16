@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "fetchedAt": "2026-08-14T08:57:06.361Z",
+  "source": "https://shumap.wangyixuan163.workers.dev",
+  "releaseId": "release_c2ccad63fb034421a18c1182c673c052",
+  "note": "已发布校区底图快照。配准（scripts/generate_geo_transform.mjs）必须用这一份，因为前端与管理端画布渲染的就是它；仓库里的 地图/*.svg 是另一个坐标空间。",
+  "campuses": [
+    {
+      "key": "baoshan",
+      "file": "baoshan.svg",
+      "campusId": "campus_baoshan",
+      "mapVersionId": "mapver_4ba7a816ef2f46f2be71a0845330eee6",
+      "versionLabel": "20260807",
+      "coordinateSpaceType": "svg_viewbox",
+      "viewBox": {
+        "x": 0,
+        "y": 0,
+        "width": 921.6,
+        "height": 1019.7
+      },
+      "byteSize": 102629,
+      "sha256": "063547f5dcd3be0b4426bddfcf6461a6435debf190afcb03c65974b4fd970467"
+    },
+    {
+      "key": "jiading",
+      "file": "jiading.svg",
+      "campusId": "campus_jiading",
+      "mapVersionId": "mapver_f2819d3660e2439fa52522a7eb75861e",
+      "versionLabel": "20260807",
+      "coordinateSpaceType": "svg_viewbox",
+      "viewBox": {
+        "x": 0,
+        "y": 0,
+        "width": 466,
+        "height": 362
+      },
+      "byteSize": 20564,
+      "sha256": "75e25e1dd3e3f48776b302f8a572024f0315b1f84c4c1c87bfc1f00de8267085"
+    },
+    {
+      "key": "yanchang",
+      "file": "yanchang.svg",
+      "campusId": "campus_yanchang",
+      "mapVersionId": "mapver_7e0a74d115d8470b8fd395750e0dd4d3",
+      "versionLabel": "20260807",
+      "coordinateSpaceType": "svg_viewbox",
+      "viewBox": {
+        "x": 0,
+        "y": 0,
+        "width": 1430,
+        "height": 1316
+      },
+      "byteSize": 25927,
+      "sha256": "7ef4b2650c538ed743a83e75da64dea42586e71dd95d378af1c00586c8d2ee05"
+    }
+  ]
+}

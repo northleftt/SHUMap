@@ -1,9 +1,10 @@
 import { Layers } from "lucide-react";
 import { Chip } from "../../components/ui/Chip";
+import { MARKER_SCALE_OPTIONS, type MarkerScaleKey } from "../../lib/map/markerScale";
 import type { FilterKey } from "../../lib/types";
 
 /**
- * 图层浮卡（M8 扩展）：事件叠加开关 + 类别高亮。
+ * 图层浮卡（M8 扩展）：事件叠加开关 + 图钉大小 + 类别高亮。
  * 类别高亮与搜索抽屉的快速筛选共享选中标签——搜索里点 = 过滤列表+高亮，
  * 这里点 = 只高亮，不弹抽屉。
  */
@@ -14,6 +15,8 @@ export function LayerPanel({
   onRetryEvents,
   eventsOn,
   onToggleEvents,
+  markerScale,
+  onSelectMarkerScale,
   activeFilters,
   filters,
   onToggleFilter,
@@ -24,6 +27,8 @@ export function LayerPanel({
   onRetryEvents: () => void;
   eventsOn: boolean;
   onToggleEvents: () => void;
+  markerScale: MarkerScaleKey;
+  onSelectMarkerScale: (next: MarkerScaleKey) => void;
   activeFilters: FilterKey[];
   filters: Array<{ key: FilterKey; label: string }>;
   onToggleFilter: (key: FilterKey) => void;
@@ -60,6 +65,24 @@ export function LayerPanel({
           <button type="button" className="mt-1 font-semibold underline" onClick={onRetryEvents}>重新加载</button>
         </div>
       ) : null}
+
+      <p className="mt-3.5 text-label text-sub">图钉大小</p>
+      <div className="mt-2 flex gap-1.5" role="radiogroup" aria-label="图钉大小">
+        {MARKER_SCALE_OPTIONS.map((option) => (
+          <button
+            aria-checked={markerScale === option.key}
+            className={`h-9 flex-1 rounded-xl text-body transition-colors ${
+              markerScale === option.key ? "bg-primary text-white" : "bg-page text-ink active:bg-line"
+            }`}
+            key={option.key}
+            onClick={() => onSelectMarkerScale(option.key)}
+            role="radio"
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
 
       {filters.length > 0 ? (
         <>

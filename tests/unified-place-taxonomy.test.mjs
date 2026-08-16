@@ -177,7 +177,11 @@ test("fresh v2 data forms one canonical place, chip, and SVG feature system", ()
   const multiPolygonPlace = db.prepare(
     `select r.display_name as displayName,r.content_hash as contentHash,
             r.summary,r.description,r.content_json as contentJson,r.structure_json as structureJson,
-            json_extract(r.structure_json,'$.locations[1].geometryType') as revisionGeometryType,
+            -- 按 role 取而不是按下标：locations[] 的顺序会随种子产出的位置种类变化
+            -- （早期 locations[0] 是 navigation_target，清除后 footprint 移到了 0）。
+            (select json_extract(item.value,'$.geometryType')
+               from json_each(r.structure_json,'$.locations') item
+              where json_extract(item.value,'$.role')='footprint') as revisionGeometryType,
             la.geometry_type as anchorGeometryType,
             json_extract(mf.geometry_json,'$.type') as featureGeometryType
        from places p

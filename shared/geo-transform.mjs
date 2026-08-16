@@ -96,6 +96,41 @@ export function viewBoxToGcj02(t, x, y) {
   return { longitude: round7(point.x), latitude: round7(point.y) };
 }
 
+// 上海纬度下 1 度纬度约合米数（随纬度变化极小，取常数）。
+const METERS_PER_DEG_LAT = 110940;
+
+/**
+ * 一个 viewBox 单位对应多少米，x / y 两轴分别给。
+ * 变换矩阵的列向量范数是「单位经（纬）度对应的 viewBox 位移」，
+ * 其倒数乘每度米数即为 viewBox 单位位移对应的米数。
+ * @param {GeoTransform} t
+ * @param {number} [latitude] 校区所在纬度，用于经度方向的米数换算
+ */
+export function metersPerViewBoxUnit(t, latitude = 31.3) {
+  const metersPerDegLng = 111320 * Math.cos((latitude / 180) * Math.PI);
+  return {
+    x: metersPerDegLng / Math.hypot(t.a, t.d),
+    y: METERS_PER_DEG_LAT / Math.hypot(t.b, t.e),
+  };
+}
+
+/**
+ * 各控制点的拟合残差（viewBox 分量 + 折算米）。配准脚本与管理端校准器共用一个口径，
+ * 否则两边报出来的「残差 xx 米」不是同一个量。
+ * @param {GeoTransform} t
+ * @param {GeoControlPoint[]} points
+ * @param {number} [latitude]
+ */
+export function geoTransformResiduals(t, points, latitude = 31.3) {
+  const unit = metersPerViewBoxUnit(t, latitude);
+  return points.map((p) => {
+    const projected = applyGeoTransform(t, p.longitude, p.latitude);
+    const dx = projected.x - p.x;
+    const dy = projected.y - p.y;
+    return { dx, dy, meters: Math.hypot(dx * unit.x, dy * unit.y) };
+  });
+}
+
 const GCJ_A = 6378245.0;
 const GCJ_EE = 0.00669342162296594323;
 

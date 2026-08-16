@@ -5,6 +5,7 @@ import {
   metersToViewBoxUnits,
   wgs84ToViewBoxPoint,
 } from "../../../shared/user-location.mjs";
+import { markerUnit } from "../../lib/map/markerScale";
 import type { CampusConfig } from "../../lib/types";
 import type { MapViewWindow } from "./MapCanvas";
 
@@ -35,8 +36,9 @@ export function MapUserLocationOverlay({
   if (!viewWindow || !position) return null;
   const point = wgs84ToViewBoxPoint(campus.geoTransform, position.longitude, position.latitude);
   if (!isPointInViewBox(point, viewBox)) return null;
-  // 以较短视轴换算 dot 尺寸，让横屏与窄屏保持相近的屏幕像素大小（同 MapPoiOverlay）。
-  const unit = Math.min(viewWindow.width, viewWindow.height) / 52;
+  // 以较短视轴换算 dot 尺寸，让横屏与窄屏保持相近的屏幕像素大小（同 MapPoiOverlay 的
+  // 基准单位）。这里不吃图钉大小档位——「我的位置」是定位指示，不随图钉一起缩放。
+  const unit = markerUnit(viewWindow);
   const accuracyRadius =
     position.accuracy > 0 && position.accuracy <= MAX_ACCURACY_CIRCLE_METERS
       ? metersToViewBoxUnits(campus.geoTransform, position.accuracy)

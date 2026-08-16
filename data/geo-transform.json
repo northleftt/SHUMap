@@ -1,65 +1,91 @@
 {
+  "generatedAt": "2026-08-14T09:36:35.501Z",
+  "basemap": {
+    "source": "data/published-maps",
+    "releaseId": "release_c2ccad63fb034421a18c1182c673c052",
+    "fetchedFrom": null,
+    "fetchedAt": "2026-08-14T08:57:06.361Z"
+  },
+  "controlPointSource": "calibrator",
   "baoshan": {
-    "controlPoints": 62,
-    "droppedOutliers": [
-      "building_AJ (AJ 楼) 30.3m",
-      "building_BJ (BJ 楼) 33.0m",
-      "weichang_building (伟长楼) 46.8m",
-      "building_D1 (D1 楼) 32.3m",
-      "building_D14 (D14 楼) 42.0m",
-      "building_D15 (D15 楼) 49.6m",
-      "building_D16 (D16 楼) 32.5m",
-      "building_D17 (D17 楼) 32.3m",
-      "building_D18 (D18 楼) 45.4m",
-      "building_D19 (D19 楼) 53.2m"
-    ],
-    "meanResidualMeters": 10.73,
-    "maxResidualMeters": 26.66,
+    "mapVersionId": "mapver_4ba7a816ef2f46f2be71a0845330eee6",
+    "viewBox": {
+      "width": 921.6,
+      "height": 1019.7
+    },
+    "controlPoints": 14,
+    "droppedOutliers": [],
+    "meanResidualMeters": 3.03,
+    "maxResidualMeters": 5.88,
+    "transformUncertaintyMeters": {
+      "median": 1.39,
+      "p90": 2.93
+    },
+    "metersPerViewBoxUnit": {
+      "x": 1.6433,
+      "y": 1.6306
+    },
     "transform": {
-      "a": 58096.587722328324,
-      "b": -1364.8960867513201,
-      "c": -7009407.677731765,
-      "d": 74.66532399354122,
-      "e": -67597.59659141311,
-      "f": 2108281.4089938696
+      "a": 57870.544764976614,
+      "b": -500.5009122558277,
+      "c": -7008973.362112238,
+      "d": 298.4269436275414,
+      "e": -68036.38369392864,
+      "f": 2094863.561334667
     }
   },
   "jiading": {
-    "controlPoints": 24,
-    "droppedOutliers": [
-      "_1st_teaching_building (第一教学楼) 42.8m",
-      "chemistry_building_ (化学楼) 40.0m",
-      "wende_building (文德楼) 72.2m",
-      "wenshang_building (文商楼) 30.6m",
-      "xingjian_center (行健文体中心) 59.1m"
-    ],
-    "meanResidualMeters": 9.98,
-    "maxResidualMeters": 25.94,
+    "mapVersionId": "mapver_f2819d3660e2439fa52522a7eb75861e",
+    "viewBox": {
+      "width": 466,
+      "height": 362
+    },
+    "controlPoints": 9,
+    "droppedOutliers": [],
+    "meanResidualMeters": 4.88,
+    "maxResidualMeters": 7.42,
+    "transformUncertaintyMeters": {
+      "median": 3.16,
+      "p90": 7.86
+    },
+    "metersPerViewBoxUnit": {
+      "x": 2.2683,
+      "y": 2.2191
+    },
     "transform": {
-      "a": 36919.3517767757,
-      "b": 25314.28594417406,
-      "c": -5270501.322346184,
-      "d": 22478.179485853358,
-      "e": -43768.15435862774,
-      "f": -1351983.930294548
+      "a": 36184.114252367835,
+      "b": 26650.692067126518,
+      "c": -5223290.478750084,
+      "d": 21126.05151793013,
+      "e": -42297.949780660805,
+      "f": -1234168.403812408
     }
   },
   "yanchang": {
-    "controlPoints": 17,
-    "droppedOutliers": [
-      "shanghai_art_college (上海美术学院) 49.9m",
-      "vancouver_film_college_2 (温哥华电影学院) 99.6m",
-      "vancouver_film_college (温哥华电影学院) 93.5m"
-    ],
-    "meanResidualMeters": 16.76,
-    "maxResidualMeters": 32.52,
+    "mapVersionId": "mapver_7e0a74d115d8470b8fd395750e0dd4d3",
+    "viewBox": {
+      "width": 1430,
+      "height": 1316
+    },
+    "controlPoints": 9,
+    "droppedOutliers": [],
+    "meanResidualMeters": 4.72,
+    "maxResidualMeters": 7.48,
+    "transformUncertaintyMeters": {
+      "median": 2.8,
+      "p90": 8.23
+    },
+    "metersPerViewBoxUnit": {
+      "x": 0.6627,
+      "y": 0.656
+    },
     "transform": {
-      "a": 136825.70132644312,
-      "b": 45497.163485224744,
-      "c": -18040910.834178343,
-      "d": 43328.71796225604,
-      "e": -158309.57750572712,
-      "f": -310665.7515375959
+      "a": 137462.09448305416,
+      "b": 46048.38875404894,
+      "c": -18135449.011917878,
+      "d": 41441.49991853116,
+      "e": -162736.4906877537,
+      "f": 57019.43915576581
     }
   }
 }

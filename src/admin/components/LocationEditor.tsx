@@ -1,7 +1,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import * as admin from "../../lib/api/admin";
-import { objectValue, oneOf, requiredBoolean } from "../../lib/dataContract";
+import { objectValue, oneOf, requiredBooleanFlag } from "../../lib/dataContract";
 import type { Campus, SpacesResponse } from "../adminTypes";
 import type { CampusKey } from "../../lib/types";
 import { ErrorBanner, Field, GhostButton, InfoNote, Panel, SelectField, errorMessage } from "./primitives";
@@ -25,6 +25,8 @@ import type {
 } from "../../../shared/revision-contract";
 import { NAVIGATION_CRS } from "../../../shared/revision-contract";
 import { applyGeoTransform, viewBoxToGcj02 } from "../../../shared/geo-transform.mjs";
+import { geoTransformRecordOf } from "../../../shared/campus-geo-records.mjs";
+import { deriveNavigationTarget } from "../../../shared/navigation-target.mjs";
 import { CAMPUS_GEO_TRANSFORMS } from "../../lib/release/mapData";
 
 /** 多边形、折线与平面图坐标在 origin 中无损回写；地图要素由显式字段编辑。 */
@@ -53,6 +55,12 @@ export interface LocationDraft {
   mapFeatureId: string;
   isPrimary: boolean;
   origin?: LocationOrigin;
+  /**
+   * 这一行是从楼栋轮廓自动推导出来的导航终点（见 derivedNavigationRow）。
+   * 只存在于编辑态、不进库：换轮廓时跟着重算、清轮廓时一起撤掉，
+   * 而人一旦手改过经纬度就摘掉此标记，之后再不自动覆盖。
+   */
+  derived?: boolean;
 }
 
 export function emptyLocation(role: LocationRole = "primary_display"): LocationDraft {
@@ -149,7 +157,7 @@ export function locationDraftFromApi(raw: Record<string, unknown>, index: number
     "navigation_target", "service_position", "boarding_point", "alighting_point", "event_location",
     "impact_area", "route_shape", "other",
   ] as const);
-  const isPrimary = requiredBoolean(raw.isPrimary, `locations[${index}].isPrimary`);
+  const isPrimary = requiredBooleanFlag(raw.isPrimary, `locations[${index}].isPrimary`);
   const geometry = raw.geometry === undefined ? null : raw.geometry;
   const geometryObject = geometry === null ? null : objectValue(geometry, `locations[${index}].geometry`);
   const crsValue = optionalString(raw.crs, `locations[${index}].crs`);
@@ -316,6 +324,95 @@ function geometryTypeFromFeature(feature: admin.MapFeatureRow): GeometryType {
   return oneOf(feature.geometryType, `map feature ${feature.id}.geometryType`, ["Point", "LineString", "Polygon", "MultiPolygon"] as const);
 }
 
+// ---------------------------------------------------------------------------
+// 楼栋轮廓 → 自动推导导航终点
+//
+// 为什么要自动：导航终点原先是「添加位置 + 把用途从默认的『主要展示位置』改成
+// 『导航终点』 + 填坐标」三步。漏掉任何一步用户端就没有「导航到这里」按钮，而保存、
+// 审核、发版全程都不报错（发版校验只校验已存在导航点的形状，从不检查缺失）。楼栋
+// 选了轮廓之后代表点本来就算得出来，这一步不该靠人记。
+//
+// 推导出来的行标 derived，后续改轮廓会跟着重算、清空轮廓会一起撤掉；一旦人动过
+// 经纬度就摘掉这个标记，之后再不自动覆盖。
+// ---------------------------------------------------------------------------
+
+/** 从已选中的 footprint 图形推导导航终点行；任何一步不成立返回 null。 */
+function derivedNavigationRow(
+  feature: admin.MapFeatureRow,
+  campusKey: CampusKey | null,
+  campusId: string,
+): LocationDraft | null {
+  if (!campusKey || !feature.geometryJson) return null;
+  const params = geoTransformRecordOf(campusKey);
+  if (!params) return null;
+  let geometry: unknown;
+  try {
+    geometry = JSON.parse(feature.geometryJson);
+  } catch {
+    return null;
+  }
+  const derived = deriveNavigationTarget({
+    geometry: geometry as { type?: string; coordinates?: unknown },
+    mapVersionId: feature.mapVersionId,
+    params,
+  });
+  if (!derived) return null;
+  return {
+    ...emptyLocation("navigation_target"),
+    campusId,
+    longitude: String(derived.longitude),
+    latitude: String(derived.latitude),
+    // 楼栋路径要求导航点 isPrimary===1 才渲染「导航到这里」（见
+    // src/lib/release/mapData.ts buildMapBuildings），而契约要求每个实体恰好一个
+    // 主要位置，所以轮廓行让位。
+    isPrimary: true,
+    derived: true,
+    origin: {
+      geometryType: "Point",
+      geometry: null,
+      crs: null,
+      // 代表点的精度就是仿射变换的不确定度（1.4–3.2m），不是实测点，别谎报 exact。
+      precisionLevel: "building",
+      accuracyMeters: derived.accuracyMeters,
+      sourceId: null,
+      validFrom: null,
+      validTo: null,
+    },
+  };
+}
+
+/**
+ * 选中/清空 footprint 图形后重算整个 locations 数组。
+ * 导出供 tests/location-editor-derived-nav.test.mjs 单测（同 campusMapVersions 的先例）。
+ * @param next 新选中的图形；null 表示清空绑定
+ */
+export function withDerivedNavigation(
+  rows: LocationDraft[],
+  next: admin.MapFeatureRow | null,
+  campusKey: CampusKey | null,
+  campusId: string,
+): LocationDraft[] {
+  const navIndex = rows.findIndex((row) => row.role === "navigation_target");
+  const existingNav = navIndex === -1 ? null : rows[navIndex];
+  // 人工填过的导航点不动：这里只管自己推导出来的那一行。
+  if (existingNav && existingNav.derived !== true) return rows;
+
+  const derived = next === null ? null : derivedNavigationRow(next, campusKey, campusId);
+  if (!derived) {
+    // 清空轮廓（或推不出来）时撤掉自动行，并把主要位置还给剩下的第一行。
+    if (!existingNav) return rows;
+    const remaining = rows.filter((_, i) => i !== navIndex);
+    return remaining.map((row, i) => ({ ...row, isPrimary: i === 0 }));
+  }
+  const withNav = existingNav
+    ? rows.map((row, i) => (i === navIndex ? { ...derived, id: row.id } : row))
+    : [...rows, derived];
+  // 契约要求恰好一个主要位置，导航点占这个名额。只点亮推导的这一行：
+  // 若编辑者另外手动加过第二个导航行，按 role 全点亮会同时亮两行、违反契约。
+  const primaryIndex = existingNav ? navIndex : withNav.length - 1;
+  return withNav.map((row, i) => ({ ...row, isPrimary: i === primaryIndex }));
+}
+
 function mapVersionLabel(version: admin.MapVersionRow, spaces: SpacesResponse): string {
   if (version.campusId) {
     const campus = spaces.campuses.find((candidate) => candidate.id === version.campusId);
@@ -458,8 +555,9 @@ export function LocationEditor({
         // navigation_target 不落画布几何：viewBox 点逆变换成 GCJ-02 回填经纬度输入框，
         // 保持 0015 触发器要求的 GCJ02 Point 存储形态；清除点则同时清空经纬度。
         if (row.role === "navigation_target") {
+          // 人一旦在图上挪过点，这行就归人管：摘掉 derived，之后改轮廓不再覆盖它。
           if (!picked || !picked.geometry.point) {
-            patch(index, { longitude: "", latitude: "" });
+            patch(index, { longitude: "", latitude: "", derived: false });
             return;
           }
           const [x, y] = picked.geometry.point;
@@ -469,6 +567,7 @@ export function LocationEditor({
             mapFeatureId: "",
             longitude: String(gcj02.longitude),
             latitude: String(gcj02.latitude),
+            derived: false,
           });
           return;
         }
@@ -536,8 +635,9 @@ export function LocationEditor({
           <SelectField disabled={disabled} label="室内空间" onChange={(indoorSpaceId) => patch(index, { indoorSpaceId })} options={indoor.map((space) => ({ value: space.id, label: space.displayName }))} placeholder="不指定" value={row.indoorSpaceId} />
           <Field disabled={disabled} label="位置说明" onChange={(locationHint) => patch(index, { locationHint })} placeholder="如 北门入口" value={row.locationHint} />
           {/* 图上点过就锁住经纬度：两者都会落到同一处几何，留着能改必然有一个被静默丢弃。 */}
-          <Field disabled={disabled || Boolean(row.mapFeatureId) || drawn} label="GCJ-02 经度（可选）" onChange={(longitude) => patch(index, { longitude })} placeholder={drawn ? "已在图上标点" : "121.40"} type="number" value={row.longitude} />
-          <Field disabled={disabled || Boolean(row.mapFeatureId) || drawn} label="GCJ-02 纬度（可选）" onChange={(latitude) => patch(index, { latitude })} placeholder={drawn ? "已在图上标点" : "31.32"} type="number" value={row.latitude} />
+          {/* 人一改坐标就摘掉 derived：之后再动轮廓不会覆盖他的值。 */}
+          <Field disabled={disabled || Boolean(row.mapFeatureId) || drawn} label="GCJ-02 经度（可选）" onChange={(longitude) => patch(index, { longitude, derived: false })} placeholder={drawn ? "已在图上标点" : "121.40"} type="number" value={row.longitude} />
+          <Field disabled={disabled || Boolean(row.mapFeatureId) || drawn} label="GCJ-02 纬度（可选）" onChange={(latitude) => patch(index, { latitude, derived: false })} placeholder={drawn ? "已在图上标点" : "31.32"} type="number" value={row.latitude} />
           <SelectField
             disabled={disabled || typedPoint || drawn}
             label="地图版本（可选）"
@@ -550,27 +650,38 @@ export function LocationEditor({
             disabled={disabled || !row.mapVersionId || loadingVersions.has(row.mapVersionId) || drawn}
             label="地图图形（可选）"
             onChange={(mapFeatureId) => {
+              // 选中/清空轮廓时顺带重算自动导航终点（见 withDerivedNavigation）。
+              // 这里不能用 patch()：推导会增删整个数组里的另一行，不只是改本行。
+              const applyDerived = (rows: LocationDraft[], next: admin.MapFeatureRow | null) =>
+                onChange(row.role === "footprint"
+                  ? withDerivedNavigation(rows, next, campusKey, effectiveCampusId)
+                  : rows);
               if (!mapFeatureId) {
-                patch(index, { mapFeatureId, origin: row.origin ? { ...row.origin, geometryType: "Point", geometry: null, crs: null } : undefined });
+                applyDerived(value.map((item, i) => i === index
+                  ? { ...item, mapFeatureId, origin: item.origin ? { ...item.origin, geometryType: "Point" as GeometryType, geometry: null, crs: null } : undefined }
+                  : item), null);
                 return;
               }
               const feature = features.find((candidate) => candidate.id === mapFeatureId);
               if (!feature) throw new Error(`地图图形 ${mapFeatureId} 不在所选版本中`);
-              patch(index, {
-                mapFeatureId,
-                longitude: "",
-                latitude: "",
-                origin: {
-                  geometryType: geometryTypeFromFeature(feature),
-                  geometry: null,
-                  crs: null,
-                  precisionLevel: "exact",
-                  accuracyMeters: row.origin?.accuracyMeters ?? null,
-                  sourceId: row.origin?.sourceId ?? null,
-                  validFrom: row.origin?.validFrom ?? null,
-                  validTo: row.origin?.validTo ?? null,
-                },
-              });
+              applyDerived(value.map((item, i) => i === index
+                ? {
+                    ...item,
+                    mapFeatureId,
+                    longitude: "",
+                    latitude: "",
+                    origin: {
+                      geometryType: geometryTypeFromFeature(feature),
+                      geometry: null,
+                      crs: null,
+                      precisionLevel: "exact" as LocationPrecision,
+                      accuracyMeters: item.origin?.accuracyMeters ?? null,
+                      sourceId: item.origin?.sourceId ?? null,
+                      validFrom: item.origin?.validFrom ?? null,
+                      validTo: item.origin?.validTo ?? null,
+                    },
+                  }
+                : item), feature);
             }}
             options={featureOptions}
             placeholder={loadingVersions.has(row.mapVersionId) ? "加载图形中…" : "不绑定地图图形"}

@@ -86,6 +86,33 @@ export function viewBoxOf(svgRaw: string): { x: number; y: number; w: number; h:
   return { x: viewBox.x, y: viewBox.y, w: viewBox.width, h: viewBox.height };
 }
 
+/**
+ * 画布图形的尺寸基准（viewBox 单位）：让图形的**屏幕**尺寸与校区无关。
+ *
+ * 原先所有图形都按 vb.w 取基准，但 preserveAspectRatio="meet" 的实际缩放是
+ * meet = min(容器宽/vb.w, 容器高/vb.h)。三个校区 viewBox 纵横比各不相同
+ * （线上：宝山 921.6×1019.7、嘉定 466×362、延长 1430×1316），vb.w 与 meet 脱钩，
+ * 于是同一容器里嘉定的选点画出来是宝山的 ~1.4 倍——这就是「嘉定的点异常大」。
+ *
+ * 正确口径要把容器带进来：取 base = min(容器宽,容器高) / meet，则图形的屏幕尺寸
+ * = base/系数 × meet = min(容器宽,容器高)/系数，只随容器变，与 viewBox 无关。
+ * 这也正是前台 markerUnit 的语义（min(视窗轴)，视窗 = 容器/缩放）。
+ *
+ * 只用 min(vb.w, vb.h) 是不够的：宝山线上底图较短轴是宽、而 meet 约束的是高，
+ * 两者不是同一根轴，宝山会比其余校区再小 ~10%。
+ */
+export function canvasUnitBase(
+  viewBox: { w: number; h: number },
+  container: MapViewportSize | null,
+): number {
+  // 容器还没量到（首帧）：退化到方形容器下的等价值，量到后立刻被正确值替换。
+  if (!container || container.width <= 0 || container.height <= 0) {
+    return Math.max(viewBox.w, viewBox.h);
+  }
+  const meet = Math.min(container.width / viewBox.w, container.height / viewBox.h);
+  return Math.min(container.width, container.height) / meet;
+}
+
 export function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
@@ -314,6 +341,8 @@ export interface CampusMapCanvasState {
   statusText: string;
   viewBox: { x: number; y: number; w: number; h: number } | null;
   unit: number;
+  /** 图形尺寸基准（viewBox 单位，见 canvasUnitBase）；渲染层按它取半径/描边。 */
+  unitBase: number;
   mapRef: React.RefObject<HTMLDivElement | null>;
   viewport: MapViewport;
   toggleMode(tool: CanvasTool): void;
@@ -360,6 +389,9 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
   const [cursor, setCursor] = useState<CanvasVert | null>(null);
   const [viewport, setViewport] = useState<MapViewport>(FITTED_VIEWPORT);
   const viewportSizeRef = useRef<MapViewportSize | null>(null);
+  // 图形尺寸基准要用容器尺寸算（见 canvasUnitBase），而 ref 变化不会触发重渲染，
+  // 所以这里另存一份 state：容器尺寸变了，图形的屏幕尺寸才跟着重算。
+  const [containerSize, setContainerSize] = useState<MapViewportSize | null>(null);
   const panRef = useRef<{ pointerId: number; startX: number; startY: number; panX: number; panY: number; moved: boolean } | null>(null);
   const ignoreNextClickRef = useRef(false);
 
@@ -390,9 +422,11 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
   const list = loaded ?? [];
   const campus = campusKey ? list.find((candidate) => candidate.key === campusKey) ?? null : null;
   const vb = useMemo(() => campus ? viewBoxOf(campus.svgRaw) : null, [campus]);
-  // 闭合吸附半径（viewBox 单位）；双击去重 epsilon
-  const snapR = vb ? vb.w / 50 : null;
-  const dedupeEps = vb ? vb.w / 500 : null;
+  // 闭合吸附半径（viewBox 单位）；双击去重 epsilon。基准同图形尺寸走 canvasUnitBase，
+  // 否则纵横比不同的校区，吸附半径的屏幕像素也会跟着漂。
+  const unitBase = vb ? canvasUnitBase(vb, containerSize) : null;
+  const snapR = unitBase === null ? null : unitBase / 50;
+  const dedupeEps = unitBase === null ? null : unitBase / 500;
 
   const drafting = mode === "area" || mode === "path";
   const minVertices = mode === "area" ? 3 : 2;
@@ -419,6 +453,10 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
 
   const setViewportSize = useCallback((size: MapViewportSize) => {
     viewportSizeRef.current = size;
+    // 同尺寸不换对象，避免 ResizeObserver 每帧回调都触发一次重渲染。
+    setContainerSize((current) =>
+      current && current.width === size.width && current.height === size.height ? current : size,
+    );
     setViewport((current) => {
       const clamped = clampViewport(current, size);
       return sameViewport(current, clamped) ? current : clamped;
@@ -625,7 +663,8 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
     geometry,
     statusText,
     viewBox: vb,
-    unit: vb ? vb.w / 40 : 0,
+    unit: (unitBase ?? 0) / 40,
+    unitBase: unitBase ?? 0,
     mapRef,
     viewport,
     toggleMode,
@@ -766,7 +805,7 @@ function CampusMapCanvasSurface({
   height: string;
   onFullscreen?: () => void;
 }) {
-  const { campus, cursor, draft, drafting, geometry, mode, unit, viewBox: vb } = canvas;
+  const { campus, cursor, draft, drafting, geometry, mode, unit, unitBase: base, viewBox: vb } = canvas;
   const safeSvg = useMemo(() => sanitizeSvg(campus?.svgRaw ?? ""), [campus?.svgRaw]);
 
   useEffect(() => {
@@ -852,8 +891,8 @@ function CampusMapCanvasSurface({
           {/* 已完成：位置点 */}
           {geometry?.point ? (
             <g>
-              <circle cx={geometry.point[0]} cy={geometry.point[1]} r={vb.w / 90} fill={POINT_COLOR} opacity={0.25} />
-              <circle cx={geometry.point[0]} cy={geometry.point[1]} r={vb.w / 200} fill={POINT_COLOR} stroke="#fff" strokeWidth={vb.w / 500} />
+              <circle cx={geometry.point[0]} cy={geometry.point[1]} r={base / 90} fill={POINT_COLOR} opacity={0.25} />
+              <circle cx={geometry.point[0]} cy={geometry.point[1]} r={base / 200} fill={POINT_COLOR} stroke="#fff" strokeWidth={base / 500} />
             </g>
           ) : null}
 
@@ -876,7 +915,7 @@ function CampusMapCanvasSurface({
                 strokeLinecap="round"
                 strokeWidth={unit * 0.1}
               />
-              {mode === "area" && canvas.draftReady && cursor && dist(cursor, draft[0]) <= vb.w / 50 ? (
+              {mode === "area" && canvas.draftReady && cursor && dist(cursor, draft[0]) <= base / 50 ? (
                 <line
                   x1={draft[draft.length - 1][0]}
                   y1={draft[draft.length - 1][1]}
@@ -906,8 +945,8 @@ function CampusMapCanvasSurface({
           {/* 点模式光标预览 */}
           {mode === "point" && cursor ? (
             <g>
-              <circle cx={cursor[0]} cy={cursor[1]} r={vb.w / 90} fill={POINT_COLOR} opacity={0.2} />
-              <circle cx={cursor[0]} cy={cursor[1]} r={vb.w / 200} fill={POINT_COLOR} opacity={0.6} />
+              <circle cx={cursor[0]} cy={cursor[1]} r={base / 90} fill={POINT_COLOR} opacity={0.2} />
+              <circle cx={cursor[0]} cy={cursor[1]} r={base / 200} fill={POINT_COLOR} opacity={0.6} />
             </g>
           ) : null}
         </svg>

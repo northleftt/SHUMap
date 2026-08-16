@@ -63,7 +63,12 @@ test("无导航点的画布点实体生成正确 GCJ02 坐标与契约字段", (
   assert.match(sql, new RegExp(`insert or ignore into data_sources\\(id,source_type,title,reliability,metadata_json,created_at\\) values\\('${SOURCE_ID}','derived'`));
   assert.match(sql, /'navigation_target','Point','\{"type":"Point","coordinates":\[/);
   assert.match(sql, /'GCJ02','building'/);
-  assert.match(sql, new RegExp(`,${geoTransforms.baoshan.meanResidualMeters.toFixed(1)},'${SOURCE_ID}','unverified'`));
+  // accuracy_meters 是数字字面量，按 Number 的默认序列化写出：残差 11.97 → toFixed(1)
+  // 得 "12.0"，但 Number("12.0") 序列化回来是 "12"。所以这里必须用与脚本相同的
+  // 渲染方式取期望值，不能直接拿 toFixed(1) 的字符串比（旧残差 10.73→"10.7" 时
+  // 两者碰巧一致，换一批控制点就会假失败）。
+  const expectedAccuracy = String(Number(geoTransforms.baoshan.meanResidualMeters.toFixed(1)));
+  assert.match(sql, new RegExp(`,${expectedAccuracy},'${SOURCE_ID}','unverified'`));
   assert.match(sql, /insert or ignore into entity_locations\(id,entity_type,entity_id,anchor_id,role,is_primary,created_at\) values\('eloc_[0-9a-f]{24}','place','place_baoshan_test-a','anchor_[0-9a-f]{24}','navigation_target',0/);
   // 同一实体锚点与绑定 id 哈希同源，绑定里引用的 anchor id 必须等于锚点行的 id。
   const anchorId = sql.match(/values\('(anchor_[0-9a-f]{24})'/)[1];

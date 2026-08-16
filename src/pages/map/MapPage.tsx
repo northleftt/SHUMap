@@ -17,6 +17,7 @@ import { LoadingState } from "../../components/ui/EmptyState";
 import { SeverityIcon, severityOf } from "../../components/ui/SeverityBanner";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useOperations } from "../../lib/hooks/useOperations";
+import { markerScaleValue, useMarkerScale } from "../../lib/map/markerScale";
 import type { CampusKey } from "../../lib/types";
 import { CampusSwitcher } from "./CampusSwitcher";
 import { DesktopMapPanel, PoiMapCard } from "./DesktopMapPanel";
@@ -52,6 +53,8 @@ export function MapPage() {
   // M8 事件叠加层 + 图层浮卡
   const [layerOn, setLayerOn] = useState(true);
   const [layerPanelOpen, setLayerPanelOpen] = useState(false);
+  // 楼外图钉大小档位（localStorage 持久化，图层浮卡里调）
+  const [markerScale, setMarkerScale] = useMarkerScale();
   const [viewWindow, setViewWindow] = useState<MapViewWindow | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   // 用户定位 dot：watchPosition 持续更新；定位按钮点击后的居中请求（nonce 递增触发）
@@ -331,6 +334,7 @@ export function MapPage() {
               <MapPoiOverlay
                 viewWindow={viewWindow}
                 pois={state.visiblePointPois}
+                scale={markerScaleValue(markerScale)}
                 selectedPoiKey={state.selectedPoi?.poiKey ?? null}
                 onSelect={state.openPointPoi}
               />
@@ -410,6 +414,8 @@ export function MapPage() {
                 setLayerOn((on) => !on);
                 setSelectedEventId(null);
               }}
+              markerScale={markerScale}
+              onSelectMarkerScale={setMarkerScale}
               activeFilters={state.activeFilters}
               filters={state.releaseData.filters}
               onToggleFilter={state.handleFilterHighlight}

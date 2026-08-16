@@ -1,5 +1,6 @@
 import { Store } from "lucide-react";
 import { facilityIconByKey } from "../../lib/facilityIcons";
+import { markerUnit } from "../../lib/map/markerScale";
 import type { MapPoi } from "../../lib/types";
 import type { MapViewWindow } from "./MapCanvas";
 
@@ -9,15 +10,18 @@ export function MapPoiOverlay({
   pois,
   selectedPoiKey,
   onSelect,
+  scale = 1,
 }: {
   viewWindow: MapViewWindow | null;
   pois: MapPoi[];
   selectedPoiKey: string | null;
   onSelect: (poiKey: string) => void;
+  /** 图钉大小档位系数（lib/map/markerScale）；默认标准档。 */
+  scale?: number;
 }) {
   if (!viewWindow || pois.length === 0) return null;
   // 以较短视轴换算图标尺寸，让横屏与窄屏保持相近的屏幕像素大小。
-  const unit = Math.min(viewWindow.width, viewWindow.height) / 52;
+  const unit = markerUnit(viewWindow, scale);
 
   return (
     <svg
