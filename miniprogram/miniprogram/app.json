@@ -1,0 +1,65 @@
+{
+  "pages": [
+    "pages/map/map",
+    "pages/shuttle/shuttle",
+    "pages/offcampus/offcampus",
+    "pages/profile/profile",
+    "pages/webview/webview",
+    "pages/feedback/feedback",
+    "pages/debug/debug",
+    "pages/floors/floors",
+    "pages/guide/guide"
+  ],
+  "window": {
+    "backgroundColor": "#f5f6f8",
+    "backgroundTextStyle": "light",
+    "navigationBarBackgroundColor": "#f5f6f8",
+    "navigationBarTitleText": "SHUMap",
+    "navigationBarTextStyle": "black"
+  },
+  "tabBar": {
+    "custom": true,
+    "color": "#94a3b8",
+    "selectedColor": "#1e80c1",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/map/map",
+        "text": "地图",
+        "iconPath": "images/tabs/map.png",
+        "selectedIconPath": "images/tabs/map-active.png"
+      },
+      {
+        "pagePath": "pages/shuttle/shuttle",
+        "text": "校车",
+        "iconPath": "images/tabs/bus.png",
+        "selectedIconPath": "images/tabs/bus-active.png"
+      },
+      {
+        "pagePath": "pages/offcampus/offcampus",
+        "text": "校外",
+        "iconPath": "images/tabs/globe.png",
+        "selectedIconPath": "images/tabs/globe-active.png"
+      },
+      {
+        "pagePath": "pages/profile/profile",
+        "text": "我的",
+        "iconPath": "images/tabs/user-round.png",
+        "selectedIconPath": "images/tabs/user-round-active.png"
+      }
+    ]
+  },
+  "sitemapLocation": "sitemap.json",
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于在校园地图上显示你的实时位置，方便查找楼宇和步行导航"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation"
+  ],
+  "style": "v2",
+  "componentFramework": "glass-easel",
+  "lazyCodeLoading": "requiredComponents"
+}

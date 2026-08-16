@@ -1,0 +1,1031 @@
+/* 返校指南页样式。配色与卡片质感对齐网页版 guide-styles.js（slate 色板、
+   主题蓝 #1e80c1），移动端单列，单位 px。 */
+.page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  background-color: #f5f6f8;
+}
+
+.navbar {
+  background-color: #ffffff;
+}
+
+.navbar-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 44px;
+}
+
+.navbar-back {
+  width: 72px;
+  padding-left: 12px;
+  font-size: 14px;
+  color: #1e80c1;
+}
+
+.navbar-back-placeholder {
+  color: transparent;
+}
+
+.navbar-title {
+  flex: 1;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ══════════════ 状态块 ══════════════ */
+.state-block {
+  margin: 24px 16px;
+  padding: 56px 20px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 21px;
+  color: #94a3b8;
+  background-color: #ffffff;
+  border: 1px dashed #e2e8f0;
+  border-radius: 14px;
+}
+
+.state-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.state-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.state-retry {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 6px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background-color: #1e80c1;
+  border-radius: 999px;
+}
+
+/* ══════════════ 标题 ══════════════ */
+.header {
+  padding: 16px 16px 0;
+}
+
+.header-title-row {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.header-title {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 28px;
+  color: #0f172a;
+}
+
+.header-subtitle {
+  margin-left: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: #334155;
+}
+
+.header-edition {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #64748b;
+}
+
+/* ══════════════ 出发 × 到达 选择器 ══════════════ */
+.picker {
+  display: flex;
+  flex-direction: row;
+  margin: 16px 16px 4px;
+}
+
+.pick-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.pick-col + .pick-col {
+  margin-left: 12px;
+}
+
+.pick-label {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 19px;
+  color: #64748b;
+}
+
+.pick-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 11px 12px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.pick-item-active {
+  border-color: #1e80c1;
+  background-color: #e8f1f8;
+}
+
+.pick-item-disabled {
+  opacity: 0.45;
+}
+
+.pick-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.pick-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.pick-name {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  color: #0f172a;
+}
+
+.pick-note {
+  font-size: 11px;
+  line-height: 16px;
+  color: #64748b;
+}
+
+.pick-count {
+  flex: none;
+  margin-left: 6px;
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  color: #64748b;
+  background-color: #f1f5f9;
+  border-radius: 999px;
+}
+
+/* ══════════════ 出行方式 chips ══════════════ */
+.modebar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 8px 16px 12px;
+}
+
+.modebar-label {
+  margin-right: 8px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #64748b;
+}
+
+.chip {
+  margin: 4px 8px 4px 0;
+  padding: 5px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 19px;
+  color: #334155;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+}
+
+.chip-on {
+  color: #ffffff;
+  background-color: #1e80c1;
+  border-color: #1e80c1;
+}
+
+/* ══════════════ 卡片 ══════════════ */
+.empty {
+  margin: 12px 16px;
+  padding: 40px 20px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 21px;
+  color: #94a3b8;
+  background-color: #ffffff;
+  border: 1px dashed #e2e8f0;
+  border-radius: 14px;
+}
+
+.card {
+  margin: 0 16px 16px;
+  padding: 18px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+
+.card-head {
+  margin-bottom: 10px;
+}
+
+.origin-name {
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 24px;
+  color: #0f172a;
+}
+
+.origin-note {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 17px;
+  color: #64748b;
+}
+
+.card-chips {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.dest-chip {
+  margin-right: 8px;
+  padding: 3px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 19px;
+  color: #125b8b;
+  background-color: #e8f1f8;
+  border-radius: 999px;
+}
+
+.mode-badge {
+  margin-right: 8px;
+  padding: 3px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  border-radius: 999px;
+  color: #ffffff;
+}
+
+.mode-metro { background-color: #b3261e; }
+.mode-bus { background-color: #f59e0b; color: #422006; }
+.mode-rail { background-color: #1e6fb8; }
+.mode-maglev { background-color: #ea7c28; color: #3d2200; }
+.mode-airport { background-color: #35689f; }
+.mode-mixed, .mode-other { background-color: #475569; }
+
+.spacer {
+  flex: 1;
+}
+
+.meta-chip {
+  margin-left: 8px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #334155;
+  background-color: #f1f5f9;
+  border-radius: 999px;
+}
+
+.flags {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin: -4px 0 12px;
+}
+
+.flag {
+  margin: 0 6px 6px 0;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  color: #92400e;
+  background-color: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 999px;
+}
+
+/* ══════════════ 时间轴 ══════════════ */
+.tl {
+  display: flex;
+  flex-direction: column;
+}
+
+.leg {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.gutter {
+  position: relative;
+  flex: none;
+  width: 36px;
+}
+
+.ln {
+  position: absolute;
+  width: 3px;
+  margin-left: -1.5px;
+}
+
+.ln-top {
+  top: 0;
+  height: 50%;
+}
+
+.ln-bot {
+  top: 50%;
+  height: 50%;
+}
+
+.ln-full {
+  top: 0;
+  height: 100%;
+}
+
+.dot {
+  position: absolute;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background-color: #475569;
+}
+
+.dot-hollow {
+  background-color: #ffffff;
+  border: 2.5px solid #475569;
+}
+
+.cx {
+  position: absolute;
+  top: 50%;
+  width: 15px;
+  height: 8px;
+  margin-left: -7.5px;
+  margin-top: -4px;
+  border-radius: 4px;
+  background-color: #ffffff;
+  border: 2.5px solid #475569;
+}
+
+/* 终点强调：大蓝点 + 蓝色站名 */
+.leg-terminal .dot {
+  width: 13px;
+  height: 13px;
+  margin-left: -6.5px;
+  margin-top: -6.5px;
+  background-color: #1e80c1;
+}
+
+.leg-terminal .stop-name {
+  color: #125b8b;
+}
+
+.leg-body {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0 9px;
+}
+
+.stop-name {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 23px;
+  color: #0f172a;
+}
+
+.stop-exit {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: #334155;
+}
+
+.walk {
+  font-size: 12px;
+  line-height: 17px;
+  color: #64748b;
+}
+
+.ride {
+  display: flex;
+  flex-direction: column;
+}
+
+.ride-row-wrap {
+  display: flex;
+  flex-direction: column;
+  margin-top: 2px;
+}
+
+.ride-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lnum {
+  margin-right: 6px;
+  padding: 1px 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  color: #ffffff;
+  border-radius: 3px;
+}
+
+.suffix {
+  margin-right: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #0f172a;
+}
+
+.busline {
+  margin-right: 6px;
+  padding: 1px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: #8f6400;
+  background-color: rgba(242, 178, 3, 0.2);
+  border-radius: 3px;
+}
+
+.toward {
+  margin-right: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: #20293a;
+}
+
+.lnote {
+  font-size: 11px;
+  line-height: 16px;
+  color: #64748b;
+}
+
+/* ══════════════ 卡片脚 ══════════════ */
+.card-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.note {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 18px;
+  color: #64748b;
+}
+
+.note-label {
+  flex: none;
+  margin-right: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.note-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sched {
+  margin-top: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sched-t {
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  color: #334155;
+  background-color: #f1f5f9;
+}
+
+.sched-row {
+  display: flex;
+  flex-direction: row;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.sched-label {
+  flex: none;
+  margin-right: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.sched-times {
+  flex: 1;
+  min-width: 0;
+  color: #64748b;
+}
+
+/* ══════════════ 页脚 ══════════════ */
+.foot {
+  margin: 24px 16px 32px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 18px;
+  color: #94a3b8;
+}
+
+/* ══════════════ 线路图标（位图 data URI） ══════════════ */
+.mico {
+  flex: none;
+  margin-right: 6px;
+}
+
+/* ══════════════ figure 图示卡 ══════════════ */
+.fig-head {
+  margin-bottom: 4px;
+}
+
+.fig-t {
+  display: inline-block;
+  padding-bottom: 3px;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 24px;
+  color: #0f172a;
+  border-bottom: 3px solid #1e80c1;
+}
+
+.fig-cap {
+  margin: 10px 0 14px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #64748b;
+}
+
+.figwrap {
+  position: relative;
+  background-color: #f1f5f9;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.fig-img {
+  width: 100%;
+  display: block;
+}
+
+.fig-placeholder {
+  padding: 40px 20px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 20px;
+  color: #94a3b8;
+}
+
+/* 热区：半透明虚线描边常显；坐标百分比随图缩放（view 模型已算好），
+   translate(-50%,-50%) 以 x/y 为中心（同网页版） */
+.hot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
+  background-color: rgba(30, 128, 193, 0.1);
+  border: 1.5px dashed rgba(30, 128, 193, 0.65);
+  border-radius: 8px;
+}
+
+.fighint {
+  margin-top: 12px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #94a3b8;
+}
+
+/* ══════════════ 枢纽级区块（实况指引） ══════════════ */
+.hub-sec {
+  margin: 12px 16px 0;
+}
+
+.hub-sec-t {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 23px;
+  color: #0f172a;
+}
+
+.hub-sec-t::before {
+  content: "";
+  flex: none;
+  width: 4px;
+  height: 16px;
+  margin-right: 8px;
+  border-radius: 2px;
+  background-color: #1e80c1;
+}
+
+.sec-placeholder {
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 20px;
+  color: #94a3b8;
+  background-color: #ffffff;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 10px;
+}
+
+/* ══════════════ 实景步骤（对齐网页版 gc-steps） ══════════════ */
+.steps-intro {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 21px;
+  color: #334155;
+  background-color: #f1f5f9;
+  border-radius: 10px;
+}
+
+.sec {
+  margin-bottom: 16px;
+}
+
+.sec-t {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 21px;
+  color: #0f172a;
+}
+
+.sec-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 50%;
+}
+
+.secfigs {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.secfig {
+  width: 48%;
+  margin: 0 1% 10px;
+}
+
+.secfig-img {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.secfig-cap {
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  color: #334155;
+}
+
+.sec-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.sec-list-grid {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.sec-list-grid .step {
+  width: 48%;
+}
+
+.step {
+  margin-bottom: 7px;
+}
+
+.step-figs {
+  display: flex;
+  flex-direction: row;
+  margin-bottom: 6px;
+}
+
+.step-fig {
+  flex: 1;
+  min-width: 0;
+  height: 120px;
+  margin-right: 6px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.step-t {
+  font-size: 13px;
+  line-height: 20px;
+  color: #20293a;
+}
+
+.step-no {
+  color: #1e80c1;
+  font-weight: 600;
+}
+
+.step-n {
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #64748b;
+}
+
+.pending {
+  padding: 11px 13px;
+  border: 1px dashed #fcd34d;
+  border-radius: 10px;
+  background-color: #fffbeb;
+}
+
+.pending-l {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+  color: #92400e;
+}
+
+.pending-d {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 17px;
+  color: #6b5228;
+}
+
+/* ══════════════ 热点说明弹层 ══════════════ */
+.pop-mask {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgba(15, 23, 42, 0.55);
+}
+
+.pop {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  padding: 16px 18px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+
+.pop-x {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  padding: 5px;
+  font-size: 15px;
+  line-height: 1;
+  color: #94a3b8;
+}
+
+.pop-t {
+  margin-bottom: 5px;
+  padding-right: 22px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 21px;
+  color: #0f172a;
+}
+
+.pop-b {
+  font-size: 13px;
+  line-height: 20px;
+  color: #334155;
+}
+
+.pop-links {
+  margin-top: 11px;
+}
+
+.pop-link {
+  margin-top: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 26px;
+  color: #1e80c1;
+}
+
+.pop-link-disabled {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+/* ══════════════ 枢纽指引图 ══════════════ */
+.hubfig {
+  margin-bottom: 14px;
+}
+
+.hub-fig {
+  width: 100%;
+  display: block;
+  border-radius: 10px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+}
+
+/* ══════════════ 实况视频入口 ══════════════ */
+.video-entry {
+  margin-top: 14px;
+}
+
+.video-entry-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 14px 16px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.video-entry-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  margin-right: 12px;
+  padding-left: 2px;
+  border-radius: 50%;
+  background-color: #1e80c1;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 34px;
+  text-align: center;
+}
+
+.video-entry-t {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.video-entry-n {
+  flex: 1;
+  min-width: 0;
+  margin-left: 10px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #64748b;
+  text-align: right;
+}
+
+.hub-video {
+  width: 100%;
+  height: 200px;
+  margin-top: 10px;
+  border-radius: 10px;
+  background-color: #0f172a;
+}
+
+/* ══════════════ 备注富文本 ══════════════ */
+.remark {
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: #334155;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+/* ══════════════ 全屏看图 ══════════════ */
+.img-viewer {
+  position: fixed;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 200;
+}
+
+.img-viewer-mask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.92);
+}
+
+.img-viewer-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+}
+
+.img-viewer-img {
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+}
+
+/* SVG / 简图 PNG 副本带透明通道，垫白底避免叠在深色遮罩上镂空 */
+.img-viewer-img-paper {
+  background-color: #ffffff;
+}
+
+.img-viewer-close {
+  position: absolute;
+  top: 52px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  line-height: 36px;
+  text-align: center;
+  font-size: 18px;
+  color: #ffffff;
+  background-color: rgba(15, 23, 42, 0.45);
+  border-radius: 18px;
+}
+
+.img-viewer-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 28px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+}

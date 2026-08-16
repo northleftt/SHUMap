@@ -1,0 +1,450 @@
+/* M3 校车时刻表。配色对齐 Web 端 src/index.css 的设计令牌。 */
+
+page {
+  height: 100%;
+  background: #f5f6f8;
+}
+
+.page {
+  height: 100%;
+  padding: 0 40rpx;
+  box-sizing: border-box;
+}
+
+/* 头部 */
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 48rpx 0 24rpx;
+}
+
+.title {
+  font-size: 44rpx;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.booking-link {
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #1e80c1;
+  padding-bottom: 8rpx;
+}
+
+/* 线路卡 */
+.route-card {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border-radius: 32rpx;
+  padding: 28rpx 32rpx;
+  box-shadow: 0 2rpx 12rpx rgba(15, 23, 42, 0.06);
+}
+
+.stop-picker {
+  flex: 1;
+  min-width: 0;
+}
+
+.stop-label {
+  font-size: 22rpx;
+  color: #64748b;
+}
+
+.stop-value {
+  margin-top: 6rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.swap-btn {
+  width: 64rpx;
+  height: 64rpx;
+  margin: 0 16rpx;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #e8f1f8;
+  color: #1e80c1;
+  font-size: 30rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.date-divider {
+  width: 2rpx;
+  height: 56rpx;
+  background: #e2e8f0;
+  margin: 0 24rpx 0 8rpx;
+  flex-shrink: 0;
+}
+
+.date-picker {
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.date-label {
+  font-size: 22rpx;
+  color: #64748b;
+}
+
+.date-sub {
+  margin-top: 6rpx;
+  font-size: 26rpx;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+/* 离线快照提示 */
+.offline-tip {
+  margin-top: 20rpx;
+  font-size: 22rpx;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 16rpx;
+  padding: 14rpx 24rpx;
+}
+
+/* 状态块 */
+.state-block {
+  padding: 80rpx 0;
+  text-align: center;
+  font-size: 26rpx;
+  color: #64748b;
+}
+
+.state-title {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.state-sub {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  color: #64748b;
+  white-space: pre-line;
+}
+
+/* 区块标题 */
+.section-header {
+  margin-top: 40rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* 最近一班 hero 卡 */
+.hero-row {
+  display: flex;
+  gap: 24rpx;
+  margin-top: 20rpx;
+}
+
+.hero-card {
+  flex: 1;
+  min-width: 0;
+  border-radius: 48rpx;
+  padding: 32rpx;
+  color: #ffffff;
+}
+
+.hero-reservation {
+  background: #1e80c1;
+}
+
+.hero-free {
+  background: #77a988;
+}
+
+.hero-disabled {
+  opacity: 0.45;
+}
+
+.hero-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16rpx;
+  white-space: nowrap;
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.hero-time {
+  margin-top: 12rpx;
+  font-size: 76rpx;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -1rpx;
+}
+
+/* 时刻网格（Skyline 对 grid 支持不完整，用 flex 两列） */
+.grid-card {
+  margin-top: 20rpx;
+  background: #ffffff;
+  border-radius: 32rpx;
+  padding: 16rpx 40rpx;
+  box-shadow: 0 2rpx 12rpx rgba(15, 23, 42, 0.06);
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.grid-item {
+  width: 50%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 28rpx 0;
+}
+
+.grid-item-right {
+  padding-left: 32rpx;
+}
+
+.grid-time {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.chip {
+  font-size: 22rpx;
+  font-weight: 500;
+}
+
+.chip-reservation {
+  color: #1e80c1;
+}
+
+.chip-free {
+  color: #64748b;
+}
+
+.grid-legend {
+  margin-top: 16rpx;
+  font-size: 22rpx;
+  color: #64748b;
+}
+
+/* 上下车点 */
+.stop-card {
+  margin-top: 20rpx;
+  background: #ffffff;
+  border-radius: 32rpx;
+  padding: 12rpx 40rpx;
+  box-shadow: 0 2rpx 12rpx rgba(15, 23, 42, 0.06);
+}
+
+.stop-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx 0;
+}
+
+.stop-row-border {
+  border-bottom: 2rpx solid #e2e8f0;
+}
+
+.stop-row-label {
+  width: 96rpx;
+  flex-shrink: 0;
+  font-size: 22rpx;
+  color: #64748b;
+}
+
+.stop-row-pin {
+  font-size: 26rpx;
+  flex-shrink: 0;
+}
+
+.stop-row-name {
+  min-width: 0;
+  flex: 1;
+  font-size: 26rpx;
+  color: #475569;
+}
+
+.stop-row-action {
+  margin-left: 12rpx;
+  flex-shrink: 0;
+  color: #1e80c1;
+  font-size: 22rpx;
+}
+
+.page-footer-space {
+  height: 48rpx;
+}
+
+/* 班次预览弹层 */
+.sheet-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 100;
+  background: rgba(15, 23, 42, 0.4);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.sheet {
+  background: #ffffff;
+  border-radius: 40rpx 40rpx 0 0;
+  /* 自定义 tabBar 是页面渲染层内的覆盖组件：Skyline 页 bottom:0 参照完整窗口，
+     底部需额外抬 64px 避免被 tab 栏遮住（同 map.wxss 的 sheet 处理） */
+  padding: 24rpx 40rpx calc(48rpx + 64px + env(safe-area-inset-bottom));
+}
+
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
+.sheet-title {
+  font-size: 36rpx;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.sheet-meta {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #64748b;
+}
+
+.sheet-close {
+  width: 64rpx;
+  height: 64rpx;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #f5f6f8;
+  color: #64748b;
+  font-size: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-offline {
+  margin-top: 32rpx;
+  font-size: 24rpx;
+  color: #64748b;
+  text-align: center;
+  padding: 24rpx 0;
+}
+
+/* 站点时间线 */
+.timeline {
+  margin-top: 32rpx;
+}
+
+.timeline-row {
+  display: flex;
+  gap: 24rpx;
+}
+
+.timeline-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.dot {
+  width: 20rpx;
+  height: 20rpx;
+  margin-top: 12rpx;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.dot-boarding {
+  background: #1e80c1;
+}
+
+.dot-alighting {
+  background: #77a988;
+}
+
+.rail-line {
+  width: 2rpx;
+  flex: 1;
+  margin-top: 8rpx;
+  background: #e2e8f0;
+}
+
+.timeline-body {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 24rpx;
+}
+
+.timeline-body-nav,
+.alighting-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.timeline-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.timeline-nav {
+  flex-shrink: 0;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #e8f1f8;
+  color: #1e80c1;
+  font-size: 21rpx;
+  font-weight: 500;
+}
+
+.timeline-name {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: #0f172a;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.timeline-time {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #64748b;
+}
+
+.alighting-gap {
+  margin-top: 16rpx;
+}
+
+.book-btn {
+  margin-top: 40rpx;
+  width: 100%;
+  border-radius: 999rpx;
+  background: #1e80c1;
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 600;
+  padding: 8rpx 0;
+}
+
+.book-btn::after {
+  border: none;
+}

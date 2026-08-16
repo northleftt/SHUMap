@@ -1,0 +1,42 @@
+/* 自定义 tabBar，对齐 Web 端 BottomTabBar：64px + 安全区，白 96% + blur，顶部 1px #e8ebef。
+   图标按真机反馈在 Web 22px 基础上上调一档至 26px（glyph 密度一致，纯显示尺寸放大）。 */
+.tab-bar {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  height: 64px;
+  box-sizing: content-box;
+  background-color: rgba(255, 255, 255, 0.96);
+  /* Skyline 不支持 backdrop-filter 时该属性被忽略，静默降级为近实色白底 */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid #e8ebef;
+  /* JS 算不出的环境由 env() 兜底（JS 已设置 inline padding 时以此为准前的初始值） */
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+}
+
+.tab-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.tab-text {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+.tab-item--active {
+  color: #1e80c1;
+}

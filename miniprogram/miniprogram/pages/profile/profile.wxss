@@ -1,0 +1,135 @@
+.page {
+  flex: 1;
+  min-height: 100vh;
+  background: #f5f6f8;
+  padding: 16px 16px 24px;
+  box-sizing: border-box;
+}
+
+.section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.section-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.section-link {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.submission-card {
+  margin-bottom: 20px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.submission-empty {
+  padding: 22px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.submission-empty-link {
+  margin-left: 5px;
+  color: #1e80c1;
+}
+
+.submission-row {
+  padding: 13px 16px;
+}
+
+.submission-row + .submission-row {
+  border-top: 1px solid #e8ebef;
+}
+
+.submission-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.submission-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.submission-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 10px;
+}
+
+.submission-meta {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.menu {
+  background: #ffffff;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.menu-row + .menu-row {
+  border-top: 1px solid #e8ebef;
+}
+
+.menu-row-hover {
+  background: #f5f6f8;
+}
+
+.menu-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.menu-label {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.menu-right {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.menu-chevron {
+  font-size: 16px;
+  color: #94a3b8;
+}
+
+.footer {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+}

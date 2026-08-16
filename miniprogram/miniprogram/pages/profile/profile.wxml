@@ -1,0 +1,55 @@
+<view class="page">
+  <view class="section-heading-row">
+    <view class="section-heading">我的反馈</view>
+    <view class="section-link" bindtap="openFeedback">全部 ›</view>
+  </view>
+  <view class="submission-card">
+    <view wx:if="{{submissionRows.length === 0}}" class="submission-empty">
+      还没有提交过反馈
+      <text class="submission-empty-link" bindtap="openFeedback">去反馈 ›</text>
+    </view>
+    <view wx:else>
+      <view wx:for="{{submissionRows}}" wx:key="id" class="submission-row">
+        <view class="submission-top">
+          <view class="submission-title">{{item.title}}</view>
+          <view class="submission-status">{{item.statusLabel}}</view>
+        </view>
+        <view class="submission-meta">{{item.meta}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="menu">
+    <view class="menu-row" hover-class="menu-row-hover" bindtap="openFavorites">
+      <image class="menu-icon" src="/images/menu/heart.png" mode="aspectFit" />
+      <view class="menu-label">我的收藏</view>
+      <view class="menu-right" wx:if="{{favoriteCount > 0}}">{{favoriteCount}} 个地点</view>
+      <view class="menu-chevron">›</view>
+    </view>
+    <view class="menu-row" hover-class="menu-row-hover" bindtap="openRecents">
+      <image class="menu-icon" src="/images/menu/clock.png" mode="aspectFit" />
+      <view class="menu-label">最近查看</view>
+      <view class="menu-right" wx:if="{{recentCount > 0}}">{{recentCount}} 条</view>
+      <view class="menu-chevron">›</view>
+    </view>
+    <view class="menu-row" hover-class="menu-row-hover" bindtap="openFeedback">
+      <image class="menu-icon" src="/images/sheet/inbox.png" mode="aspectFit" />
+      <view class="menu-label">意见反馈</view>
+      <view class="menu-right" wx:if="{{submissionCount > 0}}">{{submissionCount}} 条</view>
+      <view class="menu-chevron">›</view>
+    </view>
+    <view class="menu-row" hover-class="menu-row-hover" bindtap="openAbout">
+      <image class="menu-icon" src="/images/menu/info.png" mode="aspectFit" />
+      <view class="menu-label">关于 SHUMap</view>
+      <view class="menu-right">v2.0</view>
+      <view class="menu-chevron">›</view>
+    </view>
+    <view class="menu-row" hover-class="menu-row-hover" bindtap="openDebug">
+      <image class="menu-icon" src="/images/menu/bug.png" mode="aspectFit" />
+      <view class="menu-label">调试信息</view>
+      <view class="menu-chevron">›</view>
+    </view>
+  </view>
+
+  <view class="footer">SHUMap v2.0 · 数据版本 {{releaseVersion}}</view>
+</view>

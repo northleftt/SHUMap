@@ -1,0 +1,310 @@
+/* 楼层图页样式。配色对齐地图页（主题绿 #1e80c1、文字 #0f172a / 次要 #64748b）。 */
+.page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  background-color: #eef1ea;
+}
+
+.navbar {
+  background-color: #ffffff;
+}
+
+.navbar-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 44px;
+}
+
+.navbar-back {
+  width: 72px;
+  padding-left: 12px;
+  font-size: 14px;
+  color: #1e80c1;
+}
+
+.navbar-back-placeholder {
+  color: transparent;
+}
+
+.navbar-title {
+  flex: 1;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.floor-bar {
+  background-color: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+  padding: 8px 12px;
+}
+
+.floor-pill {
+  position: relative;
+  display: inline-block;
+  margin-right: 8px;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: #4b5563;
+  background-color: #f3f4f6;
+}
+
+.floor-pill-active {
+  color: #ffffff;
+  background-color: #1e80c1;
+  font-weight: 600;
+}
+
+/* 有平面图的层右上角色点角标 */
+.floor-pill-dot {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #2f80ed;
+}
+
+.view-toggle {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.view-toggle-item {
+  padding: 5px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: #4b5563;
+  background-color: #f3f4f6;
+}
+
+.view-toggle-active {
+  color: #ffffff;
+  background-color: #1e80c1;
+  font-weight: 600;
+}
+
+.floor-viewport {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+.floor-surface {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* world 容器：viewBox 坐标系 1 单位 = 1px，transform 由 worklet 驱动。 */
+.floor-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+/* 底图 SVG 按 rasterRatio 放大布局再缩回，给高倍缩放留栅格化余量。 */
+.floor-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  transform: scale(0.3333);
+}
+
+.floor-badge {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+/* 徽章锚点在圆心：worklet 反向缩放时锚点不动。 */
+.floor-badge-inner {
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  background-color: #2f80ed;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transform-origin: 8px 8px;
+}
+
+.facility-card {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 20px;
+  padding: 12px 44px 12px 16px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.facility-card-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.facility-card-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.facility-card-close {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  line-height: 26px;
+  text-align: center;
+  font-size: 18px;
+  color: #9ca3af;
+}
+
+.facility-status {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: #fef3c7;
+  color: #92400e;
+  font-size: 12px;
+}
+
+.floor-list {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  /* 列表视图盖在常驻手势层上面，必须不透明 */
+  background-color: #eef1ea;
+}
+
+.floor-note {
+  margin: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background-color: #ffffff;
+  font-size: 13px;
+  line-height: 20px;
+  color: #0f172a;
+}
+
+.floor-media {
+  margin: 0 12px;
+  white-space: nowrap;
+}
+
+.floor-media-img {
+  display: inline-block;
+  width: 160px;
+  height: 110px;
+  margin-right: 8px;
+  border-radius: 10px;
+  background-color: #f3f4f6;
+}
+
+.facility-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin: 8px 12px 0;
+  padding: 12px;
+  border-radius: 10px;
+  background-color: #ffffff;
+}
+
+.facility-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: #2f80ed;
+  margin-right: 10px;
+}
+
+.facility-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.facility-row-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.facility-status-inline {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background-color: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.facility-row-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.floor-empty {
+  padding: 48px 0;
+  text-align: center;
+  font-size: 14px;
+  color: #64748b;
+}
+
+.floor-cover {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #eef1ea;
+}
+
+.floor-cover-text {
+  font-size: 14px;
+  color: #64748b;
+}
+
+.floor-retry {
+  margin-top: 12px;
+  padding: 6px 20px;
+  border-radius: 999px;
+  font-size: 14px;
+  color: #ffffff;
+  background-color: #1e80c1;
+}

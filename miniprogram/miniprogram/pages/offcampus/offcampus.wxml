@@ -1,0 +1,8 @@
+<view class="page">
+  <view class="empty">
+    <image class="empty-icon" src="/images/tabs/globe.png" mode="aspectFit" />
+    <view class="empty-title">校外</view>
+    <view class="empty-sub">功能还在更新当中，</view>
+    <view class="empty-sub">以后再来吧！</view>
+  </view>
+</view>

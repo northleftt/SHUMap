@@ -1,0 +1,9 @@
+<web-view wx:if="{{url && !loadFailed}}" src="{{url}}" binderror="onWebViewError"></web-view>
+
+<!-- web-view 不可用（主体限制 / 域名未配置 / 加载失败）时的通用降级页 -->
+<view wx:if="{{loadFailed || !url}}" class="fallback">
+  <view class="fallback-title">无法直接打开{{title}}</view>
+  <view class="fallback-sub">该页面需要在浏览器中打开，请复制链接后前往</view>
+  <view class="fallback-url">{{url}}</view>
+  <button class="fallback-btn" bindtap="copyLink">复制链接</button>
+</view>

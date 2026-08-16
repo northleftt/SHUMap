@@ -1,0 +1,8 @@
+{
+  "version": "2.0",
+  "envId": "cloudbase-d1gse9nsp7630b4e7",
+  "$schema": "https://framework-1258016615.tcloudbaseapp.com/schema/latest.json",
+  "cloudrun": {
+    "name": "shumap-api"
+  }
+}

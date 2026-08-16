@@ -1,0 +1,89 @@
+<scroll-view scroll-y class="page">
+  <view wx:if="{{loading}}" class="state">正在加载发布数据…</view>
+  <view wx:elif="{{loadError}}" class="state">
+    <view class="state-title">反馈目标加载失败</view>
+    <view class="state-sub">{{loadError}}</view>
+    <view class="retry" bindtap="loadTargets">重试</view>
+  </view>
+
+  <view wx:elif="{{done}}" class="done">
+    <view class="done-icon">✓</view>
+    <view class="done-title">提交成功</view>
+    <view class="done-sub">感谢反馈！提交记录已保存在本机，可在「我的」页查看。</view>
+    <button class="primary-btn done-btn" bindtap="goProfile">查看我的反馈</button>
+  </view>
+
+  <view wx:else class="form">
+    <view class="field-title">反馈类型</view>
+    <scroll-view scroll-x class="chips">
+      <view class="chips-inner">
+        <view
+          wx:for="{{types}}"
+          wx:key="key"
+          class="chip {{item.active ? 'chip-active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="selectType"
+        >{{item.label}}</view>
+      </view>
+    </scroll-view>
+
+    <block wx:if="{{targetRequired}}">
+      <view class="field-title field-gap">{{targetLabel}}</view>
+      <picker mode="selector" range="{{targetNames}}" bindchange="onTargetChange">
+        <view class="picker-row">
+          <view class="picker-value {{targetName ? '' : 'placeholder'}}">{{targetName || targetPlaceholder}}</view>
+          <view class="chevron">›</view>
+        </view>
+      </picker>
+    </block>
+
+    <view class="field-title field-gap">反馈内容</view>
+    <textarea
+      class="textarea"
+      value="{{content}}"
+      maxlength="2000"
+      placeholder="请描述问题，如：位置有误、信息过时、设施已搬离…"
+      bindinput="onContentInput"
+    />
+
+    <view class="field-title field-gap">补充照片（选填，最多 3 张）</view>
+    <view class="photo-grid">
+      <view wx:for="{{photos}}" wx:key="key" class="photo-tile">
+        <image
+          class="photo-image"
+          src="{{item.path}}"
+          mode="aspectFill"
+          data-path="{{item.path}}"
+          bindtap="previewFeedbackPhoto"
+        />
+        <view wx:if="{{item.status === 'uploading'}}" class="photo-state">上传中…</view>
+        <view
+          wx:elif="{{item.status === 'error'}}"
+          class="photo-state photo-error"
+          data-key="{{item.key}}"
+          catchtap="retryPhoto"
+        >上传失败 · 点此重试</view>
+        <view class="photo-remove" data-key="{{item.key}}" catchtap="removePhoto">×</view>
+      </view>
+      <view wx:if="{{canChoosePhotos}}" class="photo-add" bindtap="choosePhotos">
+        <view class="photo-add-icon">＋</view>
+        <view>添加照片</view>
+      </view>
+    </view>
+    <view wx:if="{{uploadingPhotoCount > 0}}" class="hint">照片上传完成后即可提交。</view>
+    <view wx:if="{{failedPhotoCount > 0}}" class="hint">有 {{failedPhotoCount}} 张上传失败，可重试或删除；文字反馈仍可提交。</view>
+
+    <view class="field-title field-gap">署名（选填）</view>
+    <input class="input" value="{{nickname}}" maxlength="100" placeholder="如 张同学，留空则匿名" bindinput="onNicknameInput" />
+    <view class="hint">未登录也可以提交，署名仅用于展示和联系。</view>
+
+    <view class="field-title field-gap">联系方式（选填，便于核实）</view>
+    <input class="input" value="{{contact}}" maxlength="100" placeholder="手机 / 邮箱" bindinput="onContactInput" />
+
+    <view wx:if="{{submitError}}" class="error">{{submitError}}</view>
+    <button class="primary-btn" disabled="{{!canSubmit}}" bindtap="submitFeedback">
+      {{submitting ? '提交中…' : '提交反馈'}}
+    </button>
+    <view class="footer-hint">提交后可在「我的」页查看本机提交记录</view>
+  </view>
+</scroll-view>

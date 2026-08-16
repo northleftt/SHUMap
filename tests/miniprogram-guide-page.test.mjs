@@ -480,6 +480,83 @@ const content = guide.normalizeGuideContent(fixture.content);
   assert.match(guideWxml, /枢纽指引/, "应渲染 guideFigures 区块");
   assert.match(guideWxml, /rich-text/, "备注应用 rich-text 渲染");
   assert.match(guideSource, /preprocessRemarkHtml/);
+  assert.match(guideWxml, /bindtap="previewGuideImage"/, "枢纽简图/实景照应能点开大图");
+  assert.match(guideWxml, /class="img-viewer"/, "应有全屏看图层");
+  assert.match(guideSource, /onViewerTouchStart/, "看图层应接 JS 触摸手势");
+  assert.match(guideSource, /toggleViewerScale/, "单击应切换放大/还原");
+
+  // 白底不能只在纯函数里判对，还得真接到视图上：wxml 绑 class、wxss 定义背景、
+  // 页面把 viewerNeedsPaper 的结果写进 imageViewer.paper。少任何一环，
+  // SVG 简图叠在深色遮罩上就是镂空的。
+  const guideWxss = readFileSync(
+    join(repoRoot, "miniprogram/miniprogram/pages/guide/guide.wxss"),
+    "utf8",
+  );
+  assert.match(guideWxml, /imageViewer\.paper \? 'img-viewer-img-paper'/, "看图层应按需挂白底 class");
+  assert.match(
+    guideWxss,
+    /\.img-viewer-img-paper\s*\{[^}]*background-color:\s*#ffffff/i,
+    "img-viewer-img-paper 必须定义白色背景",
+  );
+  assert.match(guideSource, /"imageViewer\.paper": viewerNeedsPaper\(/, "白底应由 viewerNeedsPaper 判定");
+}
+
+// ---------------------------------------------------------------------------
+// 10. 看图列表：figure / 枢纽简图 / 实景配图，裂图不进
+// ---------------------------------------------------------------------------
+{
+  const items = guide.collectGuidePreviewImages({
+    cards: [
+      { kind: "route", id: "r1" },
+      {
+        kind: "figure",
+        id: "f1",
+        src: "https://map.shutf.com/api/public/guide-assets/hub-png",
+        fallbackSrc: "https://map.shutf.com/api/public/guide-assets/hub",
+      },
+      {
+        kind: "figure",
+        id: "f2",
+        src: "https://map.shutf.com/broken",
+        fallbackSrc: "https://map.shutf.com/broken",
+        imgFailed: true,
+      },
+    ],
+    hubGuide: {
+      placeholder: "",
+      figures: [{ src: "https://map.shutf.com/hub.jpg", fallbackSrc: "https://map.shutf.com/hub.jpg", caption: "" }],
+    },
+    sceneGuide: {
+      intro: "",
+      placeholder: "",
+      pending: null,
+      sections: [
+        {
+          title: "出站",
+          accent: "",
+          numbered: true,
+          grid: true,
+          figures: [{ src: "https://map.shutf.com/sec.jpg", fallbackSrc: "https://map.shutf.com/sec.jpg", caption: "" }],
+          steps: [
+            {
+              text: "走西南",
+              note: "",
+              figures: [{ src: "https://map.shutf.com/step.jpg", fallbackSrc: "https://map.shutf.com/step.jpg" }],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  assert.deepEqual(
+    items.map((item) => item.src),
+    [
+      "https://map.shutf.com/api/public/guide-assets/hub-png",
+      "https://map.shutf.com/hub.jpg",
+      "https://map.shutf.com/sec.jpg",
+      "https://map.shutf.com/step.jpg",
+    ],
+  );
 }
 
 console.log("miniprogram-guide-page: all assertions passed");

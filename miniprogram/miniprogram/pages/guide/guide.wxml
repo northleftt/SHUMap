@@ -1,0 +1,370 @@
+<!-- 返校指南页（原生版）：对标网页版 public/guide/index.html。
+  结构：自定义导航栏 → 标题/版次 → 出发枢纽 × 到达校区两列选择器 →
+  出行方式 chips（>1 种才显示）→ 卡片列表（本切片只渲染 route 卡，
+  figure/steps 占位跳过）→ 页脚版本行。样式对齐 guide-styles.js。 -->
+<view class="page">
+  <view class="navbar" style="padding-top: {{statusBarHeight}}px;">
+    <view class="navbar-row">
+      <view class="navbar-back" bindtap="goBack">‹ 返回</view>
+      <view class="navbar-title">返校指南</view>
+      <view class="navbar-back navbar-back-placeholder"></view>
+    </view>
+  </view>
+
+  <scroll-view scroll-y class="body" enhanced show-scrollbar="{{false}}" scroll-into-view="{{scrollToCard}}" scroll-with-animation="{{true}}">
+    <!-- 加载中 / 未发布 / 网络错误 -->
+    <view wx:if="{{state === 'loading'}}" class="state-block">正在载入指南内容…</view>
+    <view wx:elif="{{state === 'unpublished'}}" class="state-block">
+      <view class="state-title">该指南暂未发布或已下线</view>
+    </view>
+    <view wx:elif="{{state === 'error'}}" class="state-block">
+      <view class="state-title">指南内容加载失败</view>
+      <view class="state-sub">{{errorMessage}}</view>
+      <view class="state-retry" bindtap="load">重试</view>
+    </view>
+
+    <block wx:else>
+      <!-- 标题 + 版次（以接口发布记录为准） -->
+      <view class="header">
+        <view class="header-title-row">
+          <text class="header-title">{{title}}</text>
+          <text wx:if="{{subtitle}}" class="header-subtitle">{{subtitle}}</text>
+        </view>
+        <view wx:if="{{edition}}" class="header-edition">{{edition}}</view>
+      </view>
+
+      <!-- 出发 × 到达 选择器 -->
+      <view class="picker">
+        <view class="pick-col">
+          <view class="pick-label">出发</view>
+          <view
+            wx:for="{{hubOptions}}"
+            wx:key="id"
+            class="pick-item {{item.active ? 'pick-item-active' : ''}}"
+            data-id="{{item.id}}"
+            bindtap="pickHub"
+          >
+            <view class="pick-dot" style="{{item.colorStyle}}"></view>
+            <view class="pick-main">
+              <view class="pick-name">{{item.name}}</view>
+              <view wx:if="{{item.note}}" class="pick-note">{{item.note}}</view>
+            </view>
+          </view>
+        </view>
+        <view class="pick-col">
+          <view class="pick-label">到达</view>
+          <view
+            wx:for="{{campusOptions}}"
+            wx:key="id"
+            class="pick-item {{item.active ? 'pick-item-active' : ''}} {{item.disabled ? 'pick-item-disabled' : ''}}"
+            data-id="{{item.id}}"
+            bindtap="pickCampus"
+          >
+            <view class="pick-main">
+              <view class="pick-name">{{item.label}}</view>
+            </view>
+            <view class="pick-count">{{item.countText}}</view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 出行方式筛选 chips -->
+      <view wx:if="{{showModeBar}}" class="modebar">
+        <text class="modebar-label">出行方式</text>
+        <view
+          wx:for="{{modeChips}}"
+          wx:key="mode"
+          class="chip {{item.on ? 'chip-on' : ''}}"
+          data-mode="{{item.mode}}"
+          bindtap="toggleMode"
+        >
+          {{item.label}}
+        </view>
+      </view>
+
+      <!-- 卡片列表：route/figure 渲染，其他 kind（steps 已摘入 sceneGuide）占位跳过 -->
+      <view wx:if="{{emptyText}}" class="empty">{{emptyText}}</view>
+      <block wx:for="{{cards}}" wx:key="id">
+      <view wx:if="{{item.kind === 'route'}}" class="card" id="card-{{item.id}}">
+        <!-- 卡片头：出发点名 + 括注 -->
+        <view class="card-head">
+          <text class="origin-name">{{item.originName}}</text>
+          <text wx:if="{{item.originNote}}" class="origin-note">{{item.originNote}}</text>
+        </view>
+
+        <!-- 目的地 chip + 方式徽标 + 计量 chips -->
+        <view class="card-chips">
+          <view wx:if="{{item.toward}}" class="dest-chip">{{item.toward}}</view>
+          <view wx:if="{{item.modeBadgeText}}" class="{{item.modeBadgeClass}}">{{item.modeBadgeText}}</view>
+          <view class="spacer"></view>
+          <view wx:if="{{item.durationText}}" class="meta-chip">{{item.durationText}}</view>
+          <view wx:if="{{item.fareText}}" class="meta-chip">{{item.fareText}}</view>
+        </view>
+
+        <!-- 提醒 flags -->
+        <view wx:if="{{item.flags.length > 0}}" class="flags">
+          <view wx:for="{{item.flags}}" wx:for-item="flag" wx:key="index" class="flag">{{flag}}</view>
+        </view>
+
+        <!-- 多段时间线 -->
+        <view class="tl">
+          <view
+            wx:for="{{item.legs}}"
+            wx:for-item="leg"
+            wx:key="index"
+            class="leg {{leg.terminal ? 'leg-terminal' : ''}}"
+          >
+            <view class="gutter">
+              <view
+                wx:for="{{leg.topRails}}"
+                wx:for-item="rail"
+                wx:key="index"
+                class="ln ln-top"
+                style="{{rail.style}}"
+              ></view>
+              <view
+                wx:for="{{leg.bottomRails}}"
+                wx:for-item="rail"
+                wx:key="index"
+                class="ln ln-bot"
+                style="{{rail.style}}"
+              ></view>
+              <view
+                wx:for="{{leg.fullRails}}"
+                wx:for-item="rail"
+                wx:key="index"
+                class="ln ln-full"
+                style="{{rail.style}}"
+              ></view>
+              <view wx:if="{{leg.dotClass}}" class="{{leg.dotClass}}" style="left: {{leg.dotLeft}}px;"></view>
+            </view>
+            <view class="leg-body">
+              <block wx:if="{{leg.type === 'stop'}}">
+                <view class="stop-name">{{leg.stopName}}</view>
+                <view wx:if="{{leg.stopExit}}" class="stop-exit">{{leg.stopExit}}</view>
+                <view wx:if="{{leg.stopNote}}" class="lnote">{{leg.stopNote}}</view>
+              </block>
+              <view wx:elif="{{leg.type === 'walk'}}" class="walk">{{leg.walkText}}</view>
+              <view wx:else class="ride">
+                <view wx:for="{{leg.rideLines}}" wx:for-item="ln" wx:key="index" class="ride-row-wrap">
+                  <view class="ride-row">
+                    <image
+                      wx:if="{{ln.icon}}"
+                      class="mico"
+                      style="width: {{ln.icon.width}}rpx; height: 30rpx;"
+                      src="{{ln.icon.src}}"
+                      mode="aspectFit"
+                    />
+                    <view wx:if="{{ln.isBus}}" class="busline">{{ln.no}}</view>
+                    <block wx:else>
+                      <view class="lnum" style="{{ln.noStyle}}">{{ln.no}}</view>
+                      <text wx:if="{{ln.suffix}}" class="suffix">{{ln.suffix}}</text>
+                    </block>
+                    <text wx:if="{{ln.toward}}" class="toward">{{ln.toward}}</text>
+                    <text wx:if="{{ln.note}}" class="lnote">{{ln.note}}</text>
+                  </view>
+                  <view wx:for="{{ln.extraNotes}}" wx:for-item="extra" wx:key="index" class="lnote">{{extra}}</view>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <!-- 卡片脚：备注 + 发车时刻 -->
+        <view wx:if="{{item.note || item.schedule.length > 0}}" class="card-foot">
+          <view wx:if="{{item.note}}" class="note">
+            <text class="note-label">备注</text>
+            <text class="note-text">{{item.note}}</text>
+          </view>
+          <view wx:if="{{item.schedule.length > 0}}" class="sched">
+            <view class="sched-t">发车时刻</view>
+            <view wx:for="{{item.schedule}}" wx:for-item="row" wx:key="index" class="sched-row">
+              <view class="sched-label">{{row.label}}</view>
+              <view class="sched-times">
+                <view wx:for="{{row.times}}" wx:for-item="time" wx:key="index">{{time}}</view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- figure 图示卡：真图 + 热区（-png 优先，binderror 回落，再失败占位） -->
+      <view wx:elif="{{item.kind === 'figure'}}" class="card" id="card-{{item.id}}">
+        <view class="fig-head">
+          <view class="fig-t">{{item.title}}</view>
+        </view>
+        <view wx:if="{{item.caption}}" class="fig-cap">{{item.caption}}</view>
+        <view class="figwrap">
+          <image
+            wx:if="{{!item.imgFailed}}"
+            class="fig-img"
+            src="{{item.src}}"
+            mode="widthFix"
+            data-card-id="{{item.id}}"
+            data-src="{{item.src}}"
+            binderror="onFigureImageError"
+            bindload="onFigureImageLoad"
+            bindtap="previewGuideImage"
+          />
+          <view wx:else class="fig-placeholder">图示暂未适配</view>
+          <view
+            wx:for="{{item.hotspots}}"
+            wx:for-item="hs"
+            wx:key="id"
+            class="hot"
+            style="{{hs.style}}"
+            data-card-id="{{item.id}}"
+            data-hot-id="{{hs.id}}"
+            bindtap="openHotspot"
+          ></view>
+        </view>
+        <view wx:if="{{item.hotspots.length > 0}}" class="fighint">
+          {{item.hotspots.length}} 个可点位置 · 点击查看详情或跳转
+        </view>
+      </view>
+      </block>
+
+      <!-- 枢纽指引图（guideFigures；卡片之后、实况指引之前，对齐 renderPairView） -->
+      <view wx:if="{{hubGuide}}" class="hub-sec" id="hub-guide-sec">
+        <view class="hub-sec-t">枢纽指引</view>
+        <view wx:if="{{hubGuide.placeholder}}" class="sec-placeholder">{{hubGuide.placeholder}}</view>
+        <view
+          wx:for="{{hubGuide.figures}}"
+          wx:for-item="hfig"
+          wx:for-index="hfigIndex"
+          wx:key="index"
+          class="hubfig"
+        >
+          <image
+            class="hub-fig"
+            src="{{hfig.src}}"
+            mode="widthFix"
+            data-fig="{{hfigIndex}}"
+            data-src="{{hfig.src}}"
+            binderror="onHubGuideImageError"
+            bindtap="previewGuideImage"
+          />
+          <view wx:if="{{hfig.caption}}" class="secfig-cap">{{hfig.caption}}</view>
+        </view>
+      </view>
+
+      <!-- 实况指引（枢纽 sceneGuide + 视频入口，卡片之后；对齐网页版 renderPairView 顺序） -->
+      <view wx:if="{{sceneGuide || videoEntries.length > 0}}" class="hub-sec" id="scene-guide-sec">
+        <view class="hub-sec-t">实况指引</view>
+        <view wx:if="{{sceneGuide.placeholder}}" class="sec-placeholder">{{sceneGuide.placeholder}}</view>
+        <view wx:if="{{sceneGuide.intro}}" class="steps-intro">{{sceneGuide.intro}}</view>
+        <view wx:for="{{sceneGuide.sections}}" wx:for-item="sec" wx:for-index="secIndex" wx:key="index" class="sec">
+          <view wx:if="{{sec.title}}" class="sec-t">
+            <view wx:if="{{sec.accent}}" class="sec-dot" style="background: {{sec.accent}};"></view>
+            <text>{{sec.title}}</text>
+          </view>
+          <view wx:if="{{sec.figures.length > 0}}" class="secfigs">
+            <view wx:for="{{sec.figures}}" wx:for-item="fig" wx:for-index="figIndex" wx:key="index" class="secfig">
+              <image
+                class="secfig-img"
+                src="{{fig.src}}"
+                mode="widthFix"
+                data-sec="{{secIndex}}"
+                data-step="{{-1}}"
+                data-fig="{{figIndex}}"
+                data-src="{{fig.src}}"
+                binderror="onSceneImageError"
+                bindtap="previewGuideImage"
+              />
+              <view wx:if="{{fig.caption}}" class="secfig-cap">{{fig.caption}}</view>
+            </view>
+          </view>
+          <view class="sec-list {{sec.grid ? 'sec-list-grid' : ''}}">
+            <view wx:for="{{sec.steps}}" wx:for-item="step" wx:for-index="stepIndex" wx:key="index" class="step">
+              <view wx:if="{{step.figures.length > 0}}" class="step-figs">
+                <image
+                  wx:for="{{step.figures}}"
+                  wx:for-item="sfig"
+                  wx:for-index="sfigIndex"
+                  wx:key="index"
+                  class="step-fig"
+                  src="{{sfig.src}}"
+                  mode="aspectFit"
+                  data-sec="{{secIndex}}"
+                  data-step="{{stepIndex}}"
+                  data-fig="{{sfigIndex}}"
+                  data-src="{{sfig.src}}"
+                  binderror="onSceneImageError"
+                  bindtap="previewGuideImage"
+                />
+              </view>
+              <view class="step-t"><text wx:if="{{sec.numbered}}" class="step-no">{{stepIndex + 1}}. </text>{{step.text}}</view>
+              <view wx:if="{{step.note}}" class="step-n">{{step.note}}</view>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{sceneGuide.pending}}" class="pending">
+          <view class="pending-l">{{sceneGuide.pending.label}}</view>
+          <view wx:if="{{sceneGuide.pending.detail}}" class="pending-d">{{sceneGuide.pending.detail}}</view>
+        </view>
+        <!-- 实况视频入口：点「点击查看视频引导」后才挂载 <video> -->
+        <view wx:for="{{videoEntries}}" wx:key="index" class="video-entry">
+          <view class="video-entry-row" data-index="{{index}}" bindtap="playVideo">
+            <view class="video-entry-icon">▶</view>
+            <view class="video-entry-t">点击查看视频引导</view>
+            <view wx:if="{{item.note}}" class="video-entry-n">{{item.note}}</view>
+          </view>
+          <video
+            wx:if="{{item.playing}}"
+            class="hub-video"
+            src="{{item.url}}"
+            poster="{{item.poster}}"
+            controls="{{true}}"
+            autoplay="{{true}}"
+          />
+        </view>
+      </view>
+
+      <!-- 备注（hub.remark 富文本，预处理后 rich-text 渲染；为空不显示） -->
+      <view wx:if="{{remarkHtml}}" class="hub-sec" id="remark-sec">
+        <view class="hub-sec-t">备注</view>
+        <view class="remark">
+          <rich-text nodes="{{remarkHtml}}"></rich-text>
+        </view>
+      </view>
+
+      <view wx:if="{{footText}}" class="foot">{{footText}}</view>
+    </block>
+  </scroll-view>
+
+  <!-- 全屏看图：点缩略图打开；点图切换放大/还原；双指捏合；点暗处或 ✕ 关闭 -->
+  <view wx:if="{{imageViewer.open}}" class="img-viewer" catchtouchmove="onViewerTouchMove">
+    <view class="img-viewer-mask" bindtap="closeImageViewer"></view>
+    <view
+      class="img-viewer-stage"
+      catchtouchstart="onViewerTouchStart"
+      catchtouchmove="onViewerTouchMove"
+      catchtouchend="onViewerTouchEnd"
+      catchtouchcancel="onViewerTouchEnd"
+    >
+      <image class="img-viewer-img {{imageViewer.paper ? 'img-viewer-img-paper' : ''}}" src="{{imageViewer.src}}" style="{{imageViewer.style}}" mode="aspectFit" />
+    </view>
+    <view class="img-viewer-close" bindtap="closeImageViewer">✕</view>
+    <view class="img-viewer-hint">点击放大/缩小 · 双指缩放</view>
+  </view>
+
+  <!-- 热点说明弹层：遮罩 + 卡片；#card: 链接可点，http/#shumap/#wechat 灰色不可点 -->
+  <view wx:if="{{hotspotPop}}" class="pop-mask" bindtap="closeHotspot">
+    <view class="pop" catchtap="noop">
+      <view class="pop-x" bindtap="closeHotspot">✕</view>
+      <view class="pop-t">{{hotspotPop.title}}</view>
+      <view class="pop-b">{{hotspotPop.body}}</view>
+      <view wx:if="{{hotspotPop.links.length > 0}}" class="pop-links">
+        <block wx:for="{{hotspotPop.links}}" wx:key="index">
+          <view
+            wx:if="{{item.kind === 'card'}}"
+            class="pop-link"
+            data-card-id="{{item.cardId}}"
+            bindtap="openCardLink"
+          >{{item.label}} ›</view>
+          <view wx:else class="pop-link pop-link-disabled">{{item.label}}</view>
+        </block>
+      </view>
+    </view>
+  </view>
+</view>

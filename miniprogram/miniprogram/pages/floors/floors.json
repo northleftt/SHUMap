@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "楼层图",
+  "navigationStyle": "custom",
+  "renderer": "skyline",
+  "disableScroll": true,
+  "usingComponents": {}
+}

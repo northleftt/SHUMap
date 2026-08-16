@@ -1,0 +1,178 @@
+<!-- M3 校车时刻表：对标 Web 端 src/pages/shuttle/ShuttlePage.tsx -->
+<scroll-view scroll-y class="page" enhanced show-scrollbar="{{false}}" style="padding-top: {{statusBarHeight}}px">
+  <!-- 头部：标题 + 预约网站入口 -->
+  <view class="header">
+    <text class="title">校车时刻表</text>
+    <view class="booking-link" bindtap="openBookingSite">预约网站 ›</view>
+  </view>
+
+  <!-- 线路卡：从/到站点选择 + 交换 + 日期 -->
+  <view class="route-card">
+    <picker class="stop-picker" mode="selector" range="{{stopNames}}" value="{{fromIndex}}" bindchange="onFromChange">
+      <view class="stop-label">从</view>
+      <view class="stop-value">{{stopNames[fromIndex] || '选择'}} ▾</view>
+    </picker>
+    <view class="swap-btn" bindtap="onSwap">⇅</view>
+    <picker class="stop-picker" mode="selector" range="{{stopNames}}" value="{{toIndex}}" bindchange="onToChange">
+      <view class="stop-label">到</view>
+      <view class="stop-value">{{stopNames[toIndex] || '选择'}} ▾</view>
+    </picker>
+    <view class="date-divider"></view>
+    <picker class="date-picker" mode="date" value="{{dateKey}}" bindchange="onDateChange">
+      <view class="date-label">{{dateLabel}}</view>
+      <view class="date-sub">{{dateSub}}</view>
+    </picker>
+  </view>
+
+  <!-- 离线快照提示 -->
+  <view wx:if="{{offlineTip}}" class="offline-tip">{{offlineTip}}</view>
+
+  <!-- 加载 / 错误 / 空态 -->
+  <view wx:if="{{loading}}" class="state-block">正在加载班次…</view>
+  <view wx:elif="{{errorMessage}}" class="state-block">
+    <view class="state-title">班次数据加载失败</view>
+    <view class="state-sub">{{errorMessage}}</view>
+  </view>
+  <view wx:elif="{{isEmpty}}" class="state-block">
+    <view class="state-title">{{emptyTitle}}</view>
+    <view class="state-sub">{{emptySubtitle}}</view>
+  </view>
+
+  <block wx:else>
+    <!-- 最近一班（仅今天） -->
+    <block wx:if="{{todayFlag && (!nextReservation.disabled || !nextNonReservation.disabled)}}">
+      <view class="section-header">最近一班</view>
+      <view class="hero-row">
+        <view
+          class="hero-card hero-reservation {{nextReservation.disabled ? 'hero-disabled' : ''}}"
+          data-tone="reservation"
+          bindtap="openPreviewByHero"
+        >
+          <view class="hero-top">
+            <text>{{nextReservation.label}}</text>
+            <text>{{nextReservation.countdown}}</text>
+          </view>
+          <view class="hero-time">{{nextReservation.time}}</view>
+        </view>
+        <view
+          class="hero-card hero-free {{nextNonReservation.disabled ? 'hero-disabled' : ''}}"
+          data-tone="nonReservation"
+          bindtap="openPreviewByHero"
+        >
+          <view class="hero-top">
+            <text>{{nextNonReservation.label}}</text>
+            <text>{{nextNonReservation.countdown}}</text>
+          </view>
+          <view class="hero-time">{{nextNonReservation.time}}</view>
+        </view>
+      </view>
+    </block>
+
+    <!-- 时刻网格 -->
+    <block wx:if="{{otherBuses.length > 0}}">
+      <view class="section-header">{{todayFlag ? '今日其他班次' : '当日班次'}}</view>
+      <view class="grid-card">
+        <view
+          wx:for="{{otherBuses}}"
+          wx:key="departureTime"
+          class="grid-item {{index % 2 === 1 ? 'grid-item-right' : ''}}"
+          data-time="{{item.departureTime}}"
+          bindtap="openPreviewByTime"
+        >
+          <text class="grid-time">{{item.departureTime}}</text>
+          <text wx:if="{{item.status === 'mixed'}}" class="chip chip-reservation">预</text>
+          <text wx:if="{{item.status === 'mixed'}}" class="chip chip-free">非</text>
+          <text wx:elif="{{item.status === 'reservation'}}" class="chip chip-reservation">预</text>
+          <text wx:elif="{{item.status === 'nonReservation'}}" class="chip chip-free">非</text>
+        </view>
+      </view>
+      <view class="grid-legend">
+        <text class="chip chip-reservation">预</text> = 预约车　　<text class="chip chip-free">非</text> = 非预约车
+      </view>
+    </block>
+
+    <!-- 上下车点 -->
+    <block wx:if="{{fromStopName && toStopName && fromStopName !== toStopName}}">
+      <view class="section-header">上下车点</view>
+      <view class="stop-card">
+        <view class="stop-row stop-row-border" data-role="from" bindtap="openSelectedStopOnMap">
+          <text class="stop-row-label">上车点</text>
+          <text class="stop-row-pin">📍</text>
+          <text class="stop-row-name">{{fromStopName}}</text>
+          <text wx:if="{{fromStopCanMap}}" class="stop-row-action">查看地图 ›</text>
+        </view>
+        <view class="stop-row" data-role="to" bindtap="openSelectedStopOnMap">
+          <text class="stop-row-label">下车点</text>
+          <text class="stop-row-pin">📍</text>
+          <text class="stop-row-name">{{toStopName}}</text>
+          <text wx:if="{{toStopCanMap}}" class="stop-row-action">查看地图 ›</text>
+        </view>
+      </view>
+    </block>
+  </block>
+
+  <view class="page-footer-space"></view>
+</scroll-view>
+
+<!-- 班次预览弹层（M7） -->
+<view wx:if="{{previewVisible}}" class="sheet-mask" bindtap="closePreview">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet-header">
+      <view class="sheet-title-block">
+        <view class="sheet-title">{{previewTime}} 班车</view>
+        <view class="sheet-meta">{{previewMeta}}</view>
+      </view>
+      <view class="sheet-close" bindtap="closePreview">✕</view>
+    </view>
+
+    <view wx:if="{{previewLoading}}" class="state-block">正在加载停靠站点…</view>
+    <view wx:elif="{{previewError}}" class="state-block">
+      <view class="state-title">停靠站点加载失败</view>
+      <view class="state-sub">{{previewError}}</view>
+    </view>
+    <view wx:elif="{{previewOffline}}" class="sheet-offline">离线快照数据，暂无停靠站点信息</view>
+
+    <!-- 站点时间线 -->
+    <view wx:if="{{previewBoarding}}" class="timeline">
+      <view class="timeline-row">
+        <view class="timeline-rail">
+          <view class="dot dot-boarding"></view>
+          <view wx:if="{{previewAlighting.length > 0}}" class="rail-line"></view>
+        </view>
+        <view class="timeline-body timeline-body-nav">
+          <view class="timeline-copy">
+            <view class="timeline-name">{{previewBoarding.name}} · 上车</view>
+            <view class="timeline-time">{{previewBoarding.timeText}}</view>
+          </view>
+          <view
+            wx:if="{{previewBoarding.canNavigate}}"
+            class="timeline-nav"
+            data-stop-id="{{previewBoarding.stopId}}"
+            bindtap="openStopNavigation"
+          >导航</view>
+        </view>
+      </view>
+      <view wx:if="{{previewAlighting.length > 0}}" class="timeline-row">
+        <view class="timeline-rail">
+          <view class="dot dot-alighting"></view>
+        </view>
+        <view class="timeline-body">
+          <view wx:for="{{previewAlighting}}" wx:key="stopId" class="alighting-item {{index > 0 ? 'alighting-gap' : ''}}">
+            <view class="timeline-copy">
+              <view class="timeline-name">{{item.name}} · {{item.roleText}}</view>
+              <view wx:if="{{item.timeText}}" class="timeline-time">{{item.timeText}}</view>
+            </view>
+            <view
+              wx:if="{{item.canNavigate}}"
+              class="timeline-nav"
+              data-stop-id="{{item.stopId}}"
+              bindtap="openStopNavigation"
+            >导航</view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <button wx:if="{{previewIsReservation}}" class="book-btn" bindtap="bookPreviewTrip">预约此班次</button>
+  </view>
+</view>

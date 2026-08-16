@@ -41,7 +41,7 @@ const require = createRequire(import.meta.url);
 const guide = require(join(outDir, "guide.cjs"));
 const automator = require("miniprogram-automator");
 
-const API_BASE = process.env.SHUMAN_API_BASE ?? "https://shumap-api.kitahidari.com";
+const API_BASE = process.env.SHUMAN_API_BASE ?? "https://map.shutf.com";
 const WS_ENDPOINT = process.env.AUTOMATOR_WS ?? "ws://localhost:9420";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

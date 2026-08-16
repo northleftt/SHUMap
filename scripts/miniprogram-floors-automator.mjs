@@ -46,7 +46,7 @@ const viewport = require(join(outDir, "viewport.cjs"));
 const svgGeometry = require(join(outDir, "svg-geometry.cjs"));
 const automator = require("miniprogram-automator");
 
-const API_BASE = process.env.SHUMAN_API_BASE ?? "https://shumap-api.kitahidari.com";
+const API_BASE = process.env.SHUMAN_API_BASE ?? "https://map.shutf.com";
 const WS_ENDPOINT = process.env.AUTOMATOR_WS ?? "ws://localhost:9420";
 
 // ---------------------------------------------------------------------------

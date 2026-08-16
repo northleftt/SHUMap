@@ -1,0 +1,657 @@
+<!-- 校园地图页（Skyline）。版式对齐 Web 端 src/pages/map/MapPage.tsx：
+  - 地图**全幅铺满**（无导航栏、无独立搜索条），所有 UI 浮在地图之上；
+  - 底部**常驻四档抽屉**（collapsed/home/results/poi，见 lib/map/sheet.ts）：
+    顶边 sheetTop 由档位算出，拖拽把手改 sheetOffset 共享变量（applyAnimatedStyle
+    驱动 translateY，不走 setData），松手吸附；poi 档下拉超 70px = 关闭详情；
+  - 顶部左侧校区 pill（与微信胶囊同行）、右侧控件列（图层，避让胶囊）；
+  - 地图手势在 .map-surface 的 bindtouchstart/move/end/tap（JS 线程，
+    worklet:ongesture 真机不触发，见 AGENTS.md 坑 #8）；
+  - map-world 按 viewBox 尺寸布局，底图 <image> 直连 Worker SVG asset；
+    选中楼宇/事件轮廓各用一张同尺寸临时 SVG <image> 覆盖层；
+    图钉在 world 容器内，applyAnimatedStyle 反向缩放保持屏幕尺寸。 -->
+<view class="page">
+  <view class="map-viewport">
+    <view
+      class="map-surface"
+      bindtouchstart="onSurfaceTouchStart"
+      bindtouchmove="onSurfaceTouchMove"
+      bindtouchend="onSurfaceTouchEnd"
+      bindtouchcancel="onSurfaceTouchEnd"
+      bindtap="onSurfaceTap"
+    >
+      <view class="map-world" wx:if="{{ready}}" style="width: {{worldWidth}}px; height: {{worldHeight}}px;">
+        <image
+          class="map-svg"
+          src="{{assetUrl}}"
+          mode="scaleToFill"
+          style="width: {{worldWidth * rasterRatio}}px; height: {{worldHeight * rasterRatio}}px;"
+          show-menu-by-longpress="{{false}}"
+        />
+        <!-- 搜索/筛选命中楼宇覆盖层（网页端 g[data-match] 样式；详情态隐藏） -->
+        <image
+          wx:if="{{filterHighlightUrl}}"
+          class="map-svg map-svg-filter-highlight"
+          src="{{filterHighlightUrl}}"
+          mode="scaleToFill"
+          style="width: {{worldWidth * rasterRatio}}px; height: {{worldHeight * rasterRatio}}px;"
+          show-menu-by-longpress="{{false}}"
+        />
+        <!-- 运营事件轮廓覆盖层（面/线几何画进透明 SVG 临时文件，同尺寸同定位） -->
+        <image
+          wx:if="{{eventOverlayUrl}}"
+          class="map-svg map-svg-events"
+          src="{{eventOverlayUrl}}"
+          mode="scaleToFill"
+          style="width: {{worldWidth * rasterRatio}}px; height: {{worldHeight * rasterRatio}}px;"
+          show-menu-by-longpress="{{false}}"
+        />
+        <!-- 选中楼宇高亮覆盖层（等效 Web 端 g[data-selected] 样式） -->
+        <image
+          wx:if="{{highlightUrl}}"
+          class="map-svg map-svg-highlight"
+          src="{{highlightUrl}}"
+          mode="scaleToFill"
+          style="width: {{worldWidth * rasterRatio}}px; height: {{worldHeight * rasterRatio}}px;"
+          show-menu-by-longpress="{{false}}"
+        />
+        <!-- 用户定位精度圈：世界坐标尺寸（随地图缩放，表示真实精度米数），
+             放在图钉层之下；accuracy 超过 500m 时不画（lib/map/user-location） -->
+        <view
+          wx:if="{{userLocation && userLocation.radius > 0}}"
+          class="locate-accuracy"
+          style="left: {{userLocation.x - userLocation.radius}}px; top: {{userLocation.y - userLocation.radius}}px; width: {{userLocation.radius * 2}}px; height: {{userLocation.radius * 2}}px;"
+        ></view>
+        <!-- 点状 POI 图钉：白底蓝图标圆点，选中 = 浅蓝光晕 + 蓝底白图标
+             （对齐 Web 端 MapPoiOverlay） -->
+        <view
+          wx:for="{{markers}}"
+          wx:key="poiKey"
+          class="poi-marker"
+          style="left: {{item.x}}px; top: {{item.y}}px;"
+        >
+          <view class="poi-pin {{item.dimmed ? 'poi-pin-dimmed' : ''}}">
+            <view wx:if="{{item.selected}}" class="poi-halo"></view>
+            <view class="poi-circle {{item.selected ? 'poi-circle-selected' : ''}}">
+              <image class="poi-icon" src="{{item.iconUrl}}" mode="aspectFit" />
+            </view>
+          </view>
+        </view>
+        <!-- 运营事件 marker：severity 三色「!」圆点（复用 .poi-pin 反向缩放） -->
+        <view
+          wx:for="{{eventMarkers}}"
+          wx:key="key"
+          class="poi-marker"
+          style="left: {{item.x}}px; top: {{item.y}}px;"
+        >
+          <view class="poi-pin event-pin">
+            <view class="event-dot" style="background-color: {{item.color}};">!</view>
+          </view>
+        </view>
+        <!-- 用户定位 dot：蓝点 + 白描边（仿主流地图 App），复用 .poi-pin 反向
+             缩放保持屏幕尺寸；坐标不在当前校区 viewBox 内时不渲染 -->
+        <view
+          wx:if="{{userLocation}}"
+          class="poi-marker"
+          style="left: {{userLocation.x}}px; top: {{userLocation.y}}px;"
+        >
+          <view class="poi-pin locate-pin">
+            <view class="locate-dot"></view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{loading}}" class="map-cover">
+      <view class="map-cover-spinner"></view>
+      <view class="map-cover-text">正在加载校园地图…</view>
+    </view>
+    <view wx:elif="{{errorMessage}}" class="map-cover">
+      <image class="map-cover-icon" src="/images/sheet/circle-alert.png" mode="aspectFit" />
+      <view class="map-cover-text">{{errorMessage}}</view>
+      <view class="map-retry" bindtap="boot">重试</view>
+    </view>
+
+    <!-- 校区切换 pill + 下拉（对齐 Web 端 CampusSwitcher）。与微信胶囊同行，靠左不冲突。 -->
+    <block wx:if="{{ready}}">
+      <view class="campus-pill" style="top: {{capsuleTop}}px;" bindtap="toggleCampusMenu">
+        <view class="campus-pill-label">{{activeCampusLabel}}</view>
+        <image
+          class="campus-pill-chevron {{campusMenuOpen ? 'campus-pill-chevron-open' : ''}}"
+          src="/images/sheet/chevron-down.png"
+          mode="aspectFit"
+        />
+      </view>
+      <view wx:if="{{campusMenuOpen}}" class="campus-menu" style="top: {{capsuleTop + 44}}px;">
+        <view
+          wx:for="{{campuses}}"
+          wx:key="key"
+          class="campus-menu-item {{activeCampusKey === item.key ? 'campus-menu-item-active' : ''}}"
+          data-key="{{item.key}}"
+          bindtap="switchCampus"
+        >{{item.label}}</view>
+      </view>
+    </block>
+
+    <!-- 已发布返校指南入口；关闭按 revisionNo 记忆，新版发布后会重新出现。
+         results（近全屏）档抽屉顶边与横幅同高，不隐藏会盖住搜索条。 -->
+    <view wx:if="{{guideVisible && sheetMode !== 'results'}}" class="guide-banner" style="top: {{capsuleTop + 44}}px;">
+      <view class="guide-banner-main" bindtap="openGuide">
+        <view class="guide-banner-icon">▤</view>
+        <view class="guide-banner-copy">
+          <view class="guide-banner-title">{{guideTitle}}</view>
+          <view class="guide-banner-sub">{{guideSubtitle}}</view>
+        </view>
+      </view>
+      <view class="guide-banner-close" bindtap="dismissGuide">×</view>
+    </view>
+
+    <!-- 右侧控件列：定位 + 图层，避让微信胶囊。
+         results（近全屏）档地图被抽屉完全盖住，控件钮会浮在卡片上，不出。 -->
+    <view wx:if="{{ready && sheetMode !== 'results'}}" class="control-column {{sheetMode === 'poi' ? 'control-column-poi' : ''}}" style="top: {{controlTop}}px;">
+      <!-- 定位：立即刷新一次定位并居中到用户位置（未授权/失败 toast 提示） -->
+      <view class="control-fab control-fab-locate" bindtap="locateUser">
+        <image class="control-fab-icon" src="/images/sheet/crosshair.png" mode="aspectFit" />
+      </view>
+      <view
+        wx:if="{{sheetMode !== 'poi'}}"
+        class="control-fab {{layerPanelOpen ? 'control-fab-active' : ''}}"
+        bindtap="toggleLayerPanel"
+      >
+        <image
+          class="control-fab-icon"
+          src="{{layerPanelOpen ? '/images/sheet/layers-w.png' : '/images/sheet/layers.png'}}"
+          mode="aspectFit"
+        />
+        <view wx:if="{{eventCount > 0}}" class="control-fab-badge">{{eventCount}}</view>
+      </view>
+    </view>
+
+    <!-- 图层浮卡：运营事件开关 + 高亮类别 chips（对齐 Web 端 LayerPanel） -->
+    <view wx:if="{{ready && layerPanelOpen && sheetMode !== 'poi' && sheetMode !== 'results'}}" class="layer-card" style="left: {{viewportWidth - 264}}px; top: {{controlTop + 108}}px;">
+      <scroll-view scroll-y class="layer-card-scroll">
+        <view class="layer-card-title">图层</view>
+        <view class="layer-row" bindtap="toggleEvents">
+          <image
+            class="layer-row-icon"
+            src="{{eventsOn ? '/images/sheet/layers-active.png' : '/images/sheet/layers.png'}}"
+            mode="aspectFit"
+          />
+          <view class="layer-row-label">运营事件</view>
+          <view wx:if="{{eventCount > 0}}" class="layer-badge">{{eventCount}}</view>
+          <view class="layer-switch {{eventsOn ? 'layer-switch-on' : ''}}">
+            <view class="layer-switch-dot"></view>
+          </view>
+        </view>
+        <block wx:if="{{filterChips.length > 0}}">
+          <view class="layer-card-title layer-card-title-gap">高亮类别</view>
+          <view class="layer-chips">
+            <view
+              wx:for="{{filterChips}}"
+              wx:key="key"
+              class="chip {{item.active ? 'chip-active' : ''}}"
+              data-key="{{item.key}}"
+              bindtap="onLayerFilterTap"
+            >{{item.label}}</view>
+          </view>
+        </block>
+      </scroll-view>
+    </view>
+
+    <!-- 缩放条（对齐 Web 端 MapCanvas 移动端 center-right 位置，只有 +/−） -->
+    <view class="zoom-control" wx:if="{{ready}}">
+      <view class="zoom-button" bindtap="zoomIn">
+        <image class="zoom-icon" src="/images/sheet/zoom-in.png" mode="aspectFit" />
+      </view>
+      <view class="zoom-divider"></view>
+      <view class="zoom-button" bindtap="zoomOut">
+        <image class="zoom-icon" src="/images/sheet/zoom-out.png" mode="aspectFit" />
+      </view>
+    </view>
+
+    <!-- 运营事件摘要卡（点事件 marker 后，贴在抽屉上缘之上） -->
+    <view wx:if="{{eventSummary}}" class="event-card" style="bottom: {{eventCardBottom}}px;">
+      <view class="event-card-type">
+        <image class="event-card-type-icon" src="{{eventSummary.iconUrl}}" mode="aspectFit" />
+        <view class="event-card-type-text" style="color: {{eventSummary.color}};">{{eventSummary.typeLabel}}</view>
+      </view>
+      <view class="event-card-title">{{eventSummary.title}}</view>
+      <view wx:if="{{eventSummary.description}}" class="event-card-desc">{{eventSummary.description}}</view>
+      <view class="event-card-actions">
+        <view class="event-card-dismiss" bindtap="dismissEvents">暂时关闭</view>
+        <view class="event-card-detail" bindtap="openEventDetailFromSummary">查看详情 ›</view>
+        <view class="event-card-close" bindtap="closeEventSummary">
+          <image class="event-card-close-icon" src="/images/sheet/x.png" mode="aspectFit" />
+        </view>
+      </view>
+    </view>
+
+    <!-- 全屏/恢复浮钮：贴抽屉上缘右侧，跟随顶边移动（poi 档不出，该位置是关闭钮） -->
+    <view
+      wx:if="{{ready && sheetToggle}}"
+      class="sheet-toggle"
+      style="top: {{sheetToggle.top}}px; right: {{sheetToggle.right}}px;"
+      bindtap="toggleSheet"
+    >
+      <image
+        class="sheet-toggle-icon"
+        src="{{sheetToggle.collapsed ? '/images/sheet/minimize-2.png' : '/images/sheet/maximize-2.png'}}"
+        mode="aspectFit"
+      />
+    </view>
+
+    <!-- poi 档关闭圆钮：整体抬到卡片上缘之上（不再半压卡片、挡住收藏/标题），
+         top 由 configureSheet 计算（顶边上方 48px，抽屉太高放不下时钳到胶囊/控件列之下） -->
+    <view
+      wx:if="{{ready && sheetCloseTop !== null}}"
+      class="sheet-close"
+      style="top: {{sheetCloseTop}}px;"
+      bindtap="closePoi"
+    >
+      <image class="sheet-close-icon" src="/images/sheet/x.png" mode="aspectFit" />
+    </view>
+
+    <!-- ===================== 常驻底部抽屉 =====================
+      定位模型：卡片自身高度恒为「视口高 − tab 栏高」（sheetFullHeight），
+      靠 translateY(sheetTop) 下移到档位。这样无论上拉下拉，卡片底边永远在
+      可视区之下（多出的部分被 .map-viewport overflow:hidden 裁掉），拖动时
+      底部不会露出地图缝。拖动改 sheetY 共享变量 → applyAnimatedStyle 驱动
+      translateY，不在 touchmove 里 setData。
+      重要：.sheet 是被 worklet 驱动的动画节点，必须完全静态——不挂任何
+      {{}} 绑定、不挂 wx:if（ready 门控在外层普通 view）。它身上一旦还有
+      setData 绑定的 style/class，每次 setData 提交都会重写节点属性、把
+      worklet 施加的 transform 顶掉一帧（translateY 回 0 =「弹到顶」闪跳）。
+      高度绑定在内层 .sheet-frame（setData 只碰它，它不被 worklet 驱动）。 -->
+    <view wx:if="{{ready}}">
+    <view class="sheet">
+      <view class="sheet-frame" style="height: {{sheetFullHeight}}px;">
+      <!-- 拖拽把手（在卡片上缘之上，白色小横条） -->
+      <view
+        class="sheet-handle"
+        bindtouchstart="onSheetTouchStart"
+        bindtouchmove="onSheetTouchMove"
+        bindtouchend="onSheetTouchEnd"
+        bindtouchcancel="onSheetTouchEnd"
+      >
+        <view class="sheet-handle-bar"></view>
+      </view>
+
+      <!-- 内容只在「可见高度」这条带子里排版；卡片下方多出来的白色是填充，
+           被 tab 栏盖住或落在视口之外，保证列表底边不会藏到 tab 栏后面。 -->
+      <view class="sheet-shell" style="height: {{sheetVisibleHeight}}px;">
+        <!-- ---------- POI 详情（对齐 Web 端 PoiDetailSheet） ---------- -->
+        <block wx:if="{{sheetMode === 'poi' && detail}}">
+          <scroll-view scroll-y class="sheet-scroll" enhanced show-scrollbar="{{false}}">
+            <!-- 内容自适应高度：poi 档抽屉可见高度 = 该容器实测高度（封顶 heights.poi），
+                 量的是自然内容高度，与 scroll-view 自身裁剪无关，见 map.ts measurePoiContentHeight。 -->
+            <view class="detail-measure">
+            <!-- 楼内商户子视图 -->
+            <block wx:if="{{detail.merchant}}">
+              <view class="detail-head">
+                <view class="detail-back" bindtap="backFromMerchant">
+                  <image class="detail-back-icon" src="/images/sheet/chevron-left.png" mode="aspectFit" />
+                </view>
+                <view class="detail-head-main">
+                  <view class="detail-title">{{detail.merchant.name}}</view>
+                  <view class="detail-sub">{{detail.merchant.subtitle}}</view>
+                </view>
+              </view>
+              <view class="detail-body">
+                <block wx:if="{{detail.merchant.media.length > 0}}">
+                  <swiper
+                    class="photo-swiper"
+                    circular="{{false}}"
+                    current="{{merchantPhotoIndex}}"
+                    bindchange="onMerchantPhotoChange"
+                  >
+                    <swiper-item wx:for="{{detail.merchant.media}}" wx:key="url">
+                      <image
+                        class="photo-img"
+                        src="{{item.url}}"
+                        mode="aspectFill"
+                        data-scope="merchant"
+                        data-url="{{item.url}}"
+                        bindtap="previewPhoto"
+                      />
+                    </swiper-item>
+                  </swiper>
+                  <view wx:if="{{detail.merchant.media.length > 1}}" class="photo-dots">
+                    <view
+                      wx:for="{{detail.merchant.media}}"
+                      wx:key="url"
+                      class="photo-dot {{merchantPhotoIndex === index ? 'photo-dot-active' : ''}}"
+                    ></view>
+                  </view>
+                </block>
+                <view wx:if="{{detail.merchant.facts.length > 0}}" class="fact-list">
+                  <view class="fact-row" wx:for="{{detail.merchant.facts}}" wx:key="label">
+                    <image class="fact-icon" src="{{item.iconUrl}}" mode="aspectFit" />
+                    <view class="fact-label">{{item.label}}</view>
+                    <view
+                      class="fact-value {{item.isPhone ? 'fact-phone' : ''}}"
+                      data-value="{{item.isPhone ? item.value : ''}}"
+                      bindtap="callPhone"
+                    >{{item.value}}</view>
+                  </view>
+                </view>
+                <view wx:else class="detail-hint">该商户的营业信息正在完善中</view>
+                <view class="detail-summary" wx:if="{{detail.merchant.summary}}">{{detail.merchant.summary}}</view>
+                <block wx:if="{{detail.merchant.menu.length > 0}}">
+                  <view class="section-head"><view class="section-title">菜单</view></view>
+                  <view class="menu-list">
+                    <view class="menu-row" wx:for="{{detail.merchant.menu}}" wx:key="key">
+                      <view class="menu-main">
+                        <view class="menu-name">{{item.name}}</view>
+                        <view wx:if="{{item.description}}" class="menu-desc">{{item.description}}</view>
+                      </view>
+                      <view wx:if="{{item.price}}" class="menu-price">{{item.price}}</view>
+                    </view>
+                  </view>
+                </block>
+              </view>
+            </block>
+
+            <!-- POI 主视图 -->
+            <block wx:else>
+              <view class="detail-head">
+                <view class="detail-head-main">
+                  <view class="detail-title">{{detail.name}}</view>
+                  <view class="detail-sub">{{detail.subtitle}}</view>
+                </view>
+                <view class="detail-fav" bindtap="toggleFavorite">
+                  <image
+                    class="detail-fav-icon"
+                    src="{{detail.favorite ? '/images/sheet/heart-filled.png' : '/images/sheet/heart.png'}}"
+                    mode="aspectFit"
+                  />
+                </view>
+                <view wx:if="{{detail.canNavigate}}" class="detail-nav" bindtap="navigateToPoi">
+                  <image class="detail-nav-icon" src="/images/sheet/navigation.png" mode="aspectFit" />
+                  <view class="detail-nav-text">导航</view>
+                </view>
+              </view>
+
+              <view wx:if="{{detail.statusBanner}}" class="detail-status">{{detail.statusBanner}}</view>
+
+              <!-- 运营信息通栏横幅（severity 三色，点按开事件详情） -->
+              <view
+                wx:if="{{detail.eventBanner}}"
+                class="event-banner event-banner-{{detail.eventBanner.severity}}"
+                bindtap="openEventBanner"
+              >
+                <image class="event-banner-icon" src="{{detail.eventBanner.iconUrl}}" mode="aspectFit" />
+                <view class="event-banner-title">{{detail.eventBanner.title}}</view>
+                <image class="event-banner-chevron" src="/images/sheet/chevron-right.png" mode="aspectFit" />
+              </view>
+
+              <view class="detail-body">
+                <!-- 实拍图轮播 + 分页点；点图 wx.previewImage 看大图 -->
+                <block wx:if="{{detail.media.length > 0}}">
+                  <swiper
+                    class="photo-swiper"
+                    circular="{{false}}"
+                    current="{{photoIndex}}"
+                    bindchange="onPhotoChange"
+                  >
+                    <swiper-item wx:for="{{detail.media}}" wx:key="url">
+                      <image
+                        class="photo-img"
+                        src="{{item.url}}"
+                        mode="aspectFill"
+                        data-scope="poi"
+                        data-url="{{item.url}}"
+                        bindtap="previewPhoto"
+                      />
+                    </swiper-item>
+                  </swiper>
+                  <view wx:if="{{detail.media.length > 1}}" class="photo-dots">
+                    <view
+                      wx:for="{{detail.media}}"
+                      wx:key="url"
+                      class="photo-dot {{photoIndex === index ? 'photo-dot-active' : ''}}"
+                    ></view>
+                  </view>
+                </block>
+                <view wx:else class="photo-placeholder">实拍图</view>
+
+                <view class="detail-summary detail-summary-strong" wx:if="{{detail.summary}}">{{detail.summary}}</view>
+
+                <view wx:if="{{detail.facts.length > 0}}" class="fact-list">
+                  <view class="fact-row" wx:for="{{detail.facts}}" wx:key="key">
+                    <image class="fact-icon" src="{{item.iconUrl}}" mode="aspectFit" />
+                    <view class="fact-label">{{item.label}}</view>
+                    <view
+                      class="fact-value {{item.isPhone ? 'fact-phone' : ''}}"
+                      data-value="{{item.isPhone ? item.value : ''}}"
+                      bindtap="callPhone"
+                    >{{item.value}}</view>
+                  </view>
+                </view>
+
+                <!-- 楼内设施指引（圆形图标徽章横滑）+ 楼层图入口 -->
+                <block wx:if="{{detail.isBuilding}}">
+                  <view class="section-head">
+                    <view class="section-title">楼内设施指引</view>
+                    <view class="section-action" bindtap="openFloors">查看楼层图 ›</view>
+                  </view>
+                  <scroll-view wx:if="{{detail.facilities.length > 0}}" scroll-x class="badge-row" enhanced show-scrollbar="{{false}}">
+                    <view class="badge-row-inner">
+                      <view class="icon-badge" wx:for="{{detail.facilities}}" wx:key="id">
+                        <view class="icon-badge-circle">
+                          <image class="icon-badge-icon" src="{{item.iconUrl}}" mode="aspectFit" />
+                        </view>
+                        <view class="icon-badge-label">{{item.label}}</view>
+                      </view>
+                    </view>
+                  </scroll-view>
+                  <view wx:else class="detail-hint">该楼宇的设施信息正在完善中</view>
+                </block>
+
+                <!-- 楼内商户 -->
+                <block wx:if="{{detail.isBuilding && detail.merchants.length > 0}}">
+                  <view class="section-head">
+                    <view class="section-title">楼内商户 ({{detail.merchants.length}})</view>
+                  </view>
+                  <view class="merchant-list">
+                    <view
+                      class="merchant-row"
+                      wx:for="{{detail.merchants}}"
+                      wx:key="id"
+                      data-id="{{item.id}}"
+                      bindtap="openMerchantRow"
+                    >
+                      <view class="merchant-circle">
+                        <image class="merchant-circle-icon" src="/images/poi/store.png" mode="aspectFit" />
+                      </view>
+                      <view class="merchant-main">
+                        <view class="merchant-name">
+                          {{item.name}}<text wx:if="{{item.stallCode}}" class="merchant-stall">{{item.stallCode}}</text>
+                        </view>
+                        <view class="merchant-sub">{{item.subtitle}}</view>
+                      </view>
+                      <image class="row-chevron" src="/images/sheet/chevron-right.png" mode="aspectFit" />
+                    </view>
+                  </view>
+                </block>
+
+                <view class="detail-desc" wx:if="{{detail.description}}">{{detail.description}}</view>
+              </view>
+            </block>
+            </view>
+          </scroll-view>
+        </block>
+
+        <!-- ---------- 搜索 / 结果（对齐 Web 端 SearchHomeSheet） ---------- -->
+        <block wx:else>
+          <view class="search-row">
+            <view class="search-bar">
+              <image class="search-bar-icon" src="/images/sheet/search.png" mode="aspectFit" />
+              <input
+                class="search-input"
+                value="{{searchQuery}}"
+                placeholder="搜索地点 / 楼宇 / 设施"
+                placeholder-class="search-placeholder"
+                confirm-type="search"
+                adjust-position="{{false}}"
+                bindinput="onSearchInput"
+                bindfocus="onSearchFocus"
+                bindconfirm="onSearchConfirm"
+              />
+              <view wx:if="{{searchQuery}}" class="search-clear" bindtap="clearQuery">
+                <image class="search-clear-icon" src="/images/sheet/x.png" mode="aspectFit" />
+              </view>
+            </view>
+            <!-- results（近全屏）档的收起钮：行内替代浮动全屏钮（浮动位置会顶进微信胶囊），
+                 点击 = toggleSheet → collapsed 档 -->
+            <view wx:if="{{sheetMode === 'results'}}" class="search-collapse" bindtap="toggleSheet">
+              <image class="search-collapse-icon" src="/images/sheet/minimize-2.png" mode="aspectFit" />
+            </view>
+          </view>
+
+          <!-- collapsed 档（78px）只露搜索框，以下内容全部不渲染（对齐 Web 端
+               collapsed 只渲染 SearchInput；否则下一节顶部会在 78px 带子里露出一截） -->
+          <block wx:if="{{sheetMode !== 'collapsed'}}">
+          <block wx:if="{{filterChips.length > 0}}">
+            <view class="section-head section-head-inline">
+              <view class="section-title">标签筛选</view>
+              <view class="section-actions">
+                <view wx:if="{{activeFilters.length > 0}}" class="section-reset" bindtap="resetFilters">
+                  <image class="section-reset-icon" src="/images/sheet/rotate-ccw.png" mode="aspectFit" />
+                  <view class="section-reset-text">重置</view>
+                </view>
+                <view class="section-action" bindtap="openAllFilters">全部 ›</view>
+              </view>
+            </view>
+            <scroll-view scroll-x class="chip-row" enhanced show-scrollbar="{{false}}">
+              <view class="chip-row-inner">
+                <view
+                  wx:for="{{filterChips}}"
+                  wx:key="key"
+                  class="chip {{item.active ? 'chip-active' : ''}}"
+                  data-key="{{item.key}}"
+                  bindtap="onSearchFilterTap"
+                >{{item.label}}</view>
+              </view>
+            </scroll-view>
+          </block>
+
+          <!-- 结果区：搜索/筛选生效时是结果列表，否则是最近查看 -->
+          <block wx:if="{{searchActive}}">
+            <view wx:if="{{searchStatus === 'loading'}}" class="state-block">
+              <view class="state-spinner"></view>
+              <view class="state-text">正在搜索…</view>
+            </view>
+            <view wx:elif="{{resultRows.length === 0}}" class="state-block">
+              <view class="state-circle">
+                <image class="state-icon" src="/images/sheet/search-x.png" mode="aspectFit" />
+              </view>
+              <view class="state-title">没有相关搜索结果</view>
+              <view class="state-button" bindtap="resetSearch">清空搜索条件</view>
+            </view>
+            <scroll-view wx:else scroll-y class="sheet-scroll" enhanced show-scrollbar="{{false}}">
+              <view class="row-list">
+                <view
+                  class="poi-row"
+                  wx:for="{{resultRows}}"
+                  wx:key="key"
+                  data-index="{{index}}"
+                  bindtap="openResultRow"
+                >
+                  <view class="poi-row-square">
+                    <image class="poi-row-icon" src="{{item.iconUrl}}" mode="aspectFit" />
+                  </view>
+                  <view class="poi-row-main">
+                    <view class="poi-row-title">{{item.title}}</view>
+                    <view class="poi-row-sub">{{item.subtitle}}</view>
+                  </view>
+                  <image class="row-chevron" src="/images/sheet/chevron-right.png" mode="aspectFit" />
+                </view>
+              </view>
+            </scroll-view>
+          </block>
+          <block wx:elif="{{recentRows.length > 0}}">
+            <view class="section-head section-head-inline">
+              <view class="section-title">最近查看</view>
+            </view>
+            <scroll-view scroll-y class="sheet-scroll" enhanced show-scrollbar="{{false}}">
+              <view class="row-list">
+                <view
+                  class="poi-row"
+                  wx:for="{{recentRows}}"
+                  wx:key="poiKey"
+                  data-poi-key="{{item.poiKey}}"
+                  bindtap="openRecentRow"
+                >
+                  <view class="poi-row-square">
+                    <image class="poi-row-icon" src="{{item.iconUrl}}" mode="aspectFit" />
+                  </view>
+                  <view class="poi-row-main">
+                    <view class="poi-row-title">{{item.title}}</view>
+                    <view class="poi-row-sub">{{item.subtitle}}</view>
+                  </view>
+                  <image class="row-chevron" src="/images/sheet/chevron-right.png" mode="aspectFit" />
+                </view>
+              </view>
+            </scroll-view>
+          </block>
+          <view wx:else class="state-block">
+            <view class="state-circle">
+              <image class="state-icon" src="/images/sheet/inbox.png" mode="aspectFit" />
+            </view>
+            <view class="state-title">搜索校园地点</view>
+            <view class="state-sub">楼宇、食堂、打印机、校车站点都能找到</view>
+          </view>
+          </block>
+        </block>
+      </view>
+      </view>
+    </view>
+    </view>
+
+    <!-- 运营事件详情 sheet（scrim + 底部弹卡，对齐 Web 端 OperationDetailSheet） -->
+    <view wx:if="{{eventDetailOpen && eventDetail}}" class="modal-mask" bindtap="closeEventDetail">
+      <view class="modal-sheet" catchtap="noop">
+        <view class="modal-handle"><view class="modal-handle-bar"></view></view>
+        <scroll-view scroll-y class="modal-scroll" enhanced show-scrollbar="{{false}}">
+          <view class="event-pills">
+            <view class="event-pill event-pill-{{eventDetail.severity}}">
+              <image class="event-pill-icon" src="{{eventDetail.iconUrl}}" mode="aspectFit" />
+              <view class="event-pill-text">{{eventDetail.typeLabel}}</view>
+            </view>
+            <view class="event-pill event-pill-status">{{eventDetail.statusLabel}}</view>
+          </view>
+          <view class="detail-title event-detail-title">{{eventDetail.title}}</view>
+          <view class="fact-list">
+            <view class="fact-row">
+              <image class="fact-icon" src="/images/sheet/clock.png" mode="aspectFit" />
+              <view class="fact-label">时间</view>
+              <view class="fact-value">{{eventDetail.dateRange}}</view>
+            </view>
+            <view class="fact-row">
+              <image class="fact-icon" src="{{eventDetail.iconUrl}}" mode="aspectFit" />
+              <view class="fact-label">影响程度</view>
+              <view class="fact-value">{{eventDetail.severityText}}</view>
+            </view>
+          </view>
+          <view wx:if="{{eventDetail.description}}" class="detail-summary">{{eventDetail.description}}</view>
+          <view wx:else class="detail-hint">暂无更多说明</view>
+          <block wx:if="{{eventDetail.targets.length > 0}}">
+            <view class="section-head"><view class="section-title">影响范围</view></view>
+            <view class="target-list">
+              <view class="target-row" wx:for="{{eventDetail.targets}}" wx:key="key">
+                <image class="target-icon" src="/images/poi/map-pin.png" mode="aspectFit" />
+                <view class="target-name">{{item.name}}</view>
+              </view>
+            </view>
+          </block>
+          <block wx:if="{{eventDetail.updates.length > 0}}">
+            <view class="section-head"><view class="section-title">进展</view></view>
+            <view class="update-row" wx:for="{{eventDetail.updates}}" wx:key="id">
+              <view class="update-day">{{item.day}}</view>
+              <view class="update-message">{{item.message}}</view>
+            </view>
+          </block>
+        </scroll-view>
+      </view>
+    </view>
+  </view>
+</view>

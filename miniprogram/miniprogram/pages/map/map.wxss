@@ -1,0 +1,1598 @@
+/* 校园地图页样式。设计令牌逐项对齐 Web 端 src/index.css：
+     色：primary #1e80c1 / pressed #125b8b / container #e8f1f8 / page #f5f6f8
+         surface #ffffff / ink #0f172a / sub #94a3b8 / line #e8ebef
+         warning #f59e0b / warning-bg #fef3e2 / error #dc2626 / error-bg #fdecec
+         map-ground #e7e9e4
+     字：label 11/15/500、aux 12/17、body 13/19、emphasis 15/21/600、
+         card 17/24/600、detail 22/30/600
+     角：sm 8 / md 11 / lg 12 / xl 14 / 2xl 16 / 3xl 20 / 4xl 26
+     影：card 0 4px 12px rgba(15,23,42,.08)
+         floating 0 10px 26px rgba(15,23,42,.14)
+         sheet 0 -2px 18px rgba(15,23,42,.14) */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  background-color: #e7e9e4;
+}
+
+/* 地图全幅铺满（Web 端地图页也是全幅，UI 全部浮在地图之上） */
+.map-viewport {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+.map-surface {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* world 容器：viewBox 坐标系 1 单位 = 1px，transform 由 worklet 驱动。 */
+.map-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+
+/* 底图 SVG 按 rasterRatio 放大布局再缩回，给高倍缩放留栅格化余量。 */
+.map-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  transform: scale(0.3333);
+}
+
+/* ---------------------------------------------------------------------------
+   点状 POI 图钉（对齐 Web 端 MapPoiOverlay：未选中 = 白底蓝描边圆 + 蓝图标；
+   选中 = 浅蓝光晕 + 蓝底白图标）。.poi-pin 吃 applyAnimatedStyle 反向缩放。
+   --------------------------------------------------------------------------- */
+.poi-marker {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.poi-pin {
+  position: absolute;
+  left: -22px;
+  top: -22px;
+  width: 44px;
+  height: 44px;
+  transform-origin: 22px 22px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.poi-halo {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: rgba(215, 232, 243, 0.82);
+}
+
+.poi-circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid #1e80c1;
+  background-color: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.2);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.poi-circle-selected {
+  background-color: #1e80c1;
+  border-color: #ffffff;
+  border-width: 2px;
+}
+
+.poi-icon {
+  /* 图标/圆比例对齐 Web 端 MapPoiOverlay（icon ≈ 0.69 × circle）：32px 圆配 22px 图标。 */
+  width: 22px;
+  height: 22px;
+}
+
+.poi-pin-dimmed {
+  opacity: 0.45;
+}
+
+/* 运营事件 marker：severity 三色「!」圆点（复用 .poi-pin 反向缩放） */
+.event-pin {
+  left: -16px;
+  top: -16px;
+  width: 32px;
+  height: 32px;
+  transform-origin: 16px 16px;
+}
+
+.event-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 23px;
+  text-align: center;
+}
+
+/* 用户定位 dot：蓝点 + 白描边（仿主流地图 App），.poi-pin 反向缩放保持屏幕尺寸 */
+.locate-pin {
+  left: -16px;
+  top: -16px;
+  width: 32px;
+  height: 32px;
+  transform-origin: 16px 16px;
+}
+
+.locate-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #1e80c1;
+  border: 3px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+}
+
+/* 定位精度圈：世界坐标尺寸（随地图缩放，表示真实精度米数），半透明蓝 */
+.locate-accuracy {
+  position: absolute;
+  border-radius: 50%;
+  background-color: rgba(30, 128, 193, 0.12);
+  border: 1px solid rgba(30, 128, 193, 0.3);
+}
+
+/* ---------------------------------------------------------------------------
+   加载 / 错误盖层
+   --------------------------------------------------------------------------- */
+.map-cover {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #e7e9e4;
+}
+
+.map-cover-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #e8ebef;
+  border-top-color: #1e80c1;
+  margin-bottom: 10px;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.map-cover-icon {
+  width: 36px;
+  height: 36px;
+  margin-bottom: 10px;
+}
+
+.map-cover-text {
+  font-size: 13px;
+  line-height: 19px;
+  color: #94a3b8;
+}
+
+.map-retry {
+  margin-top: 14px;
+  padding: 8px 20px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e80c1;
+  background-color: #e8f1f8;
+}
+
+/* ---------------------------------------------------------------------------
+   校区切换 pill + 下拉（对齐 Web 端 CampusSwitcher：h-9 pill、128px 白卡）
+   pill 为平面样式（无阴影，细边框），对齐微信胶囊按钮质感。
+   --------------------------------------------------------------------------- */
+.campus-pill {
+  position: absolute;
+  left: 16px;
+  z-index: 50;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid #e8ebef;
+  box-sizing: border-box;
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.campus-pill-label {
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.campus-pill-chevron {
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+}
+
+.campus-pill-chevron-open {
+  transform: rotate(180deg);
+}
+
+.campus-menu {
+  position: absolute;
+  left: 16px;
+  z-index: 50;
+  width: 128px;
+  border-radius: 16px;
+  background-color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+  padding: 4px;
+  overflow: hidden;
+}
+
+.campus-menu-item {
+  height: 36px;
+  line-height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.campus-menu-item-active {
+  background-color: #e8f1f8;
+  color: #1e80c1;
+}
+
+.guide-banner {
+  position: absolute;
+  left: 16px;
+  z-index: 49;
+  width: 270px;
+  min-height: 52px;
+  border-radius: 16px;
+  background-color: #1e80c1;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  color: #ffffff;
+}
+
+.guide-banner-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 8px 4px 8px 12px;
+}
+
+.guide-banner-icon {
+  width: 26px;
+  font-size: 22px;
+  line-height: 26px;
+  color: #ffffff;
+}
+
+.guide-banner-copy {
+  min-width: 0;
+  flex: 1;
+  margin-left: 8px;
+}
+
+.guide-banner-title,
+.guide-banner-sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.guide-banner-title {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+}
+
+.guide-banner-sub {
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 14px;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.guide-banner-close {
+  width: 38px;
+  height: 38px;
+  line-height: 36px;
+  text-align: center;
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+/* ---------------------------------------------------------------------------
+   右侧控件列：定位 + 图层
+   --------------------------------------------------------------------------- */
+.control-column {
+  position: absolute;
+  right: 16px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* 详情抽屉占到视口 74% 时，右侧控件只保留在上方地图区，避免压住收藏/导航。 */
+.control-column-poi {
+  z-index: 20;
+}
+
+.control-fab {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.control-fab-active {
+  background-color: #1e80c1;
+}
+
+.control-fab-icon {
+  width: 24px;
+  height: 24px;
+}
+
+/* 定位按钮在控件列最上方，与图层钮拉开间距 */
+.control-fab-locate {
+  margin-bottom: 12px;
+}
+
+.control-fab-badge {
+  position: absolute;
+  right: -4px;
+  top: -4px;
+  min-width: 20px;
+  height: 20px;
+  line-height: 20px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background-color: #f59e0b;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* 缩放条（对齐 Web 端 MapCanvas：移动端居右中，只有 +/−） */
+.zoom-control {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  /* 底部卡片 .sheet 为 z-index 30，缩放条要压在卡片后面 */
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid #e8ebef;
+  background-color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+  overflow: hidden;
+}
+
+.zoom-button {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.zoom-divider {
+  margin: 0 8px;
+  height: 1px;
+  background-color: #e8ebef;
+}
+
+/* ---------------------------------------------------------------------------
+   图层浮卡（对齐 Web 端 LayerPanel：248px 宽、16 圆角、p-4）。
+   z-index 90：压过跟随抽屉顶边的全屏浮钮 .sheet-toggle（z-index 80），
+   否则浮钮会浮在浮卡表面上。
+   --------------------------------------------------------------------------- */
+.layer-card {
+  position: absolute;
+  /* 真机 Skyline 上 right 定位 + 内层 scroll-view 会让卡片右缘溢出屏幕，
+     改用 wxml 内联 left（viewportWidth - 264）+ 显式宽度，左右边界完全确定。 */
+  z-index: 90;
+  width: 248px;
+  border-radius: 16px;
+  background-color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+  overflow: hidden;
+}
+
+.layer-card-scroll {
+  max-height: 420px;
+  padding: 16px;
+  width: 248px;
+  box-sizing: border-box;
+}
+
+.layer-card-title {
+  font-size: 11px;
+  line-height: 15px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.layer-card-title-gap {
+  margin-top: 14px;
+}
+
+.layer-row {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  border-radius: 12px;
+  background-color: #f5f6f8;
+  padding: 10px 12px;
+}
+
+.layer-row-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+}
+
+.layer-row-label {
+  flex: 1;
+  font-size: 13px;
+  line-height: 19px;
+  color: #0f172a;
+}
+
+.layer-badge {
+  min-width: 20px;
+  height: 20px;
+  line-height: 20px;
+  border-radius: 999px;
+  background-color: #f59e0b;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  margin-right: 8px;
+  padding: 0 4px;
+}
+
+.layer-switch {
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background-color: #e8ebef;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 0 2px;
+}
+
+.layer-switch-on {
+  background-color: #1e80c1;
+  justify-content: flex-end;
+}
+
+.layer-switch-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: #ffffff;
+}
+
+.layer-chips {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.layer-chips .chip {
+  margin: 0 6px 6px 0;
+}
+
+/* ---------------------------------------------------------------------------
+   筛选 chip（对齐 Web 端 Chip：h-9 全圆角，未选中灰底、选中蓝底白字）
+   --------------------------------------------------------------------------- */
+.chip {
+  height: 40px;
+  line-height: 40px;
+  padding: 0 20px;
+  border-radius: 999px;
+  background-color: #f5f6f8;
+  font-size: 15px;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+.chip-active {
+  background-color: #1e80c1;
+  color: #ffffff;
+}
+
+/* ---------------------------------------------------------------------------
+   事件摘要卡（对齐 Web 端 MapPage 摘要卡：inset-x-4、16 圆角、p-4）
+   --------------------------------------------------------------------------- */
+.event-card {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  /* z-index 85：压过跟随抽屉顶边的全屏浮钮 .sheet-toggle（80）——浮钮底缘正好
+     落在摘要卡操作行上，不压会挡住卡片的「查看详情/关闭」。 */
+  z-index: 85;
+  border-radius: 16px;
+  background-color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+  padding: 16px;
+}
+
+.event-card-type {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.event-card-type-icon {
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+}
+
+.event-card-type-text {
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 500;
+}
+
+.event-card-title {
+  margin-top: 4px;
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.event-card-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+}
+
+.event-card-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.event-card-detail {
+  font-size: 12px;
+  line-height: 17px;
+  font-weight: 500;
+  color: #1e80c1;
+  margin-right: 8px;
+}
+
+/* 摘要卡「暂时关闭」：次级灰字，点击 = 本次不再显示事件 overlay（dismissEvents）。 */
+.event-card-dismiss {
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+  padding: 6px 0;
+  margin-right: auto;
+}
+
+.event-card-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background-color: #f5f6f8;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.event-card-close-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* 全屏/恢复浮钮 */
+.sheet-toggle {
+  position: absolute;
+  z-index: 80;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-toggle-icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* ---------------------------------------------------------------------------
+   常驻底部抽屉（对齐 Web 端 MapPage 的 section + rounded-t-4xl + shadow-sheet）。
+   定位模型：top:0 + 内层 .sheet-frame 固定高度 sheetFullHeight（= 视口高 − tab 栏高），
+   靠 translateY(sheetTop) 下移到档位；卡片底边永远在可视区之下，
+   拖动时底部不露地图缝。translateY 只由 sheetY 共享变量 + applyAnimatedStyle 驱动。
+   纪律：.sheet 是被 worklet 驱动的动画节点，必须保持完全静态——WXML 里不给它挂
+   任何 {{}} 绑定 / wx:if（setData 提交重写节点属性会把 worklet transform 顶掉
+   一帧 = 「弹到顶」闪跳）；会变的样式（height）放内层 .sheet-frame。
+   transform: translateY(110%) 只是 worklet 接管前的屏外初始位（接管后覆盖）。
+   --------------------------------------------------------------------------- */
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 30;
+  transform: translateY(110%);
+  border-radius: 26px 26px 0 0;
+  background-color: #ffffff;
+  box-shadow: 0 -2px 18px rgba(15, 23, 42, 0.14);
+}
+
+/* 拖拽把手：卡片上缘之上的白色小横条（对齐 Web 端 h-7 w-24 命中区 + h-1 w-10 条） */
+.sheet-handle {
+  position: absolute;
+  left: 50%;
+  top: -28px;
+  margin-left: -48px;
+  width: 96px;
+  height: 28px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-handle-bar {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+/* poi 档的关闭圆钮：移到 .sheet 之外（卡片上缘之上，top 由 configureSheet 内联计算），
+   不再半压卡片上缘遮挡收藏/标题；z-index 要高于 .sheet（30）。 */
+.sheet-close {
+  position: absolute;
+  right: 16px;
+  z-index: 40;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #ffffff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-close-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.sheet-shell {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 26px 26px 0 0;
+}
+
+.sheet-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   搜索区（对齐 Web 端 SearchInput / SectionHeader / ChipRow）
+   --------------------------------------------------------------------------- */
+.search-row {
+  /* 上方留白对齐 Web 端（collapsed 档 pt-3 / home 档 pt-2+pt-1，均为 12px）。 */
+  margin: 12px 16px 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.search-bar {
+  flex: 1;
+  height: 44px;
+  border-radius: 999px;
+  background-color: #f5f6f8;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+/* results（近全屏）档搜索条行内收起钮：扁平灰底与搜索条同质（微信原生质感），
+   替代会顶进胶囊行的浮动全屏钮。 */
+.search-collapse {
+  width: 44px;
+  height: 44px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background-color: #f5f6f8;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-collapse-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.search-bar-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.search-placeholder {
+  color: #94a3b8;
+}
+
+.search-clear {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background-color: #e8ebef;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.search-clear-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.section-head {
+  margin-top: 16px;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-head-inline {
+  margin-top: 14px;
+}
+
+.section-title {
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.section-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.section-reset {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-right: 12px;
+}
+
+.section-reset-icon {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+}
+
+.section-reset-text {
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+}
+
+.section-action {
+  font-size: 12px;
+  line-height: 17px;
+  color: #1e80c1;
+}
+
+.chip-row {
+  margin-top: 10px;
+  white-space: nowrap;
+}
+
+.chip-row-inner {
+  display: inline-flex;
+  flex-direction: row;
+  padding: 0 16px;
+}
+
+.chip-row-inner .chip {
+  margin-right: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   列表行（对齐 Web 端 ListRow + PlaceSquareIcon：40px 浅蓝圆角方块 + 标题/副标题 + ›）
+   --------------------------------------------------------------------------- */
+.row-list {
+  padding-bottom: 12px;
+}
+
+.poi-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e8ebef;
+}
+
+.poi-row-square {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background-color: #e8f1f8;
+  margin-right: 14px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.poi-row-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.poi-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.poi-row-title {
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.poi-row-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-chevron {
+  width: 18px;
+  height: 18px;
+  margin-left: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+   空态 / 加载态 / 错误态（对齐 Web 端 EmptyState / LoadingState）
+   --------------------------------------------------------------------------- */
+.state-block {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.state-circle {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background-color: #e8f1f8;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.state-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.state-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid #e8ebef;
+  border-top-color: #1e80c1;
+  animation: spin 0.9s linear infinite;
+}
+
+.state-title {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.state-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.state-text {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+}
+
+.state-button {
+  margin-top: 12px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background-color: #e8f1f8;
+  font-size: 13px;
+  color: #1e80c1;
+}
+
+/* ---------------------------------------------------------------------------
+   POI 详情（对齐 Web 端 PoiDetailSheet）
+   --------------------------------------------------------------------------- */
+.detail-head {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  /* 顶部留白对齐 Web 端（sheet 容器 pt-2 + 标题行 pt-1 = 12px）。 */
+  padding: 12px 20px 0;
+}
+
+.detail-head-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-title {
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.detail-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+}
+
+.detail-fav {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: #f5f6f8;
+  margin-left: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.detail-fav-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.detail-nav {
+  height: 40px;
+  margin-left: 8px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background-color: #1e80c1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.detail-nav-icon {
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+}
+
+.detail-nav-text {
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.detail-back {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: #f5f6f8;
+  margin-right: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.detail-back-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.detail-status {
+  margin: 12px 20px 0;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background-color: #fef3e2;
+  color: #f59e0b;
+  font-size: 13px;
+  line-height: 19px;
+}
+
+/* 运营信息通栏横幅（severity 三色，通栏无左右留白，对齐 SeverityBanner） */
+.event-banner {
+  margin-top: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.event-banner-info {
+  background-color: #e8f1f8;
+}
+
+.event-banner-warning {
+  background-color: #fef3e2;
+}
+
+.event-banner-critical {
+  background-color: #fdecec;
+}
+
+.event-banner-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+}
+
+.event-banner-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-banner-info .event-banner-title { color: #1e80c1; }
+.event-banner-warning .event-banner-title { color: #f59e0b; }
+.event-banner-critical .event-banner-title { color: #dc2626; }
+
+.event-banner-chevron {
+  width: 18px;
+  height: 18px;
+  margin-left: 8px;
+}
+
+.detail-body {
+  padding: 0 20px 28px;
+}
+
+/* 实拍图轮播（对齐 Web 端 PhotoCarousel：h-44 + 真实分页点） */
+.photo-swiper {
+  margin-top: 16px;
+  width: 100%;
+  height: 176px;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.photo-img {
+  width: 100%;
+  height: 176px;
+  background-color: #f5f6f8;
+}
+
+.photo-dots {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.photo-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: #e8ebef;
+  margin: 0 3px;
+}
+
+.photo-dot-active {
+  width: 12px;
+  background-color: #1e80c1;
+}
+
+.photo-placeholder {
+  margin-top: 16px;
+  height: 176px;
+  border-radius: 14px;
+  background-color: rgba(232, 235, 239, 0.6);
+  font-size: 13px;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.detail-summary {
+  margin-top: 16px;
+  font-size: 13px;
+  line-height: 21px;
+  color: #0f172a;
+}
+
+.detail-summary-strong {
+  font-weight: 500;
+}
+
+.detail-desc {
+  margin-top: 16px;
+  font-size: 13px;
+  line-height: 21px;
+  color: #0f172a;
+}
+
+.detail-hint {
+  margin-top: 8px;
+  padding: 0 20px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+}
+
+.detail-body .detail-hint {
+  padding: 0;
+}
+
+/* .section-head 默认自带左右 16px，给搜索首页这种无内边距容器用。
+   详情卡 / 事件弹层已经有 20px 内边距，再套一层会把「楼内设施指引」挤出一格。 */
+.detail-body .section-head,
+.modal-scroll .section-head {
+  padding: 0;
+}
+
+/* 信息字段行（对齐 Web 端 facts：图标 + 标签 + 值，divide-y 分隔） */
+.fact-list {
+  margin-top: 16px;
+}
+
+.fact-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e8ebef;
+}
+
+.fact-icon {
+  width: 21px;
+  height: 21px;
+  margin-right: 14px;
+}
+
+.fact-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: #0f172a;
+}
+
+.fact-value {
+  /* 限宽右对齐：值太长时在行内换行，不再顶出卡片右边界。 */
+  max-width: 62%;
+  text-align: right;
+  font-size: 13px;
+  line-height: 19px;
+  color: #0f172a;
+}
+
+.fact-phone {
+  color: #1e80c1;
+}
+
+/* 楼内设施指引：圆形图标徽章横滑（对齐 Web 端 IconBadge） */
+.badge-row {
+  margin-top: 12px;
+  white-space: nowrap;
+}
+
+.badge-row-inner {
+  display: inline-flex;
+  flex-direction: row;
+}
+
+.icon-badge {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-right: 16px;
+}
+
+.icon-badge-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #e8f1f8;
+  margin-right: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-badge-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-badge-label {
+  font-size: 13px;
+  line-height: 19px;
+  color: #0f172a;
+  white-space: nowrap;
+}
+
+/* 楼内商户行 */
+.merchant-list {
+  margin-top: 4px;
+}
+
+.merchant-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #e8ebef;
+}
+
+.merchant-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #e8f1f8;
+  margin-right: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.merchant-circle-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.merchant-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.merchant-name {
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 600;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merchant-stall {
+  margin-left: 6px;
+  font-weight: 400;
+  color: #94a3b8;
+}
+
+.merchant-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 菜单 */
+.menu-list {
+  margin-top: 4px;
+}
+
+.menu-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  padding: 12px 0;
+  border-bottom: 1px solid #e8ebef;
+}
+
+.menu-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.menu-name {
+  font-size: 13px;
+  line-height: 19px;
+  color: #0f172a;
+}
+
+.menu-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+}
+
+.menu-price {
+  margin-left: 12px;
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+/* ---------------------------------------------------------------------------
+   事件详情弹卡（对齐 Web 端 SheetModal：scrim + 底部圆角卡 + 把手）
+   --------------------------------------------------------------------------- */
+.modal-mask {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 150;
+  background-color: rgba(15, 23, 42, 0.4);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.modal-sheet {
+  /* 限高对齐 Web 端移动端 SheetModal initialHeight 0.62：不限高时内容会把卡片
+     顶出屏幕顶部（真机 Skyline 实测），且 scroll-view 拿不到有界高度就不滚动。 */
+  max-height: 62vh;
+  width: 100%;
+  border-radius: 26px 26px 0 0;
+  background-color: #ffffff;
+  box-shadow: 0 -2px 18px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-handle {
+  padding: 10px 0 6px;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+}
+
+.modal-handle-bar {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background-color: #e8ebef;
+}
+
+.modal-scroll {
+  /* flex:1 + min-height:0：在限高的 .modal-sheet 里拿到有界高度才真正滚动；
+     显式宽度 + border-box 防 Skyline 把内容撑出右边界（时间行文字溢出修复）。 */
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 20px 32px;
+}
+
+.event-pills {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.event-pill {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  margin-right: 8px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.event-pill-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+}
+
+.event-pill-text {
+  font-size: 11px;
+  line-height: 15px;
+  font-weight: 500;
+}
+
+.event-pill-info { background-color: #e8f1f8; }
+.event-pill-info .event-pill-text { color: #1e80c1; }
+.event-pill-warning { background-color: #fef3e2; }
+.event-pill-warning .event-pill-text { color: #f59e0b; }
+.event-pill-critical { background-color: #fdecec; }
+.event-pill-critical .event-pill-text { color: #dc2626; }
+
+.event-pill-status {
+  background-color: #f5f6f8;
+  font-size: 11px;
+  line-height: 24px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.event-detail-title {
+  margin-top: 10px;
+}
+
+.target-list {
+  margin-top: 8px;
+  border-radius: 16px;
+  background-color: #f5f6f8;
+  overflow: hidden;
+}
+
+.target-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e8ebef;
+}
+
+.target-icon {
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+}
+
+.target-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 19px;
+  font-weight: 500;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.update-row {
+  margin-top: 10px;
+  border-radius: 16px;
+  background-color: #f5f6f8;
+  padding: 12px 14px;
+}
+
+.update-day {
+  font-size: 12px;
+  line-height: 17px;
+  color: #94a3b8;
+}
+
+.update-message {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 21px;
+  color: #0f172a;
+}

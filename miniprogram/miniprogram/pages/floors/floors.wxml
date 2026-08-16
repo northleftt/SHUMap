@@ -1,0 +1,126 @@
+<!-- 楼层图页（Skyline）。结构：
+  - 自定义导航栏（返回 + 楼宇名）
+  - 楼层 pills（横滑；有平面图的层带色点角标）
+  - 列表 / 平面图切换（无图纸的层强制列表，不显示切换）
+  - 平面图：渲染架构与地图页一致（shared 变量 + applyAnimatedStyle；徽章反向
+    scale(1/s)）；手势识别在 .floor-surface 的 bindtouchstart/move/end/tap
+    （JS 线程，worklet:ongesture 真机不触发）；徽章命中走 tap 换算世界坐标
+    找最近徽章，不用 bindtap
+  - 列表：楼层说明 + 本层实拍 + 本层设施行 -->
+<view class="page">
+  <view class="navbar" style="padding-top: {{statusBarHeight}}px;">
+    <view class="navbar-row">
+      <view class="navbar-back" bindtap="goBack">‹ 返回</view>
+      <view class="navbar-title">{{buildingName}}</view>
+      <view class="navbar-back navbar-back-placeholder"></view>
+    </view>
+  </view>
+
+  <scroll-view scroll-x class="floor-bar" wx:if="{{ready}}">
+    <view
+      wx:for="{{floors}}"
+      wx:key="id"
+      class="floor-pill {{activeFloorId === item.id ? 'floor-pill-active' : ''}}"
+      data-id="{{item.id}}"
+      bindtap="switchFloorRow"
+    >
+      {{item.displayName}}
+      <view wx:if="{{item.hasPlan}}" class="floor-pill-dot"></view>
+    </view>
+  </scroll-view>
+
+  <view class="view-toggle" wx:if="{{ready && hasPlan}}">
+    <view
+      class="view-toggle-item {{view === 'list' ? 'view-toggle-active' : ''}}"
+      data-view="list"
+      bindtap="setViewRow"
+    >列表</view>
+    <view
+      class="view-toggle-item {{view === 'plan' ? 'view-toggle-active' : ''}}"
+      data-view="plan"
+      bindtap="setViewRow"
+    >平面图</view>
+  </view>
+
+  <view class="floor-viewport">
+    <!-- world 只在有图纸时挂载；列表视图用不透明的 .floor-list 盖在上面。
+         手势识别在 .floor-surface 的 bind 事件（JS 线程），处理器按 view/hasPlan 守卫。 -->
+    <view
+      class="floor-surface"
+      bindtouchstart="onSurfaceTouchStart"
+      bindtouchmove="onSurfaceTouchMove"
+      bindtouchend="onSurfaceTouchEnd"
+      bindtouchcancel="onSurfaceTouchEnd"
+      bindtap="onSurfaceTap"
+    >
+      <view class="floor-world" wx:if="{{ready && hasPlan}}" style="width: {{worldWidth}}px; height: {{worldHeight}}px;">
+        <image
+          class="floor-svg"
+          src="{{assetUrl}}"
+          mode="scaleToFill"
+          style="width: {{worldWidth * rasterRatio}}px; height: {{worldHeight * rasterRatio}}px;"
+          show-menu-by-longpress="{{false}}"
+        />
+        <view
+          wx:for="{{anchors}}"
+          wx:key="id"
+          class="floor-badge"
+          style="left: {{item.x}}px; top: {{item.y}}px;"
+        >
+          <view class="floor-badge-inner"></view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{selectedFacility && view === 'plan' && hasPlan}}" class="facility-card">
+      <view class="facility-card-name">{{selectedFacility.name}}</view>
+      <view class="facility-card-sub">
+        {{selectedFacility.typeName}}<block wx:if="{{selectedFacility.location}}"> · {{selectedFacility.location}}</block>
+      </view>
+      <view wx:if="{{selectedFacility.statusLabel}}" class="facility-status">{{selectedFacility.statusLabel}}</view>
+      <view class="facility-card-close" bindtap="closeFacilityCard">×</view>
+    </view>
+
+    <!-- 列表视图 -->
+    <scroll-view wx:if="{{ready && (view === 'list' || !hasPlan)}}" scroll-y class="floor-list">
+      <view wx:if="{{floorNote}}" class="floor-note">{{floorNote}}</view>
+      <scroll-view wx:if="{{floorMedia.length}}" scroll-x class="floor-media">
+        <image
+          wx:for="{{floorMedia}}"
+          wx:key="url"
+          class="floor-media-img"
+          src="{{item.url}}"
+          mode="aspectFill"
+        />
+      </scroll-view>
+      <!-- 列表行已内联展示全部信息，不可点（选中卡只在平面图视图出现） -->
+      <view
+        wx:for="{{floorFacilities}}"
+        wx:key="id"
+        class="facility-row"
+      >
+        <view class="facility-dot"></view>
+        <view class="facility-row-main">
+          <view class="facility-row-name">
+            {{item.name}}
+            <text wx:if="{{item.statusLabel}}" class="facility-status-inline">{{item.statusLabel}}</text>
+          </view>
+          <view class="facility-row-sub">
+            {{item.typeName}}<block wx:if="{{item.location}}"> · {{item.location}}</block>
+          </view>
+        </view>
+      </view>
+      <view wx:if="{{!floorFacilities.length && !floorNote && !floorMedia.length}}" class="floor-empty">
+        本层暂无设施信息
+      </view>
+    </scroll-view>
+
+    <view wx:if="{{loading}}" class="floor-cover">
+      <view class="floor-cover-text">楼层图加载中…</view>
+    </view>
+    <view wx:elif="{{errorMessage}}" class="floor-cover">
+      <view class="floor-cover-text">{{errorMessage}}</view>
+      <view class="floor-retry" bindtap="boot">重试</view>
+    </view>
+  </view>
+</view>

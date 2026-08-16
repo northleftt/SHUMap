@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "返校指南",
+  "navigationStyle": "custom",
+  "renderer": "skyline",
+  "disableScroll": true,
+  "usingComponents": {}
+}

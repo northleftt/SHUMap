@@ -1,0 +1,39 @@
+.page {
+  flex: 1;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f6f8;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* 底部 tab 栏占位，视觉上让内容略偏上（对齐 Web 端 pb-20） */
+  padding-bottom: 80px;
+}
+
+.empty-icon {
+  width: 52px;
+  height: 52px;
+}
+
+.empty-title {
+  margin-top: 12px;
+  font-size: 17px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.empty-sub {
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.empty-sub:first-of-type {
+  margin-top: 6px;
+}
