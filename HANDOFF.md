@@ -55,7 +55,10 @@ npm run deploy:cloudflare
 **5. 管理端运营事件审核 UI**
 后端 decide / note 强制已就绪，但没有页面调用它；运营事件目前只能建不能审。
 
-**6. 其他**
+**6. 云托管代理让所有小程序用户共享限流桶**
+小程序流量经 `miniprogram/cloudrun/shumap-api` 容器代理到 Worker，Cloudflare 看到的 `cf-connecting-ip` 恒为容器出口 IP——`enforcePublicRateLimit` 的所有公共桶（照片上传 30/10min、反馈 20/10min、状态查询 120/10min）在全量小程序用户之间**合计**。用户量上来后少数人传照片就会锁死所有人。方向：代理用平台注入的 `x-wx-openid` 覆写一个约定的身份头、Worker 仅在请求来自容器出口时采信它做限流 key（不能无条件信任，直连 Worker 的攻击者可伪造该头轮换桶）；或干脆对小程序侧调高/改按 openid 计数。需要设计决策，没动手。
+
+**7. 其他**
 - 商户视图不显示所在楼层（`floorId` 在 manifest 里有，UI 未用）
 - 曲线要素为端点采样近似，可查 `metadata_json.approximated`
 - M12 下拉刷新未实装；校外页仍是预留占位
