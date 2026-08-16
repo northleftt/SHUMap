@@ -92,13 +92,27 @@ test("the release_items join can actually resolve a display name", () => {
   db.close();
 });
 
-test("the endpoint is registered behind publish:release", () => {
+test("the endpoints are registered with the right permissions", () => {
   const router = read("worker/index-v2.ts");
-  assert.match(router, /"\/api\/admin\/releases\/pending"/);
-  // 必须排在 POST /api/admin/releases 之前那类精确匹配里，且要 publish:release。
-  const block = router.slice(router.indexOf('"/api/admin/releases/pending"') - 200, router.indexOf('"/api/admin/releases/pending"') + 300);
-  assert.match(block, /requireSession\(request, env, "publish:release"\)/);
-  assert.match(block, /pendingReleaseChanges\(env\)/);
+  // 读端点（pending / 历史）用 read:admin——没发版权限的编辑也要能看「还没上线」。
+  const pendingBlock = router.slice(
+    router.indexOf('"/api/admin/releases/pending"'),
+    router.indexOf('"/api/admin/releases/pending"') + 260,
+  );
+  assert.match(pendingBlock, /read:admin/);
+  assert.match(pendingBlock, /pendingReleaseChanges\(env\)/);
+  const historyBlock = router.slice(
+    router.indexOf('method === "GET" && path === "/api/admin/releases"'),
+    router.indexOf('method === "GET" && path === "/api/admin/releases"') + 240,
+  );
+  assert.match(historyBlock, /read:admin/);
+  assert.match(historyBlock, /listReleases\(env\)/);
+  // 发版写操作必须要求 publish:release。
+  const publishBlock = router.slice(
+    router.indexOf('method === "POST" && path === "/api/admin/releases"'),
+    router.indexOf('method === "POST" && path === "/api/admin/releases"') + 240,
+  );
+  assert.match(publishBlock, /publish:release/);
 });
 
 test("the sidebar badge and the release page read one shared source", () => {

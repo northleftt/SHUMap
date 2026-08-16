@@ -3,8 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
-import { getOptionalCurrentRelease } from "../../lib/api/public";
-import type { ReleaseManifest } from "../../lib/api/types";
+import { getAdminReleaseSummary, type AdminReleaseSummary } from "../../lib/api/public";
 import type { MapLifecycleStatus, PendingChangeKind, PendingChangeRow, PendingEntityType } from "../../lib/api/admin";
 import { useAuth } from "../AuthContext";
 import { usePendingRelease } from "../PendingReleaseContext";
@@ -190,17 +189,38 @@ function mapBindingIssueText(issue: admin.ReleaseMapBindingIssue): string {
   return `${issue.entityName} · ${LOCATION_ROLE_LABEL[issue.role] ?? issue.role}：当前绑定「${currentMap}」，本次选择「${selectedMap}」`;
 }
 
+/** 历史列表里的 release 状态（releases.status 的取值）。 */
+const RELEASE_STATUS_META: Record<string, { label: string; tone: "ok" | "warning" | "error" | "info" | "neutral" }> = {
+  active: { label: "当前线上", tone: "ok" },
+  superseded: { label: "已被替换", tone: "neutral" },
+  validating: { label: "校验中", tone: "info" },
+  ready: { label: "待激活", tone: "info" },
+  publishing: { label: "发布中", tone: "info" },
+  validation_failed: { label: "校验失败", tone: "error" },
+  failed: { label: "发布失败", tone: "error" },
+};
+
+function HistoryStatusPill({ status }: { status: string }) {
+  const meta = RELEASE_STATUS_META[status] ?? { label: status, tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
+
 export function ReleasesPage() {
   const { hasPermission } = useAuth();
   const canRollback = hasPermission("rollback:release");
   // 与侧栏小黄点同一份数据：两处说法不一致会比没有提示更糟。
   const { pending, reload: reloadPending } = usePendingRelease();
+  // 当前版本走 getAdminReleaseSummary 而不是完整解析：坏快照必须仍能进这个页面，
+  // 否则「发一版新的把快照重写」这条唯一的自救路径会被它要修的东西挡住。
   const { state, reload } = useAsyncData(async (signal) => {
-    const [maps, release] = await Promise.all([
+    const [maps, release, history] = await Promise.all([
       admin.listMapVersions(signal),
-      getOptionalCurrentRelease(signal),
+      getAdminReleaseSummary(signal),
+      // 历史列表拉取失败不该挡住发版表单（比如老 Worker 还没部署新端点），
+      // 单独兜成空列表。
+      admin.listReleaseHistory(signal).catch(() => []),
     ]);
-    return { maps: maps.items, release };
+    return { maps: maps.items, release, history };
   }, []);
 
   const [version, setVersion] = useState("");
@@ -209,13 +229,12 @@ export function ReleasesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<admin.PublishReleaseResult | null>(null);
-  const [rollbackId, setRollbackId] = useState("");
   const [rollbackMsg, setRollbackMsg] = useState("");
 
   if (state.status === "loading") return <LoadingState label="加载发布信息…" />;
   if (state.status === "error") return <ErrorBanner message={state.message} />;
   const data = state.data;
-  const release: ReleaseManifest | null = data.release;
+  const release: AdminReleaseSummary | null = data.release;
 
   async function publish() {
     if (!version.trim()) return;
@@ -249,15 +268,18 @@ export function ReleasesPage() {
     }
   }
 
-  async function doRollback() {
-    if (!rollbackId.trim()) return;
+  // 从历史列表点选回滚，替代从前的手输版本 ID：回滚立刻影响全体用户，
+  // 手输错一位就是事故；看着列表选 + confirm 二次确认。
+  async function doRollback(row: admin.ReleaseHistoryRow) {
+    if (busy || !row.rollbackEligible) return;
+    const ok = window.confirm(`回滚到 ${row.version}（${row.id}）？\n当前线上版本会立即被替换，影响全体用户。`);
+    if (!ok) return;
     setBusy(true);
     setRollbackMsg("");
     setError("");
     try {
-      await admin.rollbackRelease(rollbackId.trim(), { reason: null });
-      setRollbackMsg(`已回滚到 ${rollbackId.trim()}`);
-      setRollbackId("");
+      await admin.rollbackRelease(row.id, { reason: null });
+      setRollbackMsg(`已回滚到 ${row.version}`);
       reload();
       // 回滚换掉了 active release，比对的基准也就换了：回到旧版本后，本来已发布的
       // 内容重新变成「待发布」。不重算清单会停在回滚前的说法。
@@ -282,14 +304,16 @@ export function ReleasesPage() {
             <div>
               <p className="text-aux text-sub">当前线上版本</p>
               <div className="mt-1.5 flex items-center gap-3">
-                <span className="text-title">{release.release.version}</span>
-                <Pill tone="ok" className="h-6 px-2.5">已上线</Pill>
+                <span className="text-title">{release.version}</span>
+                <Pill tone={release.incompatibleReason ? "warning" : "ok"} className="h-6 px-2.5">
+                  {release.incompatibleReason ? "客户端读不动" : "已上线"}
+                </Pill>
               </div>
-              <p className="mt-1.5 text-aux text-sub">发布于 {fmtDateTime(release.release.createdAt)}</p>
+              <p className="mt-1.5 text-aux text-sub">发布于 {fmtDateTime(release.createdAt)}</p>
             </div>
             <div className="text-right">
               <p className="text-body text-ink">
-                {release.places.length} 地点 · {release.facilities.length} 设施 · {release.merchants.length} 商户 · {release.maps.length} 地图版本
+                {release.counts.places} 地点 · {release.counts.facilities} 设施 · {release.counts.merchants} 商户 · {release.counts.maps} 地图版本
               </p>
             </div>
           </div>
@@ -297,6 +321,15 @@ export function ReleasesPage() {
           <div className="p-5"><EmptyState label="尚无已发布版本" /></div>
         )}
       </Panel>
+
+      {/* 快照与客户端契约不兼容：用户端此刻打不开地图，发一版新的即可重写快照。
+          这条提示要在发布表单上方，因为它就是此刻该做的事。 */}
+      {release?.incompatibleReason ? (
+        <InfoNote tone="warning">
+          当前线上快照客户端解析失败，用户端地图打不开：{release.incompatibleReason}
+          。用下面的表单发一版新的即可重写快照恢复（无需改动内容）。
+        </InfoNote>
+      ) : null}
 
       <div className="grid grid-cols-2 items-start gap-4">
         {/* 发布新版本 */}
@@ -406,28 +439,43 @@ export function ReleasesPage() {
         {/* 历史版本 + 回滚 */}
         <div className="space-y-4">
           <Panel title="历史版本" padded={false}>
-            <div className="divide-y divide-line">
-              {release ? (
-                <div className="flex items-center justify-between px-5 py-3.5 text-body">
-                  <span className="font-semibold">{release.release.version}</span>
-                  <Pill tone="ok">当前线上</Pill>
-                  <span className="text-aux text-sub">{fmtDateTime(release.release.createdAt)}</span>
-                  <span className="text-aux text-sub">—</span>
+            {/* 含失败尝试（validation_failed / failed）：它们是排障线索，不是噪音。 */}
+            <div className="max-h-[26rem] divide-y divide-line overflow-y-auto">
+              {data.history.length === 0 ? (
+                <div className="px-5 py-6">
+                  <EmptyState label="暂无历史版本（或历史接口不可用）" />
                 </div>
-              ) : null}
+              ) : data.history.map((row) => (
+                <div className="flex items-center justify-between gap-3 px-5 py-3 text-body" key={row.id}>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-semibold">{row.version}</span>
+                      <HistoryStatusPill status={row.status} />
+                    </div>
+                    <p className="mt-0.5 truncate text-aux text-sub" title={row.id}>
+                      {row.createdAt ? fmtDateTime(row.createdAt) : "—"}
+                      {row.summary ? ` · ${row.summary}` : ""}
+                      {row.createdBy ? ` · ${row.createdBy}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {row.status === "active" ? <span className="text-aux text-success">当前线上</span> : null}
+                    {canRollback && row.rollbackEligible && row.status !== "active" ? (
+                      <GhostButton danger disabled={busy} onClick={() => doRollback(row)}>回滚到此版</GhostButton>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
             </div>
           </Panel>
 
           {canRollback ? (
-            <Panel title="回滚">
+            <Panel title="回滚说明">
               <div className="space-y-3">
-                <p className="text-body text-sub">回滚会立即影响所有用户看到的内容，请谨慎操作。</p>
-                <div className="flex items-end gap-3">
-                  <div className="flex-1">
-                    <Field label="目标版本" onChange={setRollbackId} placeholder="输入要回滚到的版本编号" value={rollbackId} />
-                  </div>
-                  <GhostButton danger disabled={busy || !rollbackId.trim()} onClick={doRollback}>回滚</GhostButton>
-                </div>
+                <p className="text-body text-sub">
+                  在上方历史列表中点「回滚到此版」。回滚会立即影响所有用户看到的内容，操作前需二次确认；
+                  只有点亮过（active / superseded）的版本才可回滚，失败的废尝试不可选。
+                </p>
                 {rollbackMsg ? <InfoNote tone="info">{rollbackMsg}</InfoNote> : null}
               </div>
             </Panel>

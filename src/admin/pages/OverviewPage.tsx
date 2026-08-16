@@ -1,8 +1,7 @@
 import { ArrowRight, CirclePlus, Rocket } from "lucide-react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
-import { getOptionalCurrentRelease } from "../../lib/api/public";
-import type { ReleaseManifest } from "../../lib/api/types";
+import { getAdminReleaseSummary, type AdminReleaseSummary } from "../../lib/api/public";
 import type {
   FacilityListItem,
   MerchantListItem,
@@ -33,7 +32,7 @@ interface OverviewData {
   merchants: MerchantListItem[];
   submissions: SubmissionRow[];
   operations: OperationalEventRow[];
-  release: ReleaseManifest | null;
+  release: AdminReleaseSummary | null;
 }
 
 interface TodoItem {
@@ -65,7 +64,7 @@ export function OverviewPage() {
       admin.listMerchants<MerchantListItem>(signal),
       admin.listSubmissions(signal),
       admin.listAdminOperations<OperationalEventRow>(signal),
-      getOptionalCurrentRelease(signal),
+      getAdminReleaseSummary(signal),
     ]);
     return {
       spaces,
@@ -110,7 +109,7 @@ export function OverviewPage() {
   // 最近动态：无动态流 API，用现有列表时间戳近似推导
   const activity = [
     ...(data.release
-      ? [{ key: "rel", dot: "bg-success", text: `发布了 ${data.release.release.version}`, at: data.release.release.createdAt }]
+      ? [{ key: "rel", dot: "bg-success", text: `发布了 ${data.release.version}`, at: data.release.createdAt }]
       : []),
     ...data.submissions.slice(0, 4).map((s) => ({
       key: `sub:${s.id}`,
@@ -131,9 +130,13 @@ export function OverviewPage() {
   const statCards = [
     {
       label: "当前发布版本",
-      value: data.release ? data.release.release.version : "—",
-      sub: data.release ? `已上线 · ${fmtDateTime(data.release.release.createdAt)}` : "尚无已发布版本",
-      subClass: "text-success",
+      value: data.release ? data.release.version : "—",
+      sub: data.release
+        ? data.release.incompatibleReason
+          ? `客户端读不动 · ${fmtDateTime(data.release.createdAt)}`
+          : `已上线 · ${fmtDateTime(data.release.createdAt)}`
+        : "尚无已发布版本",
+      subClass: data.release?.incompatibleReason ? "text-warning" : "text-success",
       dot: true,
     },
     {

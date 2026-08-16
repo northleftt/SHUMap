@@ -30,7 +30,7 @@ import { createCampaign, createOperationalEvent, createOperationalEventUpdate, d
 import { createPlaceHandler, createPlaceRevisionHandler, deletePlace, getPlace, listPlaces, updatePlaceLifecycle } from "./modules/places";
 import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
-import { createSubmission, listSubmissions, reviewSubmission } from "./modules/submissions";
+import { createSubmission, getSubmissionStatus, listSubmissions, reviewSubmission } from "./modules/submissions";
 import { createOrganization, deleteOrganization, listOrganizations, updateOrganization } from "./modules/organizations";
 import { deleteFloor, getFloorDetail, listFloorsForBuilding, updateFloorPlanStatus } from "./modules/floors";
 import { createDataSource, createFloor, createSpace, listCampusesAndSpaces, listReferenceData, updateFloor } from "./modules/spaces";
@@ -70,7 +70,8 @@ import {
   updateTrip,
 } from "./modules/transit";
 
-import { pendingReleaseChanges } from "./modules/releases";
+import { listReleases, pendingReleaseChanges } from "./modules/releases";
+import { purgeQuarantineMedia } from "./modules/maintenance";
 
 export { ReleaseCoordinator } from "./modules/releases";
 
@@ -98,6 +99,12 @@ export default {
   },
   async queue(batch: MessageBatch<QueueJobMessage>, env: Env): Promise<void> {
     await processQueue(batch, env);
+  },
+  // 定时清理隔离区照片（wrangler.jsonc triggers.crons，每天一次）。
+  // scheduled 里不能抛——抛了这次 cron 算失败，但没有人工盯着告警，
+  // 所以维护模块内部自己吞错并打日志。
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(purgeQuarantineMedia(env));
   },
 };
 
@@ -130,6 +137,13 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "POST" && path === "/api/public/submissions") {
     const principal = await optionalSession(request, env);
     return createSubmission(request, env, principal);
+  }
+  // 提交状态的公共查询：id 是 128 位随机 UUID（crypto.randomUUID），只发给提交者
+  // 本人，凭 id 查询即能力凭证（capability URL）——响应只含状态与时间戳，
+  // 不回 payload / 联系方式，被猜中也没有可泄露的内容。
+  const publicSubmission = match(path, "/api/public/submissions/:id");
+  if (method === "GET" && publicSubmission) {
+    return getSubmissionStatus(request, env, publicSubmission.id);
   }
   if (method === "GET" && path === "/api/public/facility-types") return listPublicFacilityTypes(env);
   if (method === "GET" && path === "/api/public/facility-status") return publicFacilityStatus(env);
@@ -584,6 +598,12 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "GET" && path === "/api/admin/releases/pending") {
     await requireSession(request, env, "read:admin");
     return pendingReleaseChanges(env);
+  }
+  // 发布历史：让回滚能「看着选」而不是手输版本 ID。同为读操作，用 read:admin
+  // （实际执行回滚仍然要求 rollback:release）。
+  if (method === "GET" && path === "/api/admin/releases") {
+    await requireSession(request, env, "read:admin");
+    return listReleases(env);
   }
   if (method === "POST" && path === "/api/admin/releases") {
     principal = await requireSession(request, env, "publish:release");

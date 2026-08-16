@@ -210,6 +210,11 @@ export async function decideOperationalEvent(
   const decision = requiredString(body.decision, "decision", 20);
   if (!["approve", "reject"].includes(decision)) throw new HttpError(400, "validation_error", "Invalid decision");
   const note = optionalString(body.note, "note", 2_000);
+  // 驳回必须留下理由，与 submissions.ts 的 reviewSubmission 对齐：被驳回的运营事件
+  // 对供稿人是唯一的通知渠道就是这条 note，空着驳回等于无声否决。
+  if (decision === "reject" && (note === null || note.trim() === "")) {
+    throw new HttpError(400, "validation_error", "Rejection requires a non-empty note");
+  }
   const event = await first<Record<string, unknown>>(env.DB, "select * from operational_events where id=?", [eventId]);
   if (!event) throw new HttpError(404, "not_found", "Event does not exist");
   if (!["draft", "in_review"].includes(String(event.editorial_status))) throw new HttpError(409, "invalid_state", "Event has already been decided");

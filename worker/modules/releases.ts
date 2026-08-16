@@ -136,7 +136,14 @@ interface MapBindingIssue {
 
 type ReleaseMap = Omit<MapCandidate, "assetByteSize" | "assetSha256" | "assetStatus" | "assetBucketScope">;
 
-interface LocationCandidate {
+/**
+ * 位置在**发布快照**里的字段集合，必须与客户端 src/lib/release/manifestContract.ts
+ * 的 location() 白名单逐字一致：客户端用 exactObject 校验，多一个键就整份 manifest
+ * 解析失败、地图直接打不开（2026-08-12 的 boundMap* 就是这样把线上地图打碎的）。
+ *
+ * 所以快照里的位置一律经 releaseLocation() 逐字段挑出，别把查询行直接塞进 manifest。
+ */
+interface ReleaseLocation {
   id: string;
   entityType: "place" | "facility" | "merchant_outlet" | "transit_stop";
   entityId: string;
@@ -164,11 +171,54 @@ interface LocationCandidate {
   updated_at: string;
   sourceElementId: string | null;
   featureKind: string | null;
+}
+
+/**
+ * 查询行 = 快照字段 + 只供发布校验使用的绑定信息。后者不进 manifest。
+ * 取位置的 SQL 用了 la.*，将来给 location_anchors 加列同样只会落在这里。
+ */
+interface LocationCandidate extends ReleaseLocation {
   /** 当前锚点绑定的地图版本信息；发布失败时用来给后台可操作的修复提示。 */
   boundMapVersionLabel: string | null;
   boundMapCampusId: string | null;
   boundMapFloorId: string | null;
   boundMapCampusName: string | null;
+}
+
+/**
+ * 查询行 → 快照行。逐字段挑而不是展开对象：校验用的 join 别名、以及 la.* 带出来的
+ * 新库列，都不会顺着漏给客户端。ReleaseLocation 增删字段时这里会编译报错。
+ */
+export function releaseLocation(location: LocationCandidate): ReleaseLocation {
+  return {
+    id: location.id,
+    entityType: location.entityType,
+    entityId: location.entityId,
+    role: location.role,
+    isPrimary: location.isPrimary,
+    campus_id: location.campus_id,
+    building_place_id: location.building_place_id,
+    floor_id: location.floor_id,
+    indoor_space_id: location.indoor_space_id,
+    geometry_type: location.geometry_type,
+    geometry_json: location.geometry_json,
+    crs: location.crs,
+    map_version_id: location.map_version_id,
+    map_feature_id: location.map_feature_id,
+    location_hint: location.location_hint,
+    precision_level: location.precision_level,
+    accuracy_meters: location.accuracy_meters,
+    source_id: location.source_id,
+    verification_status: location.verification_status,
+    verified_by: location.verified_by,
+    verified_at: location.verified_at,
+    valid_from: location.valid_from,
+    valid_to: location.valid_to,
+    created_at: location.created_at,
+    updated_at: location.updated_at,
+    sourceElementId: location.sourceElementId,
+    featureKind: location.featureKind,
+  };
 }
 
 function locationGeometry(location: LocationCandidate): Record<string, unknown> | null {
@@ -257,7 +307,8 @@ export interface ReleaseManifest {
   facilities: ReleaseFacility[];
   merchants: ReleaseMerchant[];
   maps: ReleaseMap[];
-  locations: LocationCandidate[];
+  /** 快照字段集合（见 releaseLocation）；不是取位置的查询行。 */
+  locations: ReleaseLocation[];
   floors: FloorCandidate[];
   facilityTypes: FacilityTypeCandidate[];
   mapFilters: ReleaseMapFilter[];
@@ -437,6 +488,10 @@ export class ReleaseCoordinator {
       await this.env.DB.prepare("update releases set validation_report_json=?,validated_at=?,status=? where id=?")
         .bind(jsonString(validation), isoNow(), validation.valid ? "ready" : "validation_failed", releaseId).run();
       if (!validation.valid) {
+        // 校验失败的 release 永远到不了 active：buildCandidate 已写入的
+        // release_items / release_map_versions / search_documents 对它毫无用处，
+        // 留在库里只会越积越多（releases 行本身保留——validation report 是排障依据）。
+        await deleteReleaseSideTables(this.env, releaseId);
         return json({ id: releaseId, status: "validation_failed", validation }, { status: 422 });
       }
 
@@ -479,6 +534,13 @@ export class ReleaseCoordinator {
     } catch (error) {
       await this.env.DB.prepare("update releases set status='failed',validation_report_json=? where id=?")
         .bind(jsonString({ valid: false, errors: [error instanceof Error ? error.message : "Unknown release error"] }), releaseId).run();
+      // 与 validation_failed 同理：中途失败的 release（如 artifact 超限）同样带着
+      // 已写入的侧表行，清掉。清理自身出错不再抛——不能让它掩盖原始错误。
+      try {
+        await deleteReleaseSideTables(this.env, releaseId);
+      } catch (cleanupError) {
+        console.error("release side-table cleanup failed", cleanupError);
+      }
       throw error;
     }
   }
@@ -620,7 +682,9 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
     places: releasePlaces,
     facilities: releaseFacilities,
     merchants: releaseMerchants,
-    maps: releaseMaps, locations, floors, facilityTypes, mapFilters,
+    // 位置逐字段挑进快照（releaseLocation）：校验用的 boundMap* 别名留在
+    // locations 里给 validateCandidate 用，不外发给客户端。
+    maps: releaseMaps, locations: locations.map(releaseLocation), floors, facilityTypes, mapFilters,
     transit: { stops },
     searchDocuments,
     generatedAt: isoNow(),
@@ -1137,6 +1201,58 @@ function diffHashed(
     changes.push({ entityType, entityId: row.entityId, displayName: row.displayName ?? row.entityId, change: "removed" });
   }
   return changes;
+}
+
+/**
+ * 清掉 buildCandidate 为一个 release 写入的三张侧表（release_items /
+ * release_map_versions / search_documents）。只用于终态为 validation_failed /
+ * failed 的 release——它们的侧表行永远不会被任何读路径消费，留着就是孤儿。
+ * releases 行本身不动：validation_report_json 是排障与审计依据。
+ */
+async function deleteReleaseSideTables(env: Env, releaseId: string): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare("delete from search_documents where release_id=?").bind(releaseId),
+    env.DB.prepare("delete from release_map_versions where release_id=?").bind(releaseId),
+    env.DB.prepare("delete from release_items where release_id=?").bind(releaseId),
+  ]);
+}
+
+/**
+ * GET /api/admin/releases —— 发布历史。回滚此前只能手输版本 ID，而回滚立刻影响
+ * 全体用户；有列表才能「看着回滚」，也能看出哪些版本是 validation_failed / failed
+ * 的废尝试。只读、不含 manifest 内容。
+ */
+export async function listReleases(env: Env): Promise<Response> {
+  const items = await all<{
+    id: string;
+    version: string;
+    status: string;
+    summary: string | null;
+    createdAt: string;
+    activatedAt: string | null;
+    createdByEmail: string | null;
+    itemCount: number;
+  }>(
+    env.DB,
+    `select r.id,r.version,r.status,r.summary,r.created_at as createdAt,r.activated_at as activatedAt,
+            u.email as createdByEmail,(select count(*) from release_items ri where ri.release_id=r.id) as itemCount
+       from releases r left join users u on u.id=r.created_by
+      order by r.created_at desc limit 50`,
+  );
+  return json({
+    items: items.map((row) => ({
+      id: row.id,
+      version: row.version,
+      status: row.status,
+      summary: row.summary,
+      createdAt: row.createdAt,
+      activatedAt: row.activatedAt,
+      createdBy: row.createdByEmail,
+      itemCount: row.itemCount,
+      // 与 rollback 的可回滚条件保持一致（active/superseded 且有 artifact）。
+      rollbackEligible: (row.status === "active" || row.status === "superseded"),
+    })),
+  });
 }
 
 export async function pendingReleaseChanges(env: Env): Promise<Response> {

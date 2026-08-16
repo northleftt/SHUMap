@@ -1,8 +1,16 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "shumap",
+  "account_id": "400623ade20e6d96cb546c98bcf3e33f",
   "main": "./worker/index-v2.ts",
   "compatibility_date": "2026-05-28",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "map.shutf.com",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist",
@@ -13,6 +21,10 @@
   },
   "observability": {
     "enabled": true
+  },
+  // 每天 18:00 UTC（北京 02:00）跑 worker/modules/maintenance.ts：清理过期隔离区照片。
+  "triggers": {
+    "crons": ["0 18 * * *"]
   },
   "secrets": {
     "required": [
@@ -37,7 +49,7 @@
     {
       "binding": "DB",
       "database_name": "shumap-v2",
-      "database_id": "61c93320-b731-44a0-a5a6-fc32177dba42",
+      "database_id": "7b36d7cb-6352-409b-a520-175beee59f90",
       "migrations_dir": "migrations-v2"
     }
   ],

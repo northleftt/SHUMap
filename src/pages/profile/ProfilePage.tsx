@@ -1,5 +1,5 @@
 import { Check, ChevronRight, ClipboardList, Clock, Info, MessageSquare, Pencil, Settings, Star } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Avatar } from "../../components/ui/Avatar";
 import { StatusPill, type StatusTone } from "../../components/ui/StatusPill";
@@ -19,9 +19,11 @@ const SHOW_LOGIN: boolean = false;
 
 const SUBMISSION_STATUS: Record<LocalSubmissionStatus, { label: string; tone: StatusTone }> = {
   pending: { label: "已提交", tone: "warning" },
+  in_review: { label: "审核中", tone: "warning" },
   accepted: { label: "已采纳", tone: "success" },
   partially_accepted: { label: "部分采纳", tone: "success" },
   rejected: { label: "未采纳", tone: "error" },
+  withdrawn: { label: "已撤回", tone: "neutral" },
 };
 
 function formatSubmitDate(iso: string): string {
@@ -66,11 +68,16 @@ export function ProfilePage() {
   const [identity] = useIdentity();
   const { favorites } = useFavorites();
   const { recents } = useRecents();
-  const { submissions } = useSubmissionsLog();
+  const { submissions, refreshStatuses } = useSubmissionsLog();
   const [collectionTasks] = useLocalStore<CollectionTaskMap>("shumap.collection-tasks", {});
   const collectedCount = Object.values(collectionTasks).filter((task) => task.status === "submitted" || task.status === "accepted").length;
   const releaseState = useRelease();
   const [editing, setEditing] = useState(false);
+  // 进页面时把未终态的反馈拿服务端状态刷一遍（静默失败）。「我的反馈」此前
+  // 永远停在「已提交」，不是没人处理，是状态回不来。
+  useEffect(() => {
+    void refreshStatuses();
+  }, [refreshStatuses]);
 
   const menu = [
     {

@@ -1032,6 +1032,24 @@ export function rollbackRelease(releaseId: string, body: { reason: string | null
   return apiFetch(`/api/admin/releases/${encodeURIComponent(releaseId)}/rollback`, { method: "POST", body });
 }
 
+/** GET /api/admin/releases 的一行：发布历史。 */
+export interface ReleaseHistoryRow {
+  id: string;
+  version: string;
+  status: string;
+  summary: string | null;
+  createdAt: string;
+  activatedAt: string | null;
+  createdBy: string | null;
+  itemCount: number;
+  rollbackEligible: boolean;
+}
+
+export async function listReleaseHistory(signal?: AbortSignal): Promise<ReleaseHistoryRow[]> {
+  const response = await apiFetch<{ items: ReleaseHistoryRow[] }>("/api/admin/releases", { signal });
+  return response.items;
+}
+
 export type PendingEntityType = "place" | "facility" | "merchant_outlet" | "transit_stop" | "map_version";
 export type PendingChangeKind = "added" | "changed" | "removed";
 

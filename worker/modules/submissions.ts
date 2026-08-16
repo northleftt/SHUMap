@@ -188,6 +188,26 @@ export async function createSubmission(
   );
 }
 
+/**
+ * GET /api/public/submissions/:id —— 提交者查自己那条反馈的处理状态。
+ *
+ * 鉴权模型是 capability URL：id 为 128 位随机串（crypto.randomUUID 去连字符），
+ * 只在创建时回给提交者本人；响应只含状态与时间戳，不含 payload / 联系方式 /
+ * 审核备注——即使 id 泄露也没有可读的隐私。404 与「不存在」同形，不区分
+ * 「格式对但不存在」，不给枚举探测留分辨面。
+ */
+export async function getSubmissionStatus(request: Request, env: Env, submissionId: string): Promise<Response> {
+  await enforcePublicRateLimit(request, env, "submission-status", 120);
+  if (!/^[a-z]+_[0-9a-f]{32}$/.test(submissionId)) throw new HttpError(404, "not_found", "Submission does not exist");
+  const row = await first<{ status: string; createdAt: string; reviewedAt: string | null }>(
+    env.DB,
+    "select status,created_at as createdAt,reviewed_at as reviewedAt from content_submissions where id=?",
+    [submissionId],
+  );
+  if (!row) throw new HttpError(404, "not_found", "Submission does not exist");
+  return json({ id: submissionId, status: row.status, createdAt: row.createdAt, reviewedAt: row.reviewedAt });
+}
+
 export async function listSubmissions(env: Env): Promise<Response> {
   const items = await all<SubmissionListRow>(
     env.DB,

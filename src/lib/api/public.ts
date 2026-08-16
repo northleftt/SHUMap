@@ -39,6 +39,88 @@ export async function getOptionalCurrentRelease(signal?: AbortSignal): Promise<R
   }
 }
 
+/** 服务端的反馈处理状态（content_submissions.status 的取值）。 */
+export type ServerSubmissionStatus =
+  | "pending"
+  | "in_review"
+  | "accepted"
+  | "partially_accepted"
+  | "rejected"
+  | "withdrawn";
+
+/**
+ * GET /api/public/submissions/:id —— 查自己那条反馈的处理状态。
+ * id 是创建时返回的随机串（capability URL），响应只有状态与时间戳。
+ */
+export async function getSubmissionStatus(
+  submissionId: string,
+  signal?: AbortSignal,
+): Promise<{ id: string; status: ServerSubmissionStatus; createdAt: string; reviewedAt: string | null }> {
+  return apiFetch(`/api/public/submissions/${encodeURIComponent(submissionId)}`, { signal });
+}
+
+/** 发布中心 / 总览展示当前线上版本所需的最小信息。 */
+export interface AdminReleaseSummary {
+  version: string;
+  createdAt: string;
+  counts: { places: number; facilities: number; merchants: number; maps: number };
+  /**
+   * 快照与客户端契约不兼容时的原因；null 表示快照正常。
+   * 不为 null 意味着用户端此刻打不开地图，需要发一版新的把快照重写。
+   */
+  incompatibleReason: string | null;
+}
+
+function countOf(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function objectOf(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+/**
+ * 当前线上版本摘要，**解析失败也照样返回**。
+ *
+ * 不复用 getOptionalCurrentRelease 的原因是一个死锁：那条路径整份走 exactObject
+ * 校验，快照里多一个未知字段就抛（2026-08-12 的 boundMap* 即如此）。而重写坏快照
+ * 的唯一手段就是在发布中心发新版——若发布中心自己因为读不动坏快照而整页报错，
+ * 发版入口就被它本该修的东西挡住了。
+ *
+ * 所以这里只挑展示用的几个字段、逐个判类型，另把契约错误作为数据（而不是异常）
+ * 带出来，让页面显式提示「发一版即可恢复」。
+ */
+export async function getAdminReleaseSummary(signal?: AbortSignal): Promise<AdminReleaseSummary | null> {
+  let raw: unknown;
+  try {
+    raw = await apiFetch<unknown>("/api/public/releases/current", { signal });
+  } catch (error) {
+    if (error instanceof ApiError && error.isReleaseUnavailable) return null;
+    throw error;
+  }
+  let incompatibleReason: string | null = null;
+  try {
+    parseReleaseManifest(raw);
+  } catch (error) {
+    incompatibleReason = error instanceof Error ? error.message : String(error);
+  }
+  const root = objectOf(raw);
+  const release = objectOf(root.release);
+  return {
+    version: typeof release.version === "string" ? release.version : "未知版本",
+    createdAt: typeof release.createdAt === "string" ? release.createdAt : "",
+    counts: {
+      places: countOf(root.places),
+      facilities: countOf(root.facilities),
+      merchants: countOf(root.merchants),
+      maps: countOf(root.maps),
+    },
+    incompatibleReason,
+  };
+}
+
 /** GET /api/public/releases/:id — immutable versioned artifact. */
 export async function getRelease(releaseId: string, signal?: AbortSignal): Promise<ReleaseManifest> {
   const value = await apiFetch<unknown>(`/api/public/releases/${encodeURIComponent(releaseId)}`, { signal });
