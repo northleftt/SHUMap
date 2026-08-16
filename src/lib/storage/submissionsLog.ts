@@ -1,4 +1,5 @@
 import { getSubmissionStatus, type ServerSubmissionStatus } from "../api/public";
+import { useCallback, useRef } from "react";
 import { useLocalStore } from "./localStore";
 
 const KEY = "shumap.submissions-log";
@@ -37,6 +38,32 @@ export function useSubmissionsLog(): {
   refreshStatuses: () => Promise<void>;
 } {
   const [submissions, setSubmissions] = useLocalStore<LocalSubmission[]>(KEY, []);
+  // 最新记录走 ref：refreshStatuses 必须是稳定引用，否则消费者把它放进
+  // useEffect 依赖时每次渲染都会重跑（进而再触发请求）。
+  const submissionsRef = useRef(submissions);
+  submissionsRef.current = submissions;
+  const refreshStatuses = useCallback(async () => {
+    // 只查未终态的最近 20 条：老记录基本不会再变，全部轮询只是给限流添堵。
+    const unsettled = submissionsRef.current.filter((item) => !isSettled(item.status)).slice(0, 20);
+    if (unsettled.length === 0) return;
+    const updates = new Map<string, LocalSubmissionStatus>();
+    await Promise.all(
+      unsettled.map(async (item) => {
+        try {
+          const remote = await getSubmissionStatus(item.id);
+          if (remote.status !== item.status) updates.set(item.id, remote.status);
+        } catch {
+          // 404（服务端数据被清）/ 网络失败都保持本地现状，下次再试。
+        }
+      }),
+    );
+    if (updates.size > 0) {
+      setSubmissions((prev) => prev.map((item) => {
+        const next = updates.get(item.id);
+        return next ? { ...item, status: next } : item;
+      }));
+    }
+  }, [setSubmissions]);
   return {
     submissions,
     addSubmission: (entry) =>
@@ -44,27 +71,6 @@ export function useSubmissionsLog(): {
         { ...entry, status: entry.status ?? "pending", createdAt: new Date().toISOString() },
         ...prev,
       ]),
-    refreshStatuses: async () => {
-      // 只查未终态的最近 20 条：老记录基本不会再变，全部轮询只是给限流添堵。
-      const unsettled = submissions.filter((item) => !isSettled(item.status)).slice(0, 20);
-      if (unsettled.length === 0) return;
-      const updates = new Map<string, LocalSubmissionStatus>();
-      await Promise.all(
-        unsettled.map(async (item) => {
-          try {
-            const remote = await getSubmissionStatus(item.id);
-            if (remote.status !== item.status) updates.set(item.id, remote.status);
-          } catch {
-            // 404（服务端数据被清）/ 网络失败都保持本地现状，下次再试。
-          }
-        }),
-      );
-      if (updates.size > 0) {
-        setSubmissions((prev) => prev.map((item) => {
-          const next = updates.get(item.id);
-          return next ? { ...item, status: next } : item;
-        }));
-      }
-    },
+    refreshStatuses,
   };
 }
