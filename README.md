@@ -70,7 +70,7 @@ npm run maps:upload:canonical
 - `RELEASE_COORDINATOR`：发布协调 Durable Object
 - `ASSETS`：前端构建产物
 
-生产发布前需要设置 `SESSION_PEPPER`。管理员初始化密钥按部署环境单独配置。
+生产入口是 `https://map.shutf.com`（Workers Custom Domain，zone `shutf.com`）。发布前需要设置 `SESSION_PEPPER`。管理员初始化密钥按部署环境单独配置。
 
 ## 目录
 

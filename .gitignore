@@ -2,6 +2,7 @@ node_modules/
 dist/
 tmp/
 output/
+tests/.cache/
 __pycache__/
 *.pyc
 .DS_Store
@@ -17,3 +18,13 @@ m1-check.png
 map-check.png
 admin-login.png
 final-*.jpeg
+
+# 根目录的设计源文件与品牌素材：留在磁盘上供设计/验收用，但体积大（358MB），
+# 不进 git。返校指南的正稿走 public/guide 与 R2，不依赖这里的 .ai 源。
+/返校指南2025秋/
+/shumaps.ai
+/shumaps.png
+/shumaps小程序码.png
+
+# 微信开发者工具的本机私有配置（官方建议不提交）。
+miniprogram/project.private.config.json

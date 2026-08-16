@@ -1,0 +1,36 @@
+{
+  // 个人号（wangyixuan163@163.com / 312d0179…）旧 Worker 的下线配置。
+  //
+  // 为什么单独一份配置：仓库根 wrangler.jsonc 里写死了 account_id=400623…（公共号，
+  // 也就是正式站）。那个字段优先级高于 CLOUDFLARE_ACCOUNT_ID 环境变量——在根目录
+  // 导出环境变量再跑 wrangler，请求仍然打到 /accounts/400623…/，也就是打到线上。
+  // 所以下线个人号必须显式 -c 指到这份配置，绝不能在根目录 --name shumap 操作。
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "shumap",
+  "account_id": "312d017aa107640cd40f503f805175c3",
+  "main": "./offline.ts",
+  "compatibility_date": "2026-05-28",
+  "workers_dev": true,
+
+  // 个人号上已存在 ReleaseCoordinator 的 DO 命名空间。上传新版本时脚本必须继续
+  // 导出同名类并保留绑定，否则 Cloudflare 拒绝（code 10064：新版本不导出被现存
+  // Durable Objects 依赖的类）。offline.ts 里那个类是只回 410 的空壳。
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELEASE_COORDINATOR",
+        "class_name": "ReleaseCoordinator"
+      }
+    ]
+  },
+
+  // tag 必须与根 wrangler.jsonc 完全一致：个人号那份 shumap 当初就是从本仓库部署的，
+  // 这个 tag 在该账号上已经应用过，照抄即为 no-op。改名或换成 delete_classes 都会
+  // 真的动 DO 命名空间（后者不可逆），封存期不需要。
+  "migrations": [
+    {
+      "tag": "v2-release-coordinator",
+      "new_sqlite_classes": ["ReleaseCoordinator"]
+    }
+  ]
+}
