@@ -513,6 +513,33 @@ test("re-uploading the same key replaces the artwork without adding a second key
 //      三个字段，字段改名会让下拉静默清空。
 // ---------------------------------------------------------------------------
 
+function rasterRequest(body, contentType = "image/jpeg") {
+  return new Request("https://example.test/api/admin/guide/assets/scene-photo?kind=figure_png", {
+    method: "PUT",
+    headers: { "content-type": contentType },
+    body,
+  });
+}
+
+test("uploaded JPEG scene photos can be read back from the public asset URL", async () => {
+  // 编辑器按魔术字节收 JPEG（手机实景照的自然格式），曾只在读端放行 svg/png，
+  // 结果 PUT 201、「已配图」写进草稿，预览却裂图。
+  const e = env(database());
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+  const put = await guide.uploadGuideAsset(rasterRequest(jpeg), e, principal, "scene-photo", "req_1");
+  assert.equal(put.status, 201);
+  const created = await payload(put);
+  assert.equal(created.contentType, "image/jpeg");
+
+  const get = await guide.getPublicGuideAsset(
+    new Request("https://example.test/api/public/guide-assets/scene-photo"),
+    e,
+    "scene-photo",
+  );
+  assert.equal(get.status, 200, "公开读必须放行已入库的 JPEG，不能 500 裂图");
+  assert.equal(get.headers.get("content-type"), "image/jpeg");
+});
+
 test("asset responses revalidate instead of caching immutably", async () => {
   const sqlite = database();
   const e = env(sqlite);

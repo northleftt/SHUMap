@@ -37,7 +37,9 @@ test("a 404 from the guide API means unpublished, never a seed fallback", () => 
 });
 
 test("print styles stay at paper-readable sizes", () => {
-  const printBlock = styles.slice(styles.indexOf("@media print"));
+  // 版式规则常显（编辑器排版预览与真实打印共用同一套，见 guide-print-layout.js），
+  // 不再包在 @media print 里 —— 从 @page 起切片，覆盖全部打印版式与打印媒体块。
+  const printBlock = styles.slice(styles.indexOf("@page"));
   const sizes = [...printBlock.matchAll(/font-size:(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]));
   assert.ok(sizes.length > 10, "打印样式里应有一批显式字号");
   const min = Math.min(...sizes);

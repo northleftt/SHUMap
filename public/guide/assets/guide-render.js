@@ -16,6 +16,7 @@
  *   buildPrintRoot(data)             → 打印/PDF 用的离屏文档树
  *   h / esc / RAIL / HOT_REF / lineColor / lineIcon → 供编辑器复用的图元
  *   toast / closePop / openPop       → 交互反馈
+ *   openImageViewer / closeImageViewer → 枢纽简图与实景照全屏查看
  */
 window.GuideRender = (function () {
   "use strict";
@@ -527,6 +528,7 @@ window.GuideRender = (function () {
     var o = opts || {};
     var wrap = h("div", { class: "gc-figwrap" });
     var img = h("img", {
+      class: "gc-zoomable",
       src: ASSET_BASE + encodeURIComponent(card.figure),
       alt: card.title || "图示",
       loading: "lazy", decoding: "async",
@@ -585,24 +587,32 @@ window.GuideRender = (function () {
   /* 步骤内容体：steps 卡片与枢纽 sceneGuide 共用（intro + 小节 + pending）
      图文混排：step.figure（字符串或数组）画在步骤文字上方；某一步有图时
      整个小节的步骤列表切双列网格（对齐原稿实景指引版式）。
-     section.figures 是小节级照片（如上海站的出站口指示牌），带说明文字。 */
+     section.figures 是小节级照片（如上海站的出站口指示牌），带说明文字。
+     图片尺寸可调：figures[i].w / steps[i].figW 是百分比（默认 100），渲染时
+     直接生效（前台 / 编辑器 / PDF 同一棵树）；hubId 非空时标注 data-fig-path
+     回溯位置（hubId|小节序|figures|steps|图序），编辑器悬停工具靠它写回数据。 */
   function figureSrc(ref) {
     if (/^(https?:|data:|\/)/.test(ref)) return ref;
     return ASSET_BASE + encodeURIComponent(ref);
   }
-  function stepFigs(ref) {
+  function stepFigs(ref, w, path) {
     var srcs = Array.isArray(ref) ? ref : [ref];
-    return h("span", { class: "gc-step__figs" }, srcs.map(function (s) {
-      return h("img", { class: "gc-step__fig", src: figureSrc(s), alt: "实景照片",
+    return h("span", {
+      class: "gc-step__figs",
+      style: w && w < 100 ? "width:" + w + "%" : null,
+      dataset: path ? { figPath: path } : undefined,
+    }, srcs.map(function (s) {
+      return h("img", { class: "gc-step__fig gc-zoomable", src: figureSrc(s), alt: "实景照片",
         loading: "lazy", decoding: "async" });
     }));
   }
-  function renderStepsBody(obj, campusId, campuses) {
+  function renderStepsBody(obj, campusId, campuses, hubId) {
     var body = h("div", { class: "gc-steps" });
     if (obj.intro) body.appendChild(h("div", { class: "gc-steps__intro", text: obj.intro }));
 
-    (obj.sections || []).filter(function (sec) { return appliesTo(sec, campusId); })
-      .forEach(function (sec) {
+    /* 不过滤直接迭代（内部按 appliesTo 跳过），保留数据里的真实下标供回溯标注 */
+    (obj.sections || []).forEach(function (sec, si) {
+      if (!appliesTo(sec, campusId)) return;
       var box = h("section", { class: "gc-sec", dataset: { accent: sec.accent || "" } });
       if (sec.title)
         box.appendChild(h("h4", { class: "gc-sec__t", text: sec.title },
@@ -610,9 +620,13 @@ window.GuideRender = (function () {
           !campusId && sec.campuses && sec.campuses.length
             ? campusTag(campuses, sec.campuses) : null));
       if (sec.figures && sec.figures.length)
-        box.appendChild(h("div", { class: "gc-secfigs" }, sec.figures.map(function (f) {
-          return h("figure", { class: "gc-secfig" },
-            h("img", { src: figureSrc(f.src), alt: f.caption || "实景照片",
+        box.appendChild(h("div", { class: "gc-secfigs" }, sec.figures.map(function (f, fi) {
+          return h("figure", {
+            class: "gc-secfig",
+            style: f.w && f.w < 100 ? "width:" + f.w + "%;margin-left:auto;margin-right:auto" : null,
+            dataset: hubId ? { figPath: hubId + "|" + si + "|figures|" + fi } : undefined,
+          },
+            h("img", { class: "gc-zoomable", src: figureSrc(f.src), alt: f.caption || "实景照片",
               loading: "lazy", decoding: "async" }),
             f.caption ? h("figcaption", { class: "gc-secfig__cap", text: f.caption }) : null);
         })));
@@ -620,9 +634,10 @@ window.GuideRender = (function () {
       var list = h(sec.bare && !hasFigs ? "div" : "ol", {
         class: "gc-sec__list" + (hasFigs ? " gc-sec__list--grid" : ""),
       });
-      (sec.steps || []).forEach(function (st) {
+      (sec.steps || []).forEach(function (st, ti) {
         list.appendChild(h(sec.bare && !hasFigs ? "div" : "li", { class: "gc-step" },
-          st.figure ? stepFigs(st.figure) : null,
+          st.figure ? stepFigs(st.figure, st.figW,
+            hubId ? hubId + "|" + si + "|steps|" + ti : null) : null,
           h("span", { class: "gc-step__t", text: st.text }),
           st.note ? h("span", { class: "gc-step__n", text: st.note }) : null
         ));
@@ -692,7 +707,7 @@ window.GuideRender = (function () {
     if (!shown.length) return null;
     var body = h("div", { class: "gc-hubfigs" }, shown.map(function (f) {
       var img = h("img", {
-        class: "gc-hub-fig",
+        class: "gc-hub-fig gc-zoomable",
         src: figureSrc(f.src),
         alt: (hub.name || "") + " 枢纽指引图",
         loading: "lazy", decoding: "async",
@@ -721,7 +736,10 @@ window.GuideRender = (function () {
     var videos = allVideos.filter(function (v) { return appliesTo(v, campusId); });
     var kids = [];
     if (hasScene)
-      kids.push(renderStepsBody({ intro: sg.intro, sections: secs, pending: sg.pending }, campusId, campuses));
+      /* 传原始 sections（renderStepsBody 内部再按方向过滤），保留下标做
+         data-fig-path 回溯标注；hub.id 用于编辑器定位数据写回 */
+      kids.push(renderStepsBody({ intro: sg.intro, sections: sg.sections, pending: sg.pending },
+        campusId, campuses, hub.id));
     videos.forEach(function (gv) {
       var entry = h("button", {
         class: "gc-video-entry", type: "button",
@@ -771,11 +789,19 @@ window.GuideRender = (function () {
   }
 
   /* 备注：hub.remark 经白名单消毒后渲染。空备注在前台返回 null（不渲染），
-     编辑器传 opts.placeholder 可换成虚线占位。 */
+     编辑器传 opts.placeholder 可换成虚线占位。
+     判空看「可见内容」而不是 HTML 字符串：富文本残留的空段落（<p><br></p>、
+     一堆空 div）trim 后非空但纸上就是个空框 —— 没有文字也没有图就当没有备注。 */
   function renderRemark(hub, opts) {
     var o = opts || {};
     var html = hub && hub.remark ? sanitizeRichHtml(hub.remark) : "";
-    if (!html.trim()) {
+    var hasContent = false;
+    if (html.trim()) {
+      var probe = h("div");
+      probe.innerHTML = html;
+      hasContent = !!probe.textContent.trim() || !!probe.querySelector("img");
+    }
+    if (!hasContent) {
       if (!o.placeholder) return null;
       return h("section", { class: "gc-hub-sec" }, hubSecTitle("备注"),
         h("div", { class: "gc-placeholder",
@@ -783,6 +809,10 @@ window.GuideRender = (function () {
     }
     var box = h("div", { class: "gc-remark" });
     box.innerHTML = html;
+    if (box.querySelectorAll) {
+      var remarkImgs = box.querySelectorAll("img[src]");
+      for (var ri = 0; ri < remarkImgs.length; ri++) remarkImgs[ri].classList.add("gc-zoomable");
+    }
     return h("section", { class: "gc-hub-sec" }, hubSecTitle("备注"), box);
   }
 
@@ -876,7 +906,7 @@ window.GuideRender = (function () {
     );
 
     hubs.forEach(function (hub) {
-      var sec = h("section", { class: "gc-print-hub" });
+      var sec = h("section", { class: "gc-print-hub", "data-hub-id": hub.id });
       sec.appendChild(h("div", {
         class: "gc-print-hubband", style: "background:" + (hub.color || "#465060"),
       },
@@ -904,7 +934,13 @@ window.GuideRender = (function () {
         sec.appendChild(h("h3", { class: "gc-print-subhead",
           text: hub.name + " → " + (camp.label || camp.id) }));
         var box = h("div", { class: "gc-print-cards" });
-        cards.forEach(function (c) { box.appendChild(renderCard(c, d)); });
+        /* data-card-id 供排版工具（guide-print-layout.js）把打印块映射回数据，
+           屏幕端编辑器预览本来就带，打印树补上保持两棵树可同套路由 */
+        cards.forEach(function (c) {
+          var cardEl = renderCard(c, d);
+          cardEl.dataset.cardId = c.id;
+          box.appendChild(cardEl);
+        });
         sec.appendChild(box);
       });
       /* 只有色带、没有任何实质内容的枢纽（如未维护的附录）整节不印 */
@@ -990,7 +1026,9 @@ window.GuideRender = (function () {
   document.addEventListener("click", function (e) {
     if (popEl && !popEl.contains(e.target)) closePop();
   });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") { closePop(); closeVideoLayer(); } });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { closePop(); closeVideoLayer(); closeImageViewer(); }
+  });
 
   /* 调起打印前等打印树里的图片就绪（load/error 都算了结，4s 超时兜底）。
      buildPrintRoot 已把 lazy 摘掉，正常情况下 append 后很快就全部 complete，
@@ -1013,6 +1051,150 @@ window.GuideRender = (function () {
     }
   }
 
+  /* ══════════════ 图片查看器（手机 H5 / 编辑器预览共用） ══════════════
+   * 点枢纽简图或实景照打开全屏；再点图片在 1x / 2.5x 间切换；双指捏合
+   * 连续缩放；点暗处或 ✕ 关闭。打印树不挂。 */
+  var VIEWER_MIN = 1;
+  var VIEWER_MAX = 5;
+  var VIEWER_TOGGLE = 2.5;
+  var VIEWER_SLOP = 8;
+  var viewer = {
+    el: null, img: null, scale: 1, tx: 0, ty: 0,
+    start: null, moved: false, fromTouch: false,
+  };
+
+  function clampViewerScale(s) {
+    return Math.min(VIEWER_MAX, Math.max(VIEWER_MIN, s));
+  }
+  function applyViewerTransform() {
+    if (!viewer.img) return;
+    viewer.img.style.transform =
+      "translate(" + viewer.tx + "px," + viewer.ty + "px) scale(" + viewer.scale + ")";
+  }
+  function viewerTouchDist(a, b) {
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  }
+  function ensureImageViewer() {
+    if (viewer.el) return viewer.el;
+    if (!document.body || !document.createElement) return null;
+    var el = h("div", { class: "gc-lightbox", hidden: "hidden" });
+    if (typeof el.addEventListener !== "function") return null;
+    var stage = h("div", { class: "gc-lightbox__stage" });
+    var img = h("img", { class: "gc-lightbox__img", alt: "查看图片" });
+    var close = h("button", { class: "gc-lightbox__x", type: "button", text: "✕" });
+    var hint = h("div", { class: "gc-lightbox__hint", text: "点击放大/缩小 · 双指缩放" });
+    stage.appendChild(img);
+    el.appendChild(stage);
+    el.appendChild(close);
+    el.appendChild(hint);
+    close.addEventListener("click", function (e) { e.stopPropagation(); closeImageViewer(); });
+    el.addEventListener("click", function (e) {
+      if (e.target === el || e.target === stage) closeImageViewer();
+    });
+    img.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (viewer.fromTouch) { viewer.fromTouch = false; return; }
+      if (viewer.moved) return;
+      viewer.scale = viewer.scale > 1.05 ? VIEWER_MIN : VIEWER_TOGGLE;
+      viewer.tx = 0; viewer.ty = 0;
+      applyViewerTransform();
+    });
+    stage.addEventListener("touchstart", onViewerTouchStart, { passive: false });
+    stage.addEventListener("touchmove", onViewerTouchMove, { passive: false });
+    stage.addEventListener("touchend", onViewerTouchEnd);
+    stage.addEventListener("touchcancel", onViewerTouchEnd);
+    stage.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var next = clampViewerScale(viewer.scale * (e.deltaY < 0 ? 1.12 : 1 / 1.12));
+      viewer.scale = next;
+      if (next <= 1.01) { viewer.tx = 0; viewer.ty = 0; }
+      applyViewerTransform();
+    }, { passive: false });
+    document.body.appendChild(el);
+    viewer.el = el;
+    viewer.img = img;
+    return el;
+  }
+  function onViewerTouchStart(e) {
+    var t = e.touches;
+    if (!t.length) return;
+    viewer.moved = t.length >= 2;
+    viewer.start = {
+      scale: viewer.scale, tx: viewer.tx, ty: viewer.ty,
+      x: t[0].clientX, y: t[0].clientY,
+      dist: t.length >= 2 ? viewerTouchDist(t[0], t[1]) : 0,
+      pinch: t.length >= 2,
+    };
+    if (t.length >= 2) e.preventDefault();
+  }
+  function onViewerTouchMove(e) {
+    var t = e.touches;
+    var s = viewer.start;
+    if (!s || !t.length) return;
+    if (t.length >= 2) {
+      e.preventDefault();
+      var dist = viewerTouchDist(t[0], t[1]);
+      var startDist = s.dist > 0 ? s.dist : dist;
+      viewer.moved = true;
+      viewer.scale = clampViewerScale(s.scale * (dist / startDist));
+      applyViewerTransform();
+      return;
+    }
+    var dx = t[0].clientX - s.x;
+    var dy = t[0].clientY - s.y;
+    if (Math.hypot(dx, dy) > VIEWER_SLOP) viewer.moved = true;
+    if (viewer.scale > 1.01) {
+      e.preventDefault();
+      viewer.tx = s.tx + dx;
+      viewer.ty = s.ty + dy;
+      applyViewerTransform();
+    }
+  }
+  function onViewerTouchEnd(e) {
+    if (e.touches && e.touches.length >= 1) {
+      onViewerTouchStart(e);
+      return;
+    }
+    var wasTap = !viewer.moved && viewer.start && !viewer.start.pinch;
+    viewer.start = null;
+    if (!wasTap) return;
+    viewer.fromTouch = true;
+    if (e.target === viewer.img) {
+      viewer.scale = viewer.scale > 1.05 ? VIEWER_MIN : VIEWER_TOGGLE;
+      viewer.tx = 0; viewer.ty = 0;
+      applyViewerTransform();
+    } else {
+      closeImageViewer();
+    }
+  }
+  function openImageViewer(src) {
+    if (!src || !ensureImageViewer()) return;
+    viewer.scale = 1; viewer.tx = 0; viewer.ty = 0; viewer.moved = false;
+    viewer.img.src = src;
+    applyViewerTransform();
+    viewer.el.removeAttribute("hidden");
+    viewer.el.setAttribute("data-open", "1");
+  }
+  function closeImageViewer() {
+    if (!viewer.el) return;
+    viewer.el.setAttribute("hidden", "hidden");
+    viewer.el.removeAttribute("data-open");
+    viewer.scale = 1; viewer.tx = 0; viewer.ty = 0;
+    if (viewer.img) viewer.img.removeAttribute("src");
+  }
+  function onZoomableClick(e) {
+    var t = e.target;
+    if (!t || t.tagName !== "IMG") return;
+    if (!/(?:^|\s)gc-zoomable(?:\s|$)/.test(t.className || "")) return;
+    if (t.closest && t.closest(".gc-print-root,.gc-lightbox")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openImageViewer(t.currentSrc || t.src);
+  }
+  if (document.addEventListener) {
+    document.addEventListener("click", onZoomableClick, true);
+  }
+
   return {
     h: h, esc: esc, RAIL: RAIL, HOT_REF: HOT_REF,
     lineColor: lineColor, lineIcon: lineIcon,
@@ -1028,5 +1210,6 @@ window.GuideRender = (function () {
     renderRemark: renderRemark, renderPairView: renderPairView,
     buildPrintRoot: buildPrintRoot, whenPrintReady: whenPrintReady,
     toast: toast, closePop: closePop, openPop: openPop,
+    openImageViewer: openImageViewer, closeImageViewer: closeImageViewer,
   };
 })();

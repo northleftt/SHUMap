@@ -48,6 +48,7 @@ test("guide-render.js exposes the documented window.GuideRender API", () => {
     "renderCard", "renderRouteCard", "renderFigureCard", "renderStepsCard",
     "renderHubGuide", "renderHubVideo", "renderRemark", "renderPairView",
     "buildPrintRoot", "lineColor", "esc", "h",
+    "openImageViewer", "closeImageViewer",
   ]) {
     assert.equal(typeof GR[key], "function", `GuideRender.${key} 缺失`);
   }
@@ -61,9 +62,12 @@ test("guide-styles.js exports window.GUIDE_CSS with the v2 class vocabulary", ()
   for (const cls of [".gc-card", ".gc-grid", ".gc-dest-chip", ".gc-mode-badge", ".gc-meta-chip",
     ".gc-flag", ".gc-sched", ".gc-note", ".gc-hub-sec", ".gc-placeholder", ".gc-remark",
     ".gc-camptag", ".gc-hubfigs",
-    ".gc-hot", ".gc-pop", ".gc-print-root", "#gc-screen", "@media print", "@page"]) {
+    ".gc-hot", ".gc-pop", ".gc-print-root", "#gc-screen", "@media print", "@page",
+    ".gc-lightbox", ".gc-zoomable"]) {
     assert.ok(css.includes(cls), `CSS 缺少 ${cls}`);
   }
+  assert.ok(css.includes("background:#fff") || css.includes("background: #fff"),
+    "灯箱里的 SVG 必须垫白底，不能透出深色遮罩");
   for (const retired of [".gc-cover", ".gc-pick", ".gc-toc", ".gc-acts", ".gc-act", "存图"]) {
     assert.ok(!css.includes(retired), `CSS 不应再含已删除的 ${retired}`);
   }

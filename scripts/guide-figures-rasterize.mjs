@@ -27,7 +27,7 @@ import sharp from "sharp";
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes("--dry-run");
 const apiIdx = args.indexOf("--api");
-const API = apiIdx >= 0 ? args[apiIdx + 1] : "https://shumap-api.kitahidari.com";
+const API = apiIdx >= 0 ? args[apiIdx + 1] : "https://map.shutf.com";
 const SLUG = process.env.GUIDE_SLUG || "freshman-transit";
 const DB = "shumap-v2";
 const BUCKET = "shumap-assets";

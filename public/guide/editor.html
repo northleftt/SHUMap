@@ -9,6 +9,7 @@
 <!-- 离线兜底种子：管理端 API 不可用（未登录 / 离线）时才用它，正式内容来自 D1 -->
 <script src="data/guide-seed.js"></script>
 <script src="assets/guide-render.js"></script>
+<script src="assets/guide-print-layout.js"></script>
 <script src="assets/guide-versions.js"></script>
 <style>
   /* v2 渲染层的 guide-styles.js 只带前台令牌，编辑器外壳缺的几个在这里补齐 */
@@ -107,6 +108,19 @@
 
   /* 顶栏按用途分组：状态区 / 数据 / 导出 / 版本。组间用竖线分隔。 */
   .ge-sep{width:1px;align-self:stretch;margin:4px 2px;background:var(--line);flex:none}
+  /* 排版预览：顶栏开关的开启态；分页工具条贴在块右上角，绝对定位不参与测量 */
+  #ge-layout[aria-pressed="true"]{border-color:var(--primary);color:var(--primary);
+    background:var(--primary-container)}
+  .ge-mini.is-on{border-color:var(--primary);color:var(--primary);
+    background:var(--primary-container)}
+  .ge-pgtool{position:absolute;top:4px;right:4px;z-index:4;display:none;gap:4px;
+    background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;
+    padding:3px;box-shadow:0 2px 8px rgba(15,23,42,.12)}
+  .gc-print-hubband:hover .ge-pgtool,.gc-print-page .gc-card:hover .ge-pgtool{display:flex}
+  /* 实况指引图片缩放工具：悬停小节照片 / 步骤配图出现 */
+  .gc-secfig[data-fig-path],.gc-step__figs[data-fig-path]{position:relative}
+  .gc-secfig[data-fig-path]:hover .ge-pgtool,
+  .gc-step__figs[data-fig-path]:hover .ge-pgtool{display:flex}
   .ge-doc{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:16px;
     color:#4d5865;letter-spacing:.02em;white-space:nowrap}
   .ge-doc__badge{font-size:10px;font-weight:600;letter-spacing:.04em;padding:2px 7px;
@@ -263,6 +277,7 @@
     <button type="button" class="gc-btn" id="ge-json">导出 JSON</button>
     <button type="button" class="gc-btn" id="ge-load">导入 JSON</button>
     <span class="ge-sep"></span>
+    <button type="button" class="gc-btn" id="ge-layout" aria-pressed="false">排版预览</button>
     <button type="button" class="gc-btn gc-btn--primary" id="ge-pdf">打印 / PDF</button>
     <span class="ge-sep"></span>
     <button type="button" class="gc-btn" id="ge-versions" aria-expanded="false"
@@ -345,6 +360,7 @@
     sel: null, selHot: null, open: {},
     pair: { hub: "", campus: "" },          // 画布当前预览的 枢纽 × 校区 组合
     fresh: { hub: "", campus: "" },         // 新建卡片用的两个下拉
+    layout: false,                          // 排版预览模式：画布显示 PDF 逐页稿
   };
 
   function loadLocal() {
@@ -615,6 +631,7 @@
   }
 
   function renderPreview() {
+    if (view.layout) { renderLayoutPreview(); return; }
     var body = document.getElementById("ge-canvas-body");
     var canvas = document.getElementById("ge-canvas");
     var keepScroll = canvas.scrollTop;
@@ -622,7 +639,136 @@
     R.renderPairView(body, data, view.pair.hub, view.pair.campus, opts);
     paintSelection(body);
     attachHotDrag(body);
+    attachFigResize(body);
     canvas.scrollTop = keepScroll;
+  }
+
+  /* ══════════════ 排版预览（PDF 逐页稿） ══════════════
+   * GuidePrintLayout 在真实打印宽度（186mm）下测量并显式分页，画布看到的
+   * 就是「打印 / PDF」的逐页结果。悬停色带/卡片右上角的工具条可调整：
+   *   新起一页 → hub.printBreakBefore / card.printBreakBefore
+   *   独占整行 → card.printSpan = 2（双列变整行，长图卡用）
+   * 设置写回数据，随自动保存进版本历史；超高块（比一页还高）标红告警。 */
+  var layoutTimer = null, layoutSeq = 0;
+  function renderLayoutPreview() {
+    var bar = document.getElementById("ge-pairbar");
+    bar.textContent = "";
+    bar.appendChild(h("span", { class: "ge-pairbar__l",
+      text: "排版预览 = PDF 逐页稿；悬停色带/卡片可调整分页、整行、疏密与图片大小，超高块会标红" }));
+    clearTimeout(layoutTimer);
+    layoutTimer = setTimeout(function () {
+      var seq = ++layoutSeq;
+      window.GuidePrintLayout.layout(data).then(function (res) {
+        if (seq !== layoutSeq || !view.layout) { return; }   // 过期结果丢弃
+        var body = document.getElementById("ge-canvas-body");
+        var canvas = document.getElementById("ge-canvas");
+        var keepScroll = canvas.scrollTop;
+        body.textContent = "";
+        res.root.classList.add("gc-on");
+        attachPageTools(res);
+        body.appendChild(res.root);
+        canvas.scrollTop = keepScroll;
+      });
+    }, 250);
+  }
+
+  function pageTool(items) {
+    var bar = h("div", { class: "ge-pgtool" });
+    items.forEach(function (it) {
+      var b = h("button", { type: "button",
+        class: "ge-mini" + (it.on ? " is-on" : ""), text: it.label });
+      b.addEventListener("click", function (e) {
+        e.preventDefault(); e.stopPropagation();
+        it.click();
+      });
+      bar.appendChild(b);
+    });
+    return bar;
+  }
+
+  function attachPageTools(res) {
+    var PL = window.GuidePrintLayout;
+    res.overflows.forEach(function (o) {
+      if (!o.ref || !o.ref.appendChild) return;
+      o.ref.appendChild(h("div", { class: "gc-print-overflow",
+        text: "超出页面约 " + Math.max(1, Math.round(o.hmm - PL.PAGE_H_MM)) +
+              "mm，请拆分内容" }));
+    });
+    res.root.querySelectorAll(".gc-print-hubband[data-hub-id]").forEach(function (band) {
+      var hub = hubById(band.getAttribute("data-hub-id"));
+      if (!hub) return;
+      band.appendChild(pageTool([{
+        label: "新起一页", on: !!hub.printBreakBefore,
+        click: function () {
+          if (hub.printBreakBefore) delete hub.printBreakBefore;
+          else hub.printBreakBefore = true;
+          persist(); renderPreview();
+        },
+      }]));
+    });
+    res.root.querySelectorAll(".gc-card[data-card-id]").forEach(function (cardEl) {
+      var c = cardById(cardEl.getAttribute("data-card-id"));
+      if (!c) return;
+      var DENSITY_NEXT = { "": "compact", compact: "loose", loose: "" };
+      var DENSITY_LABEL = { "": "密度·标准", compact: "密度·紧凑", loose: "密度·宽松" };
+      var tools = [
+        { label: "新起一页", on: !!c.printBreakBefore, click: function () {
+          if (c.printBreakBefore) delete c.printBreakBefore;
+          else c.printBreakBefore = true;
+          persist(); renderPreview();
+        } },
+        { label: "独占整行", on: c.printSpan === 2, click: function () {
+          c.printSpan = c.printSpan === 2 ? 1 : 2;
+          persist(); renderPreview();
+        } },
+        { label: DENSITY_LABEL[c.printDensity || ""], on: !!c.printDensity,
+          click: function () {
+            var next = DENSITY_NEXT[c.printDensity || ""];
+            if (next) c.printDensity = next; else delete c.printDensity;
+            persist(); renderPreview();
+          } },
+      ];
+      /* 图示卡：图片宽度 40%–100% 步进 10%，等比缩放（高度自适应） */
+      if (cardEl.querySelector(".gc-figwrap")) {
+        var imgW = function () { return Number(c.printImgW) || 100; };
+        var setImgW = function (w) {
+          w = Math.max(40, Math.min(100, w));
+          if (w >= 100) delete c.printImgW; else c.printImgW = w;
+          persist(); renderPreview();
+        };
+        tools.push({ label: "图−", on: imgW() < 100, click: function () { setImgW(imgW() - 10); } });
+        tools.push({ label: "图＋", on: false, click: function () { setImgW(imgW() + 10); } });
+      }
+      cardEl.appendChild(pageTool(tools));
+    });
+    attachFigResize(res.root);
+  }
+
+  /* 实况指引图片缩放：渲染层在 sceneGuide 图片上标了 data-fig-path
+     （hubId|小节序|figures|steps|图序），悬停出「图−/图＋」按 10% 步进，
+     写回 figures[i].w / steps[i].figW（100 即删除字段，恢复默认整宽）。
+     组合预览与排版预览共用 —— 两处调的是同一份数据，前台/PDF 同步生效。 */
+  function attachFigResize(root) {
+    root.querySelectorAll("[data-fig-path]").forEach(function (el) {
+      var parts = el.getAttribute("data-fig-path").split("|");
+      var hi = (data.hubs || []).findIndex(function (x) { return x.id === parts[0]; });
+      if (hi < 0) return;
+      var base = "hubs." + hi + ".sceneGuide.sections." + parts[1] + "." + parts[2] + "." + parts[3];
+      var field = parts[2] === "figures" ? "w" : "figW";
+      var getW = function () {
+        var v = Number(getPath(base + "." + field));
+        return v >= 30 && v < 100 ? v : 100;
+      };
+      var setW = function (w) {
+        w = Math.max(30, Math.min(100, w));
+        setPath(base + "." + field, w >= 100 ? undefined : w);
+        persist(); refresh();
+      };
+      el.appendChild(pageTool([
+        { label: "图−", on: getW() < 100, click: function () { setW(getW() - 10); } },
+        { label: "图＋", on: false, click: function () { setW(getW() + 10); } },
+      ]));
+    });
   }
 
   function paintSelection(root) {
@@ -1504,20 +1650,47 @@
         var fi = document.getElementById("ge-stepfig");
         fi.dataset.figuresPath = figuresPath;
         delete fi.dataset.path;
+        delete fi.dataset.stepFigArray;
+        fi.click();
+      };
+    }
+    function pickStepFigureArray(figurePath) {
+      return function () {
+        if (!server.online) return R.toast("离线模式下不能上传图片");
+        var fi = document.getElementById("ge-stepfig");
+        fi.dataset.stepFigArray = figurePath;
+        delete fi.dataset.path;
+        delete fi.dataset.figuresPath;
         fi.click();
       };
     }
     function stepFigControl(path, cur) {
-      var first = Array.isArray(cur) ? cur[0] : cur;
-      if (!first)
+      var list = Array.isArray(cur) ? cur : (cur ? [cur] : []);
+      if (!list.length)
         return h("div", { class: "ge-figrow" },
           h("button", { class: "ge-mini", type: "button", text: "+ 配图", onclick: pickFigure(path) }));
-      return h("div", { class: "ge-figrow" },
-        h("img", { class: "ge-figrow__thumb", src: R.figureSrc(first), alt: "" }),
-        h("span", { class: "ge-hint", text: Array.isArray(cur) ? cur.length + " 张图" : "已配图" }),
-        h("button", { class: "ge-mini", type: "button", text: "替换", onclick: pickFigure(path) }),
-        h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "清除",
-          onclick: function () { setPath(path, null); persist(); refresh(); } }));
+      var wrap = h("div", null);
+      list.forEach(function (src, i) {
+        wrap.appendChild(h("div", { class: "ge-figrow" },
+          h("img", { class: "ge-figrow__thumb", src: R.figureSrc(src), alt: "" }),
+          h("span", { class: "ge-hint", text: "图 " + (i + 1) }),
+          h("button", { class: "ge-mini", type: "button", text: "替换",
+            onclick: pickFigure(Array.isArray(cur) ? path + "." + i : path) }),
+          h("button", { class: "ge-mini ge-mini--danger", type: "button", text: "✕", title: "删除这张图",
+            onclick: function () {
+              if (Array.isArray(cur)) {
+                cur.splice(i, 1);
+                if (!cur.length) setPath(path, null);
+              } else {
+                setPath(path, null);
+              }
+              persist(); refresh();
+            } })));
+      });
+      wrap.appendChild(h("div", { class: "ge-figrow" },
+        h("span", { class: "ge-hint", text: list.length + " 张图" }),
+        h("button", { class: "ge-mini", type: "button", text: "+ 再加一张", onclick: pickStepFigureArray(path) })));
+      return wrap;
     }
 
     (owner.sections || []).forEach(function (sec, si) {
@@ -2155,15 +2328,26 @@
     e.target.value = "";
   });
 
-  /* 打印 / PDF：打印树由渲染层 buildPrintRoot 离屏构建（标题页 + 每枢纽一节），
-     屏幕 UI 整棵在 #gc-screen 里，打印 CSS 自动切换显隐。 */
+  /* 排版预览开关：画布在「枢纽 × 校区组合」与「PDF 逐页稿」之间切换 */
+  document.getElementById("ge-layout").addEventListener("click", function () {
+    view.layout = !view.layout;
+    this.setAttribute("aria-pressed", view.layout ? "true" : "false");
+    renderPreview();
+  });
+
+  /* 打印 / PDF：经 GuidePrintLayout 显式分页后再打印 —— 输出与「排版预览」
+     逐页一致。打印树挂 body 直属（屏幕隐藏、打印显示）；画布里的预览树随
+     #gc-screen 整体隐藏，不会重复打印。 */
   document.getElementById("ge-pdf").addEventListener("click", function () {
-    var old = document.querySelector(".gc-print-root");
-    if (old) old.remove();
-    var root = R.buildPrintRoot(data);
-    document.body.appendChild(root);
-    R.toast("打印对话框里选「另存为 PDF」，卡片不会被切断");
-    R.whenPrintReady(root, function () { window.print(); });
+    document.querySelectorAll("body > .gc-print-root").forEach(function (n) { n.remove(); });
+    R.toast("正在排版…");
+    window.GuidePrintLayout.layout(data).then(function (res) {
+      document.body.appendChild(res.root);
+      R.toast(res.overflows.length
+        ? "有 " + res.overflows.length + " 块内容比一页还高，PDF 里会被截断，建议开「排版预览」处理"
+        : "打印对话框里选「另存为 PDF」，分页与排版预览一致");
+      R.whenPrintReady(res.root, function () { window.print(); });
+    });
   });
 
   document.getElementById("ge-reset").addEventListener("click", function () {
@@ -2301,10 +2485,12 @@
     var f = fi.files && fi.files[0];
     var path = fi.dataset.path || "";
     var figuresPath = fi.dataset.figuresPath || "";
+    var stepFigArray = fi.dataset.stepFigArray || "";
     delete fi.dataset.path;
     delete fi.dataset.figuresPath;
+    delete fi.dataset.stepFigArray;
     fi.value = "";
-    if (!f || (!path && !figuresPath)) return;
+    if (!f || (!path && !figuresPath && !stepFigArray)) return;
     if (!server.online) return R.toast("离线模式下不能上传图片");
     var key = ("scene-img-" + Date.now().toString(36))
       .replace(/[^a-z0-9-]/g, "-").slice(0, 62);
@@ -2318,6 +2504,12 @@
         if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
         if (path) {
           setPath(path, key);
+        } else if (stepFigArray) {
+          /* 步骤多图追加：figure 字段规范成数组后 push 字符串 key */
+          var cur = getPath(stepFigArray);
+          var list = Array.isArray(cur) ? cur : (cur ? [cur] : []);
+          setPath(stepFigArray, list);
+          list.push(key);
         } else {
           var list = getPath(figuresPath);
           if (!list) { setPath(figuresPath, []); list = getPath(figuresPath); }

@@ -177,8 +177,8 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
 .gc-sec__list--grid .gc-step{counter-increment:gstep}
 .gc-sec__list--grid .gc-step__t::before{content:counter(gstep) ". ";
   color:var(--primary);font-weight:600}
-.gc-step__figs{display:flex;gap:6px;margin-bottom:6px}
-.gc-step__fig{flex:1 1 0;min-width:0;width:100%;height:auto;border-radius:var(--r-sm);
+.gc-step__figs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.gc-step__fig{flex:1 1 30%;min-width:0;aspect-ratio:4/3;height:auto;border-radius:var(--r-sm);
   border:1px solid var(--line);object-fit:cover}
 @media screen and (max-width:640px){
   .gc-sec__list--grid{grid-template-columns:1fr}
@@ -280,6 +280,20 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   background:rgba(15,23,42,.92);color:#fff;font-size:13px;font-weight:500;
   padding:10px 18px;border-radius:999px;box-shadow:var(--shadow-hover);
   max-width:86vw;text-align:center}
+.gc-zoomable{cursor:zoom-in}
+.gc-lightbox{position:fixed;inset:0;z-index:120;background:rgba(15,23,42,.92);
+  touch-action:none}
+.gc-lightbox[hidden]{display:none!important}
+.gc-lightbox__stage{position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center}
+.gc-lightbox__img{max-width:100%;max-height:100%;object-fit:contain;
+  background:#fff;border-radius:8px;
+  transform-origin:center center;cursor:zoom-in;user-select:none;-webkit-user-drag:none}
+.gc-lightbox__x{position:absolute;top:max(12px,env(safe-area-inset-top));right:14px;
+  width:36px;height:36px;border:0;border-radius:18px;background:rgba(15,23,42,.45);
+  color:#fff;font-size:18px;line-height:36px;cursor:pointer}
+.gc-lightbox__hint{position:absolute;left:0;right:0;bottom:max(20px,env(safe-area-inset-bottom));
+  text-align:center;font-size:12px;color:rgba(255,255,255,.72);pointer-events:none}
 
 /* ══════════════ 手机 ══════════════ */
 @media screen and (max-width:640px){
@@ -289,88 +303,125 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   .gc-hub-sec{margin-top:22px}
 }
 
-/* ══════════════ 打印 / PDF ══════════════
- * 屏幕 UI 包在 #gc-screen 里；.gc-print-root 由 buildPrintRoot 离屏构建、
- * viewer append 一次。打印时隐藏屏幕树、显示打印树，版式：A4 纵向，
- * 标题页单独一页，之后枢纽之间用色带自然衔接（不强制每枢纽一页，
- * 否则一卡枢纽会留下大半页空白），卡片双列 inline-block 逐行填充。 */
-.gc-print-root{display:none}
+/* ══════════════ 打印 / PDF 版式 ══════════════
+ * 版式规则常显（不包在 @media print 里）：编辑器「排版预览」在屏幕上用同一套
+ * 规则测量与渲染，打印输出 = 预览逐页内容，所见即所得。分页不再交给打印引擎 ——
+ * guide-print-layout.js 在 186mm（A4 减 12mm×2 边距）实宽下量出每个块的高度，
+ * 显式装进一页一页 .gc-print-page；卡片双列配对也在 JS 里固定，不会再出现
+ * 某张卡被挤到下一页后整列配对漂移的错版。@media print 只剩显隐与断页切换。
+ * 屏幕端 .gc-print-root 默认隐藏，排版预览加 .gc-on 显示。 */
+.gc-print-root{display:none;color:#0f172a}
+.gc-print-root.gc-on{display:block}
 @page{size:A4;margin:12mm}
+
+/* 标题页：标题 + 版本行 + 枢纽 × 校区路线数矩阵（排版模块里独占第 1 页） */
+.gc-print-title{padding-top:20mm}
+.gc-print-title__t{margin:0;font-size:34px;font-weight:700;line-height:42px;
+  letter-spacing:-.02em}
+.gc-print-title__s{font-size:20px;font-weight:500;line-height:30px;
+  color:#334155;margin-top:4mm}
+.gc-print-title__e{font-size:12px;line-height:18px;color:#64748b;margin-top:6mm;
+  padding-bottom:8mm;border-bottom:2px solid #1e80c1}
+.gc-print-matrix__cap{font-size:15px;font-weight:600;margin:12mm 0 4mm}
+.gc-print-matrix{border-collapse:collapse;width:100%}
+.gc-print-matrix th,.gc-print-matrix td{border:1px solid #cbd5e1;
+  padding:6px 8px;font-size:13px;line-height:19px;text-align:center}
+.gc-print-matrix th{background:#f1f5f9;font-weight:600}
+.gc-print-matrix__hub{text-align:left;font-weight:600}
+
+/* 枢纽之间色带衔接、自然分页：不强制每枢纽一页起 —— 内容少的枢纽
+   （一两张卡）曾经一枢纽占一整页，空白比内容多。色带自身不跨页；
+   「不孤悬页尾」由排版模块的 keepWithNext 保证（色带与后继内容同页）。
+   枢纽间距从 .gc-print-hub 外壳挪到色带 margin-top：显式分页后块直接挂在
+   页容器下，外壳不复存在；页首的色带不吃这个间距。 */
+.gc-print-hubband{position:relative;color:#fff;padding:9px 15px;border-radius:8px;
+  font-size:18px;font-weight:600;line-height:25px;margin:8mm 0 5mm;
+  break-inside:avoid;page-break-inside:avoid;
+  print-color-adjust:exact;-webkit-print-color-adjust:exact}
+.gc-print-page>.gc-print-hubband:first-child{margin-top:0}
+.gc-print-hubband__note{font-size:13px;font-weight:500;opacity:.85;margin-left:8px}
+.gc-print-subhead{font-size:15px;font-weight:600;line-height:22px;
+  margin:5mm 0 3mm;break-after:avoid;page-break-after:avoid}
+.gc-print-root .gc-hub-sec{margin-top:0;margin-bottom:5mm}
+.gc-print-root .gc-hub-sec__t{font-size:15px;margin-bottom:3mm}
+.gc-print-root .gc-remark{font-size:13px}
+/* 实况指引的图文小节作为原子块参与分页；超高会被排版模块标红告警，而不是
+   让打印引擎硬切 grid（Chrome 对 grid 的打印分片支持差，一切就错位） */
+.gc-print-root .gc-sec{break-inside:avoid;page-break-inside:avoid}
+
+/* 卡片双列：inline-block 逐行填充，一行恰好两张（宽 50%），行高取较大者。
+   显式分页后每页一个 .gc-print-cards，只装本页的卡且从配对边界开始，
+   nth-child 奇偶配对因此稳定；data-span="2" 的卡独占整行（长图卡用）。
+   卡片自身的 break-inside:avoid 留作兜底 —— 正常分页由 JS 完成，不会触发 */
+.gc-print-cards{font-size:0;margin:0 0 2mm}
+.gc-print-cards>.gc-card{display:inline-block;width:calc(50% - 2mm);
+  vertical-align:top;margin:0 4mm 4mm 0;font-size:13px;line-height:19px;
+  break-inside:avoid;page-break-inside:avoid}
+.gc-print-cards>.gc-card:nth-child(2n){margin-right:0}
+.gc-print-cards>.gc-card[data-span="2"]{width:100%;margin-right:0}
+.gc-print-root .gc-card{box-shadow:none;border:1px solid #d8dde3;
+  border-radius:8px;padding:12px 13px;transform:none}
+.gc-print-root .gc-card:hover{transform:none;box-shadow:none}
+
+/* per-card 打印排版偏好（排版预览工具条写入数据，applyPrintPrefs 应用）：
+   data-density 控制卡片疏密；图示卡的图片宽度用 inline style（等比缩放居中） */
+.gc-print-root .gc-card[data-density="compact"]{padding:8px 10px}
+.gc-print-root .gc-card[data-density="compact"] .gc-card-chips{margin-bottom:5px;padding-bottom:5px}
+.gc-print-root .gc-card[data-density="compact"] .gc-body{padding:0 0 4px}
+.gc-print-root .gc-card[data-density="compact"] .gc-figcard__cap{margin:3px 0 5px}
+.gc-print-root .gc-card[data-density="loose"]{padding:16px 18px}
+.gc-print-root .gc-card[data-density="loose"] .gc-card-chips{margin-bottom:12px;padding-bottom:12px}
+.gc-print-root .gc-card[data-density="loose"] .gc-body{padding:2px 0 13px}
+.gc-print-root .gc-card[data-density="loose"] .gc-figcard__cap{margin:8px 0 12px}
+
+/* 卡片字号按纸质阅读距离取（≈9–12pt）；窄栏溢出靠卡片增高吸收，不压字号 */
+.gc-print-root .gc-origin__name{font-size:17px;line-height:24px}
+.gc-print-root .gc-origin__note{font-size:12px;line-height:17px}
+.gc-print-root .gc-card-chips{margin-bottom:9px;padding-bottom:9px;gap:6px}
+.gc-print-root .gc-dest-chip{font-size:12px;line-height:18px;padding:2px 9px}
+.gc-print-root .gc-mode-badge{font-size:12px;line-height:18px;padding:2px 10px}
+.gc-print-root .gc-meta-chip{font-size:12px;line-height:18px;padding:2px 9px}
+.gc-print-root .gc-flag{font-size:11px;line-height:16px;padding:2px 8px}
+.gc-print-root .gc-stop__name{font-size:16px;line-height:23px}
+.gc-print-root .gc-stop__exit{font-size:12px;line-height:17px}
+.gc-print-root .gc-leg{grid-template-columns:34px minmax(0,1fr)}
+.gc-print-root .gc-body{padding:1px 0 8px}
+.gc-print-root .gc-walk,.gc-print-root .gc-lnote{font-size:12px;line-height:18px}
+.gc-print-root .gc-toward-t,.gc-print-root .gc-suffix,
+.gc-print-root .gc-busline{font-size:13px;line-height:19px}
+.gc-print-root .gc-lnum{font-size:13px;line-height:19px}
+.gc-print-root .gc-note{font-size:12px;line-height:18px}
+.gc-print-root .gc-sched__t,.gc-print-root .gc-sched__row{font-size:12px;line-height:18px}
+.gc-print-root .gc-figcard__t{font-size:17px;line-height:24px}
+.gc-print-root .gc-figcard__cap{font-size:12px;line-height:18px;margin:6px 0 8px}
+.gc-print-root .gc-steps__intro,.gc-print-root .gc-step{font-size:13px;line-height:20px}
+.gc-print-root .gc-sec__t{font-size:14px;line-height:21px}
+
+/* 打印不出现交互元素与空态提示 */
+.gc-print-root .gc-hot{display:none}
+.gc-print-root .gc-empty{display:none}
+
+/* 排版预览的页面外壳（仅屏幕）：带阴影的 A4 纸 + 页码 + 超高角标。
+   页码与角标绝对定位，不参与内容测量；打印时整体隐藏 */
+@media screen{
+  .gc-print-root.gc-on .gc-print-page{position:relative;width:210mm;min-height:297mm;
+    padding:12mm;box-sizing:border-box;background:#fff;margin:0 auto 20px;
+    box-shadow:0 2px 12px rgba(15,23,42,.16)}
+}
+.gc-print-page__no{position:absolute;right:12mm;bottom:6mm;font-size:11px;
+  line-height:16px;color:#94a3b8}
+.gc-print-overflow{position:absolute;left:0;top:0;z-index:3;background:#b91c1c;
+  color:#fff;font-size:11px;font-weight:600;line-height:16px;padding:2px 8px;
+  border-radius:0 0 6px 0}
+
 @media print{
-  #gc-screen,.gc-pop,.gc-toast,.gc-fighint,.gc-video-entry,.gc-video-layer{display:none!important}
+  #gc-screen,.gc-pop,.gc-toast,.gc-fighint,.gc-video-entry,.gc-video-layer,.gc-lightbox,
+  .gc-print-page__no,.gc-print-overflow,.ge-pgtool{display:none!important}
   body{background:#fff}
-  .gc-print-root{display:block!important;color:#0f172a}
-
-  /* 标题页：标题 + 版本行 + 枢纽 × 校区路线数矩阵 */
-  .gc-print-title{break-after:page;page-break-after:always;padding-top:20mm}
-  .gc-print-title__t{margin:0;font-size:34px;font-weight:700;line-height:42px;
-    letter-spacing:-.02em}
-  .gc-print-title__s{font-size:20px;font-weight:500;line-height:30px;
-    color:#334155;margin-top:4mm}
-  .gc-print-title__e{font-size:12px;line-height:18px;color:#64748b;margin-top:6mm;
-    padding-bottom:8mm;border-bottom:2px solid #1e80c1}
-  .gc-print-matrix__cap{font-size:15px;font-weight:600;margin:12mm 0 4mm}
-  .gc-print-matrix{border-collapse:collapse;width:100%}
-  .gc-print-matrix th,.gc-print-matrix td{border:1px solid #cbd5e1;
-    padding:6px 8px;font-size:13px;line-height:19px;text-align:center}
-  .gc-print-matrix th{background:#f1f5f9;font-weight:600}
-  .gc-print-matrix__hub{text-align:left;font-weight:600}
-
-  /* 枢纽之间色带衔接、自然分页：不强制每枢纽一页起 —— 内容少的枢纽
-     （一两张卡）曾经一枢纽占一整页，空白比内容多。色带自身不跨页，
-     且不许分页器把它和紧随的内容拆开 */
-  .gc-print-hub{margin-top:8mm}
-  .gc-print-hubband{color:#fff;padding:9px 15px;border-radius:8px;
-    font-size:18px;font-weight:600;line-height:25px;margin-bottom:5mm;
-    break-inside:avoid;page-break-inside:avoid;
-    break-after:avoid;page-break-after:avoid;
-    print-color-adjust:exact;-webkit-print-color-adjust:exact}
-  .gc-print-hubband__note{font-size:13px;font-weight:500;opacity:.85;margin-left:8px}
-  .gc-print-subhead{font-size:15px;font-weight:600;line-height:22px;
-    margin:5mm 0 3mm;break-after:avoid;page-break-after:avoid}
-  .gc-print-root .gc-hub-sec{margin-top:0;margin-bottom:5mm}
-  .gc-print-root .gc-hub-sec__t{font-size:15px;margin-bottom:3mm}
-  .gc-print-root .gc-remark{font-size:13px}
-
-  /* 卡片双列：inline-block 逐行填充。之前用 CSS 多栏（column-count:2），
-     分页时先把整页灌进左栏再灌右栏，break-inside:avoid 的卡片稍微超高
-     就整栏留白；逐行填充在 A4 分页下稳定得多。font-size:0 消除行内缝隙，
-     卡片自身恢复基准字号（子元素在下方均有显式字号） */
-  .gc-print-cards{font-size:0;margin:0 0 2mm}
-  .gc-print-cards>.gc-card{display:inline-block;width:calc(50% - 2mm);
-    vertical-align:top;margin:0 4mm 4mm 0;font-size:13px;line-height:19px;
-    break-inside:avoid;page-break-inside:avoid}
-  .gc-print-cards>.gc-card:nth-child(2n){margin-right:0}
-  .gc-print-root .gc-card{box-shadow:none;border:1px solid #d8dde3;
-    border-radius:8px;padding:12px 13px;transform:none}
-  .gc-print-root .gc-card:hover{transform:none;box-shadow:none}
-
-  /* 卡片字号按纸质阅读距离取（≈9–12pt）；窄栏溢出靠卡片增高吸收，不压字号 */
-  .gc-print-root .gc-origin__name{font-size:17px;line-height:24px}
-  .gc-print-root .gc-origin__note{font-size:12px;line-height:17px}
-  .gc-print-root .gc-card-chips{margin-bottom:9px;padding-bottom:9px;gap:6px}
-  .gc-print-root .gc-dest-chip{font-size:12px;line-height:18px;padding:2px 9px}
-  .gc-print-root .gc-mode-badge{font-size:12px;line-height:18px;padding:2px 10px}
-  .gc-print-root .gc-meta-chip{font-size:12px;line-height:18px;padding:2px 9px}
-  .gc-print-root .gc-flag{font-size:11px;line-height:16px;padding:2px 8px}
-  .gc-print-root .gc-stop__name{font-size:16px;line-height:23px}
-  .gc-print-root .gc-stop__exit{font-size:12px;line-height:17px}
-  .gc-print-root .gc-leg{grid-template-columns:34px minmax(0,1fr)}
-  .gc-print-root .gc-body{padding:1px 0 8px}
-  .gc-print-root .gc-walk,.gc-print-root .gc-lnote{font-size:12px;line-height:18px}
-  .gc-print-root .gc-toward-t,.gc-print-root .gc-suffix,
-  .gc-print-root .gc-busline{font-size:13px;line-height:19px}
-  .gc-print-root .gc-lnum{font-size:13px;line-height:19px}
-  .gc-print-root .gc-note{font-size:12px;line-height:18px}
-  .gc-print-root .gc-sched__t,.gc-print-root .gc-sched__row{font-size:12px;line-height:18px}
-  .gc-print-root .gc-figcard__t{font-size:17px;line-height:24px}
-  .gc-print-root .gc-figcard__cap{font-size:12px;line-height:18px;margin:6px 0 8px}
-  .gc-print-root .gc-steps__intro,.gc-print-root .gc-step{font-size:13px;line-height:20px}
-  .gc-print-root .gc-sec__t{font-size:14px;line-height:21px}
-
-  /* 打印不出现交互元素与空态提示 */
-  .gc-print-root .gc-hot{display:none}
-  .gc-print-root .gc-empty{display:none}
+  .gc-print-root{display:block!important}
+  /* 显式分页：每页末尾断页，最后一页不断 */
+  .gc-print-page{break-after:page;page-break-after:always}
+  .gc-print-page:last-child{break-after:auto;page-break-after:auto}
 
   /* 线路徽标与色带保留颜色 */
   .gc-lnum,.gc-busline,.gc-mode-badge,.gc-dest-chip,.gc-meta-chip,.gc-flag,

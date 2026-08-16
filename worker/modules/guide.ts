@@ -217,7 +217,9 @@ export async function getPublicGuide(request: Request, env: Env, slug: string): 
  *
  * 三重防线叠在消毒之上：`content-security-policy: sandbox` 让浏览器把它当
  * 无脚本文档处理，`x-content-type-options: nosniff` 阻止类型嗅探，
- * `content-disposition: inline` 不触发下载。immutable 缓存 —— 换图走新 asset_key。
+ * `content-disposition: inline` 不触发下载。按 asset_key 寻址，换图走
+ * must-revalidate + ETag（见下），不能 immutable。
+ * 读端放行 svg / png / jpeg：figure_png 通道按魔术字节入库，JPEG 是实景照的自然格式。
  */
 export async function getPublicGuideAsset(request: Request, env: Env, key: string): Promise<Response> {
   if (!ASSET_KEY_PATTERN.test(key)) throw new HttpError(404, "not_found", "Guide asset does not exist");
@@ -231,7 +233,7 @@ export async function getPublicGuideAsset(request: Request, env: Env, key: strin
   if (!row || row.status !== "published" || !row.objectKey.startsWith(GUIDE_ASSET_PREFIX)) {
     throw new HttpError(404, "not_found", "Guide asset does not exist");
   }
-  if (row.contentType !== "image/svg+xml" && row.contentType !== "image/png") {
+  if (row.contentType !== "image/svg+xml" && row.contentType !== "image/png" && row.contentType !== "image/jpeg") {
     throw new Error(`Guide asset ${key} has unsupported stored content type ${row.contentType}`);
   }
   /* 这个 URL 按 asset_key 寻址，而同一个键的图是会被替换的（换图后引用它的

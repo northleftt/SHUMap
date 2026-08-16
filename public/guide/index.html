@@ -10,6 +10,7 @@
      接口回答 404（管理端未发布 / 已下线）时不使用它。正式内容来自 D1 -->
 <script src="data/guide-seed.js"></script>
 <script src="assets/guide-render.js"></script>
+<script src="assets/guide-print-layout.js"></script>
 <style>
 /* ══════════════ 页面骨架（仅本页使用，组件样式见 guide-styles.js） ══════════════
  * 屏幕 UI 全包在 #gc-screen 里：@media print 时 guide-styles.js 隐藏它、
@@ -197,7 +198,6 @@
 
   /* ── 页面状态 ── */
   var D = null;            /* normalizeData 之后的 v2 数据 */
-  var printRoot = null;    /* buildPrintRoot 生成的离屏打印树，只 append 一次 */
   var state = { hub: '', campus: '', modesOff: {} };  /* modesOff：被关掉的出行方式 */
 
   function boot(raw, info) {
@@ -222,11 +222,6 @@
     var foot = document.getElementById('foot');
     foot.textContent = footBits.join(' · ');
     foot.hidden = !footBits.length;
-
-    /* 打印树随数据（重新）加载而刷新；屏幕/打印切换纯 CSS，无需打印前再动它 */
-    if (printRoot) printRoot.remove();
-    printRoot = R.buildPrintRoot(D);
-    document.body.appendChild(printRoot);
 
     var hubs = sortedHubs();
     if (!hubs.length) return splash('暂无枢纽数据');
@@ -422,10 +417,17 @@
     } catch (e) { /* file:// 等场景 replaceState 可能受限，忽略 */ }
   }
 
-  /* ── 导出 PDF：打印输出完全来自 buildPrintRoot 的离屏树，直接调起打印 ── */
+  /* ── 导出 PDF：经 GuidePrintLayout 显式分页后打印 —— 分页在 JS 里固定，
+     不再靠打印引擎自由分页（卡片双列配对不会跨页漂移）。点击时现场排版，
+     保证用的是最终数据与已加载图片。 ── */
   document.getElementById('btn-pdf').addEventListener('click', function () {
-    R.toast('在打印对话框中选择「另存为 PDF」');
-    R.whenPrintReady(printRoot, function () { window.print(); });
+    document.querySelectorAll('body > .gc-print-root').forEach(function (n) { n.remove(); });
+    R.toast('正在排版…');
+    window.GuidePrintLayout.layout(D).then(function (res) {
+      document.body.appendChild(res.root);
+      R.toast('在打印对话框中选择「另存为 PDF」');
+      R.whenPrintReady(res.root, function () { window.print(); });
+    });
   });
 })();
 </script>
