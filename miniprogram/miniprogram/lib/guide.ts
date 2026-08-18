@@ -130,7 +130,7 @@ export interface GuideContent {
     revisedAt?: string;
     revisionNote?: string;
   };
-  lineColors?: Record<string, string>;
+  lineColors?: Record<string, GuideLineColorEntry>;
   campuses?: GuideCampus[];
   hubs?: GuideHub[];
   icons?: GuideIcon[];
@@ -300,11 +300,100 @@ export function cardsFor(
   });
 }
 
-/** 线路色号 → 颜色值；空值回 neutral，未知 key 原样透传（数据里可直接写 #rrggbb）。 */
-export function lineColor(key: string | null | undefined, content: GuideContent): string {
+/** 色库条目：旧稿是 "#rrggbb"，新稿带底色 / 字色 / 名称。 */
+export type GuideLineColorEntry =
+  | string
+  | { fill?: string; color?: string; text?: string; ink?: string; label?: string };
+
+export interface GuideLineSwatch {
+  key: string;
+  fill: string;
+  text: string;
+  label: string;
+}
+
+/** 浅色线官方黑字（2/7 号线等）。未写入 text 时用这张表，再按亮度兜底。 */
+const DEFAULT_LINE_INK: Record<string, string> = {
+  l2: "#111111",
+  l3: "#111111",
+  l7: "#111111",
+  l9: "#111111",
+  l10: "#111111",
+  l13: "#111111",
+  l15: "#111111",
+  l16: "#111111",
+  l18: "#111111",
+  l19: "#111111",
+  l21: "#111111",
+  l23: "#111111",
+  bus: "#111111",
+  bus185: "#111111",
+  walk: "#111111",
+};
+
+function parseHexColor(s: string): { r: number; g: number; b: number } | null {
+  const m = String(s || "").trim().match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!m) return null;
+  let h = m[1];
+  if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+  return {
+    r: parseInt(h.slice(0, 2), 16),
+    g: parseInt(h.slice(2, 4), 16),
+    b: parseInt(h.slice(4, 6), 16),
+  };
+}
+
+export function autoLineInk(fill: string): string {
+  const c = parseHexColor(fill);
+  if (!c) return "#ffffff";
+  const lin = (v: number) => {
+    const x = v / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  const L = 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  return L > 0.42 ? "#111111" : "#ffffff";
+}
+
+function resolveLineEntry(entry: GuideLineColorEntry | undefined): { fill: string; text: string; label: string } {
+  if (typeof entry === "string") return { fill: entry, text: "", label: "" };
+  if (entry && typeof entry === "object") {
+    return {
+      fill: entry.fill || entry.color || "",
+      text: entry.text || entry.ink || "",
+      label: entry.label || "",
+    };
+  }
+  return { fill: "", text: "", label: "" };
+}
+
+function defaultLineLabel(key: string): string {
+  const m = key.match(/^l(\d+)$/i);
+  return m ? `${m[1]}号线` : key;
+}
+
+/** 色库查询：底色 + 字色。空 key 回 neutral；未知 key 若是 #hex 原样当底色。 */
+export function lineSwatch(key: string | null | undefined, content: GuideContent): GuideLineSwatch {
   const map = content.lineColors || {};
-  if (!key) return map.neutral || "#8f98a3";
-  return map[key] || key;
+  const lookup = key || "neutral";
+  const raw = Object.prototype.hasOwnProperty.call(map, lookup) ? map[lookup] : undefined;
+  const parsed = resolveLineEntry(raw);
+  let fill = parsed.fill;
+  if (!fill) {
+    if (parseHexColor(lookup)) fill = lookup.charAt(0) === "#" ? lookup : `#${lookup}`;
+    else fill = resolveLineEntry(map.neutral).fill || "#8f98a3";
+  }
+  const text = parsed.text || DEFAULT_LINE_INK[lookup] || autoLineInk(fill);
+  return { key: lookup, fill, text, label: parsed.label || defaultLineLabel(lookup) };
+}
+
+/** 线路色号 → 底色；空值回 neutral，未知 key 原样透传（数据里可直接写 #rrggbb）。 */
+export function lineColor(key: string | null | undefined, content: GuideContent): string {
+  return lineSwatch(key, content).fill;
+}
+
+/** 线路号徽标字色（白 / 黑，可被色库覆盖）。 */
+export function lineInk(key: string | null | undefined, content: GuideContent): string {
+  return lineSwatch(key, content).text;
 }
 
 /* ══════════════ 图标注册表（对齐网页版 iconById/lineIcon） ══════════════
@@ -780,7 +869,10 @@ function buildLegViews(card: GuideRouteCard, content: GuideContent): RouteLegVie
       const icon = lineIcon(content, ln);
       return {
         isBus: ln.kind === "bus",
-        noStyle: ln.kind === "bus" ? "" : `background: ${lineColor(ln.color || null, content)};`,
+        noStyle: ln.kind === "bus" ? "" : (() => {
+          const sw = lineSwatch(ln.color || null, content);
+          return `background: ${sw.fill}; color: ${sw.text};`;
+        })(),
         no: ln.no || "",
         suffix: ln.suffix || "",
         toward: ln.toward || "",

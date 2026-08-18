@@ -14,7 +14,8 @@
  *   renderHubGuide / renderHubVideo / renderRemark → 枢纽级区块
  *   renderPairView(container, data, hubId, campusId, opts) → 一对组合的整页
  *   buildPrintRoot(data)             → 打印/PDF 用的离屏文档树
- *   h / esc / RAIL / HOT_REF / lineColor / lineIcon → 供编辑器复用的图元
+ *   h / esc / RAIL / HOT_REF / lineColor / lineInk / lineSwatch / lineIcon
+ *                                        → 供编辑器复用的图元（线路色库）
  *   toast / closePop / openPop       → 交互反馈
  *   openImageViewer / closeImageViewer → 枢纽简图与实景照全屏查看
  */
@@ -72,10 +73,135 @@ window.GuideRender = (function () {
     });
   }
 
-  function lineColor(key, data) {
+  /* 线路色库：data.lineColors[key] 可以是 "#rrggbb"（旧稿）或
+   * { fill, text?, label? }。字色未写时：先认已知浅色线（2/7 号线等官方黑字），
+   * 再按亮度自动黑/白。lineColor 只回底色，兼容旧调用。 */
+  var DEFAULT_LINE_INK = {
+    l2: "#111111", l3: "#111111", l7: "#111111", l9: "#111111",
+    l10: "#111111", l13: "#111111", l15: "#111111", l16: "#111111",
+    l18: "#111111", l19: "#111111", l21: "#111111",
+    l23: "#111111", bus: "#111111", bus185: "#111111", walk: "#111111",
+  };
+  var LINE_COLOR_PRESETS = [
+    { id: "l1", label: "1号线", fill: "#E3002B", text: "#ffffff" },
+    { id: "l2", label: "2号线", fill: "#82BF25", text: "#111111" },
+    { id: "l3", label: "3号线", fill: "#FCD600", text: "#111111" },
+    { id: "l4", label: "4号线", fill: "#461D84", text: "#ffffff" },
+    { id: "l5", label: "5号线", fill: "#944D9A", text: "#ffffff" },
+    { id: "l6", label: "6号线", fill: "#D40068", text: "#ffffff" },
+    { id: "l7", label: "7号线", fill: "#ED6F00", text: "#111111" },
+    { id: "l8", label: "8号线", fill: "#0094D8", text: "#ffffff" },
+    { id: "l9", label: "9号线", fill: "#87CAED", text: "#111111" },
+    { id: "l10", label: "10号线", fill: "#C6AFD4", text: "#111111" },
+    { id: "l11", label: "11号线", fill: "#871C2B", text: "#ffffff" },
+    { id: "l12", label: "12号线", fill: "#007B61", text: "#ffffff" },
+    { id: "l13", label: "13号线", fill: "#E999C0", text: "#111111" },
+    { id: "l14", label: "14号线", fill: "#626020", text: "#ffffff" },
+    { id: "l15", label: "15号线", fill: "#BCA886", text: "#111111" },
+    { id: "l16", label: "16号线", fill: "#98D1C0", text: "#111111" },
+    { id: "l17", label: "17号线", fill: "#BC796F", text: "#ffffff" },
+    { id: "l18", label: "18号线", fill: "#C4984F", text: "#111111" },
+    { id: "l19", label: "19号线", fill: "#F5AB78", text: "#111111" },
+    { id: "l20", label: "20号线", fill: "#009F65", text: "#ffffff" },
+    { id: "l21", label: "21号线", fill: "#F7AF00", text: "#111111" },
+    { id: "l22", label: "22号线", fill: "#5F376F", text: "#ffffff" },
+    { id: "l23", label: "23号线", fill: "#B0D478", text: "#111111" },
+    { id: "pujiang", label: "浦江线", fill: "#B5B5B6", text: "#111111" },
+    { id: "maglev", label: "磁浮线", fill: "#008B9A", text: "#ffffff" },
+    { id: "airport", label: "市域线", fill: "#898989", text: "#ffffff" },
+    { id: "bus", label: "公交", fill: "#F2B203", text: "#111111" },
+    { id: "walk", label: "步行", fill: "#B9BFC7", text: "#111111" },
+    { id: "neutral", label: "中性", fill: "#8F98A3", text: "#ffffff" },
+  ];
+
+  function parseHexColor(s) {
+    var m = String(s || "").trim().match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (!m) return null;
+    var h = m[1];
+    if (h.length === 3) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
+    return {
+      r: parseInt(h.slice(0, 2), 16),
+      g: parseInt(h.slice(2, 4), 16),
+      b: parseInt(h.slice(4, 6), 16),
+    };
+  }
+
+  function autoLineInk(fill) {
+    var c = parseHexColor(fill);
+    if (!c) return "#ffffff";
+    function lin(v) {
+      v = v / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    }
+    var L = 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+    return L > 0.42 ? "#111111" : "#ffffff";
+  }
+
+  function defaultLineLabel(key) {
+    var m = String(key || "").match(/^l(\d+)$/i);
+    if (m) return m[1] + "号线";
+    for (var i = 0; i < LINE_COLOR_PRESETS.length; i++) {
+      if (LINE_COLOR_PRESETS[i].id === key) return LINE_COLOR_PRESETS[i].label;
+    }
+    return key || "";
+  }
+
+  function resolveLineEntry(entry) {
+    if (typeof entry === "string") return { fill: entry, text: "", label: "" };
+    if (entry && typeof entry === "object") {
+      return {
+        fill: entry.fill || entry.color || "",
+        text: entry.text || entry.ink || "",
+        label: entry.label || "",
+      };
+    }
+    return { fill: "", text: "", label: "" };
+  }
+
+  function lineSwatch(key, data) {
     var map = (data && data.lineColors) || {};
-    if (!key) return map.neutral || "#8f98a3";
-    return map[key] || key;
+    var lookup = key || "neutral";
+    var raw = Object.prototype.hasOwnProperty.call(map, lookup) ? map[lookup] : undefined;
+    var parsed = resolveLineEntry(raw);
+    var fill = parsed.fill;
+    if (!fill) {
+      if (parseHexColor(lookup)) fill = lookup.charAt(0) === "#" ? lookup : "#" + lookup;
+      else fill = resolveLineEntry(map.neutral).fill || "#8f98a3";
+    }
+    var text = parsed.text || DEFAULT_LINE_INK[lookup] || autoLineInk(fill);
+    var label = parsed.label || defaultLineLabel(lookup);
+    return { fill: fill, text: text, label: label, key: lookup };
+  }
+
+  function lineColor(key, data) {
+    return lineSwatch(key, data).fill;
+  }
+
+  function lineInk(key, data) {
+    return lineSwatch(key, data).text;
+  }
+
+  function lineBadgeStyle(key, data) {
+    var s = lineSwatch(key, data);
+    return "--c:" + s.fill + ";--ink-on-line:" + s.text + ";color:" + s.text;
+  }
+
+  /* 旧稿 "#rrggbb" → {fill,text,label}，方便色库编辑；已是对象的补缺字段。 */
+  function normalizeLineColors(data) {
+    if (!data || !data.lineColors || typeof data.lineColors !== "object") return data;
+    var src = data.lineColors;
+    var out = {};
+    Object.keys(src).forEach(function (key) {
+      var sw = lineSwatch(key, data);
+      var prev = resolveLineEntry(src[key]);
+      out[key] = {
+        fill: sw.fill,
+        text: prev.text || sw.text,
+        label: prev.label || sw.label,
+      };
+    });
+    data.lineColors = out;
+    return data;
   }
 
   /* ══════════════ 数据规范化 ══════════════
@@ -94,7 +220,9 @@ window.GuideRender = (function () {
     } else {
       return raw;
     }
-    return liftSceneGuides(d);
+    var out = liftSceneGuides(d);
+    if (out) normalizeLineColors(out);
+    return out;
   }
 
   /* steps 卡 → hub.sceneGuide。非破坏：没有 steps 卡时原样返回输入。 */
@@ -405,7 +533,7 @@ window.GuideRender = (function () {
       if (ln.kind === "bus") {
         row.appendChild(h("span", { class: "gc-busline", text: ln.no }));
       } else {
-        row.appendChild(h("span", { class: "gc-lnum", style: "--c:" + lineColor(ln.color, data), text: ln.no }));
+        row.appendChild(h("span", { class: "gc-lnum", style: lineBadgeStyle(ln.color, data), text: ln.no }));
         if (ln.suffix) row.appendChild(h("span", { class: "gc-suffix", text: ln.suffix }));
       }
       if (ln.toward) row.appendChild(h("span", { class: "gc-toward-t", text: ln.toward }));
@@ -1197,7 +1325,11 @@ window.GuideRender = (function () {
 
   return {
     h: h, esc: esc, RAIL: RAIL, HOT_REF: HOT_REF,
-    lineColor: lineColor, lineIcon: lineIcon,
+    lineColor: lineColor, lineInk: lineInk, lineSwatch: lineSwatch,
+    lineBadgeStyle: lineBadgeStyle, autoLineInk: autoLineInk,
+    normalizeLineColors: normalizeLineColors,
+    LINE_COLOR_PRESETS: LINE_COLOR_PRESETS,
+    lineIcon: lineIcon,
     normalizeData: normalizeData,
     hubFigures: hubFigures, hubVideos: hubVideos, appliesTo: appliesTo,
     allIcons: allIcons, iconById: iconById, renderIcon: renderIcon,

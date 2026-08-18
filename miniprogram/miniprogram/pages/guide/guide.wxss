@@ -471,7 +471,7 @@
   font-size: 12px;
   font-weight: 600;
   line-height: 17px;
-  color: #ffffff;
+  color: #ffffff; /* 默认白字；色库指定的字色走 noStyle 内联覆盖 */
   border-radius: 3px;
 }
 

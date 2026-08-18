@@ -133,7 +133,7 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   font-variant-numeric:tabular-nums}
 .gc-ride{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px}
 .gc-mico{flex:none;display:block}
-.gc-lnum{font-size:12px;font-weight:600;line-height:17px;color:#fff;padding:1px 6px;
+.gc-lnum{font-size:12px;font-weight:600;line-height:17px;color:var(--ink-on-line,#fff);padding:1px 6px;
   border-radius:3px;background:var(--c,var(--seg-neutral));letter-spacing:.02em;
   font-variant-numeric:tabular-nums}
 .gc-suffix{font-size:13px;font-weight:600;line-height:18px}

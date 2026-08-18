@@ -209,6 +209,19 @@
     background:var(--surface)}
   .ge-ico__inline .gc-ico{height:17px!important;width:auto!important;max-width:24px}
 
+  /* 线路色库 */
+  .ge-swatch{display:flex;align-items:center;gap:8px;border:1px solid var(--line);
+    border-radius:var(--r-md);padding:8px;margin-bottom:8px;background:#fcfdfe}
+  .ge-swatch__badge{flex:none;min-width:28px;height:22px;padding:0 7px;border-radius:3px;
+    font-size:12px;font-weight:700;line-height:22px;text-align:center;
+    font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  .ge-swatch__meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+  .ge-swatch__ink{display:flex;gap:4px;flex-wrap:wrap}
+  .ge-swatch__ink .ge-mini.is-on{border-color:var(--ink);color:var(--ink);
+    background:var(--chip)}
+  .ge-swatch input[type="color"]{width:36px;height:30px;padding:0;border:1px solid var(--line);
+    border-radius:var(--r-sm);background:var(--surface);cursor:pointer}
+
   /* —— 版本管理抽屉 —— */
   .ge-vwrap{position:fixed;inset:0;z-index:75;display:none}
   .ge-vwrap[data-open="1"]{display:block}
@@ -320,7 +333,7 @@
   "use strict";
   var R = window.GuideRender, h = R.h;
   var STORE = "shu-guide-draft-v2";
-  /* 出厂种子进编辑器先过一次 normalizeData：schema v2 原样返回，
+  /* 出厂种子进编辑器先过一次 normalizeData：schema v2 保留，线路色库升成 {fill,text,label}，
      万一种子回退成 v1（cover/groups）也能就地升级，编辑器只面对 v2 一种形状。 */
   var ORIGINAL = R.normalizeData(JSON.parse(JSON.stringify(window.GUIDE_DATA || {})));
   var SLUG = (function () {
@@ -1347,9 +1360,213 @@
   ];
 
   function railColorOptions() {
-    var keys = Object.keys(data.lineColors || {});
+    var map = data.lineColors || {};
+    var keys = Object.keys(map);
     if (!keys.length) keys = ["l1", "l2", "bus", "walk", "neutral"];
-    return keys.map(function (k) { return { value: k, label: k }; });
+    return keys.map(function (k) {
+      var sw = R.lineSwatch(k, data);
+      return { value: k, label: (sw.label && sw.label !== k ? sw.label + " · " : "") + k };
+    });
+  }
+
+  function colorUsage(key) {
+    var n = 0;
+    (data.cards || []).forEach(function (c) {
+      (c.legs || []).forEach(function (leg) {
+        (leg.rails || []).forEach(function (r) { if (r === key) n++; });
+        (leg.lines || []).forEach(function (ln) { if (ln.color === key) n++; });
+      });
+    });
+    return n;
+  }
+
+  function rewriteColorKey(from, to) {
+    (data.cards || []).forEach(function (c) {
+      (c.legs || []).forEach(function (leg) {
+        if (leg.rails) {
+          leg.rails = leg.rails.map(function (r) { return r === from ? to : r; });
+        }
+        (leg.lines || []).forEach(function (ln) {
+          if (ln.color === from) ln.color = to;
+        });
+      });
+    });
+  }
+
+  function ensureLineColors() {
+    if (!data.lineColors || typeof data.lineColors !== "object") data.lineColors = {};
+    R.normalizeLineColors(data);
+    return data.lineColors;
+  }
+
+  function applyMetroPresets(mode) {
+    ensureLineColors();
+    var added = 0, updated = 0;
+    (R.LINE_COLOR_PRESETS || []).forEach(function (p) {
+      var cur = data.lineColors[p.id];
+      if (!cur) {
+        data.lineColors[p.id] = { fill: p.fill, text: p.text, label: p.label };
+        added++;
+        return;
+      }
+      if (mode === "fill-missing") return;
+      data.lineColors[p.id] = {
+        fill: p.fill,
+        text: p.text,
+        label: (cur && cur.label) || p.label,
+      };
+      updated++;
+    });
+    persist();
+    refresh();
+    R.toast(mode === "fill-missing"
+      ? ("已补齐 " + added + " 条标准色（已有条目未改）")
+      : ("已写入标准色：新增 " + added + "、覆盖 " + updated));
+  }
+
+  function colorLibEditor() {
+    var map = ensureLineColors();
+    var keys = Object.keys(map);
+    return section("colorlib", "线路色库", keys.length + " 条", false, function () {
+      var w = h("div", null,
+        h("div", { class: "ge-hint",
+          text: "路线卡里的「线路配色」从这里选。底色和字色分开存：2 号线 / 7 号线这类浅色线要用黑字，深色线用白字。改色立刻反映到预览和时间轴色带。" }));
+
+      w.appendChild(h("div", { class: "ge-adds", style: "margin:0 0 10px" },
+        h("button", {
+          class: "gc-btn", type: "button", text: "+ 新建色号",
+          onclick: function () {
+            var id = window.prompt("色号 id（如 l8、maglev，小写字母/数字/连字符）", "l8");
+            if (id === null) return;
+            id = String(id).trim();
+            if (!/^[a-z][a-z0-9-]{0,24}$/.test(id)) return R.toast("id 不合规");
+            if (data.lineColors[id]) return R.toast("色号已存在：" + id);
+            var preset = (R.LINE_COLOR_PRESETS || []).find(function (p) { return p.id === id; });
+            data.lineColors[id] = preset
+              ? { fill: preset.fill, text: preset.text, label: preset.label }
+              : { fill: "#8F98A3", text: "#ffffff", label: id };
+            view.open.colorlib = true;
+            persist(); refresh();
+          },
+        }),
+        h("button", {
+          class: "gc-btn", type: "button", text: "补齐上海地铁标准色",
+          title: "按官方色号补上尚未收录的线路，已有条目不动",
+          onclick: function () { applyMetroPresets("fill-missing"); },
+        }),
+        h("button", {
+          class: "gc-btn", type: "button", text: "覆盖为官方色",
+          title: "把已有标准线路的底色/字色改成上海地铁官方色（自定义 label 保留）",
+          onclick: function () {
+            if (!window.confirm("用上海地铁官方色覆盖色库里已有的标准线路？自定义色号不会删。")) return;
+            applyMetroPresets("overwrite");
+          },
+        })
+      ));
+
+      keys.forEach(function (key) {
+        var sw = R.lineSwatch(key, data);
+        var used = colorUsage(key);
+        var sample = /^l(\d+)$/i.test(key) ? RegExp.$1 : (key === "maglev" ? "磁" : key.slice(0, 2));
+        var row = h("div", { class: "ge-swatch" });
+        row.appendChild(h("span", {
+          class: "ge-swatch__badge",
+          style: "background:" + sw.fill + ";color:" + sw.text,
+          text: sample,
+        }));
+
+        var idIn = h("input", { type: "text", value: key });
+        var labelIn = h("input", { type: "text", value: sw.label || "" });
+        var hexIn = h("input", { type: "text", value: sw.fill || "" });
+        var pick = h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(sw.fill) ? sw.fill : "#8f98a3" });
+
+        function commitFill(hex) {
+          hex = String(hex || "").trim();
+          if (hex && hex.charAt(0) !== "#") hex = "#" + hex;
+          if (!data.lineColors[key]) return;
+          data.lineColors[key].fill = hex;
+          persist();
+          renderPreview();
+        }
+
+        pick.addEventListener("input", function () {
+          hexIn.value = pick.value;
+          commitFill(pick.value);
+        });
+        hexIn.addEventListener("change", function () {
+          commitFill(hexIn.value);
+          if (/^#[0-9a-f]{6}$/i.test(data.lineColors[key].fill))
+            pick.value = data.lineColors[key].fill;
+          refresh();
+        });
+        labelIn.addEventListener("change", function () {
+          data.lineColors[key].label = labelIn.value.trim() || key;
+          persist(); refresh();
+        });
+        idIn.addEventListener("change", function () {
+          var next = String(idIn.value || "").trim();
+          if (next === key) return;
+          if (!/^[a-z][a-z0-9-]{0,24}$/.test(next)) {
+            R.toast("id 不合规"); idIn.value = key; return;
+          }
+          if (data.lineColors[next]) {
+            R.toast("色号已存在：" + next); idIn.value = key; return;
+          }
+          data.lineColors[next] = data.lineColors[key];
+          delete data.lineColors[key];
+          rewriteColorKey(key, next);
+          persist(); refresh();
+        });
+
+        function setInk(ink) {
+          data.lineColors[key].text = ink;
+          persist(); refresh();
+        }
+        var inkIsBlack = /^#111|#000|#1a1/i.test(sw.text);
+
+        row.appendChild(h("div", { class: "ge-swatch__meta" },
+          h("div", { class: "ge-row" },
+            h("label", { class: "ge-f", style: "margin:0" },
+              h("span", { class: "ge-f__l", text: "色号" }), idIn),
+            h("label", { class: "ge-f", style: "margin:0" },
+              h("span", { class: "ge-f__l", text: "名称" }), labelIn)
+          ),
+          h("div", { class: "ge-row" },
+            h("label", { class: "ge-f", style: "margin:0" },
+              h("span", { class: "ge-f__l", text: "底色" }),
+              h("div", { style: "display:flex;gap:6px;align-items:center" }, pick, hexIn)),
+            h("div", { class: "ge-f", style: "margin:0" },
+              h("span", { class: "ge-f__l", text: "字色" }),
+              h("div", { class: "ge-swatch__ink" },
+                h("button", {
+                  class: "ge-mini" + (inkIsBlack ? "" : " is-on"), type: "button", text: "白字",
+                  onclick: function () { setInk("#ffffff"); },
+                }),
+                h("button", {
+                  class: "ge-mini" + (inkIsBlack ? " is-on" : ""), type: "button", text: "黑字",
+                  onclick: function () { setInk("#111111"); },
+                }))
+            )
+          ),
+          h("div", { class: "ge-adds", style: "margin:0" },
+            h("span", { class: "ge-chips__hint", text: used ? "已用 " + used + " 处" : "未使用" }),
+            h("button", {
+              class: "ge-mini ge-mini--danger", type: "button", text: "删除",
+              onclick: function () {
+                if (used)
+                  return R.toast("「" + (sw.label || key) + "」仍被 " + used +
+                    " 处引用，不能删除。先把线路配色换掉。");
+                if (!window.confirm("删除色号「" + key + "」？")) return;
+                delete data.lineColors[key];
+                persist(); refresh();
+              },
+            })
+          )
+        ));
+        w.appendChild(row);
+      });
+      return w;
+    });
   }
 
   function legEditor(ci, leg, li, total) {
@@ -2251,6 +2468,7 @@
     panel.appendChild(metaEditor());
     panel.appendChild(hubManager());
     panel.appendChild(campusManager());
+    panel.appendChild(colorLibEditor());
     panel.appendChild(cardManager());
     panel.appendChild(iconLibEditor());
   }

@@ -29,6 +29,20 @@ test("seed declares schema v2 and drops the v1 cover/groups layers", () => {
   assert.ok(!("groups" in data), "v2 不再有 groups");
 });
 
+test("seed lineColors is a library of {fill,text,label}, including black-ink lines", () => {
+  const map = data.lineColors;
+  assert.equal(typeof map, "object");
+  for (const [key, entry] of Object.entries(map)) {
+    assert.equal(typeof entry, "object", `${key} 应为色库对象而不是裸 hex`);
+    assert.match(entry.fill, /^#[0-9A-Fa-f]{6}$/, `${key}.fill`);
+    assert.match(entry.text, /^#[0-9A-Fa-f]{6}$/, `${key}.text`);
+    assert.equal(typeof entry.label, "string");
+  }
+  assert.equal(map.l2.text.toLowerCase(), "#111111", "2 号线黑字");
+  assert.equal(map.l7.text.toLowerCase(), "#111111", "7 号线黑字");
+  assert.equal(map.l1.text.toLowerCase(), "#ffffff", "1 号线白字");
+});
+
 test("every card carries hub/campus id refs that resolve, and no group/page", () => {
   const hubIds = new Set(data.hubs.map((h) => h.id));
   const campusIds = new Set(data.campuses.map((c) => c.id));

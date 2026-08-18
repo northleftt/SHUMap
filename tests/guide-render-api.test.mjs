@@ -47,7 +47,8 @@ test("guide-render.js exposes the documented window.GuideRender API", () => {
     "normalizeData", "hubFigures", "hubVideos", "appliesTo", "allIcons", "iconById", "renderIcon", "sanitizeRichHtml",
     "renderCard", "renderRouteCard", "renderFigureCard", "renderStepsCard",
     "renderHubGuide", "renderHubVideo", "renderRemark", "renderPairView",
-    "buildPrintRoot", "lineColor", "esc", "h",
+    "buildPrintRoot", "lineColor", "lineInk", "lineSwatch", "lineBadgeStyle",
+    "normalizeLineColors", "autoLineInk", "esc", "h",
     "openImageViewer", "closeImageViewer",
   ]) {
     assert.equal(typeof GR[key], "function", `GuideRender.${key} 缺失`);
@@ -233,4 +234,39 @@ test("icon registry: data.icons override the factory seed by id", () => {
   assert.equal(GR.iconById({ icons: own }, "metro-sh").name, "自定义地铁", "同 id 时用户的覆盖出厂的");
   assert.equal(GR.iconById({}, "metro-sh").name, "上海地铁", "缺失时回落出厂种子");
   assert.equal(GR.iconById({}, "nope"), null);
+});
+
+test("line color library: string entries, object entries, and default ink", () => {
+  const GR = loadRender().window.GuideRender;
+  const legacy = { lineColors: { l2: "#8cc63e", l1: "#e4002b", l7: "#f3901d", neutral: "#8f98a3" } };
+  assert.equal(GR.lineColor("l2", legacy), "#8cc63e", "旧稿字符串应直接当底色");
+  assert.equal(GR.lineInk("l2", legacy), "#111111", "2 号线默认黑字");
+  assert.equal(GR.lineInk("l7", legacy), "#111111", "7 号线默认黑字");
+  assert.equal(GR.lineInk("l1", legacy), "#ffffff", "1 号线默认白字");
+  assert.equal(GR.lineColor(null, legacy), "#8f98a3");
+  assert.equal(GR.lineColor("#123456", legacy), "#123456", "未知 key 原样透传");
+
+  const lib = {
+    lineColors: {
+      l2: { fill: "#82BF25", text: "#111111", label: "2号线" },
+      custom: { fill: "#000000", text: "#ffee00", label: "自定义" },
+    },
+  };
+  assert.equal(GR.lineColor("l2", lib), "#82BF25");
+  assert.equal(GR.lineInk("l2", lib), "#111111");
+  assert.equal(GR.lineSwatch("custom", lib).label, "自定义");
+  assert.equal(GR.lineInk("custom", lib), "#ffee00", "色库显式字色优先于默认");
+  assert.match(GR.lineBadgeStyle("l2", lib), /--c:#82BF25/);
+  assert.match(GR.lineBadgeStyle("l2", lib), /color:#111111/);
+
+  const upgraded = { schema: 2, hubs: [], cards: [], lineColors: { l2: "#8cc63e" } };
+  GR.normalizeData(upgraded);
+  assert.equal(typeof upgraded.lineColors.l2, "object");
+  assert.equal(upgraded.lineColors.l2.fill, "#8cc63e");
+  assert.equal(upgraded.lineColors.l2.text, "#111111");
+  assert.equal(upgraded.lineColors.l2.label, "2号线");
+
+  assert.equal(GR.autoLineInk("#FCD600"), "#111111", "亮黄应自动黑字");
+  assert.equal(GR.autoLineInk("#E3002B"), "#ffffff", "深红应自动白字");
+  assert.ok(Array.isArray(GR.LINE_COLOR_PRESETS) && GR.LINE_COLOR_PRESETS.length >= 10);
 });

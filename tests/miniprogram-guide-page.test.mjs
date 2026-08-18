@@ -127,11 +127,20 @@ const content = guide.normalizeGuideContent(fixture.content);
   // modeLabel 缺失时回 MODE_LABEL 映射
   assert.equal(guide.GUIDE_MODE_LABEL.airport, "市域线");
 
-  // lineColor
+  // lineColor / lineInk（线上夹具仍是旧稿字符串色号）
   assert.equal(guide.lineColor("l2", content), "#8cc63e");
   assert.equal(guide.lineColor("l1", content), "#e4002b");
   assert.equal(guide.lineColor(null, content), "#8f98a3", "空 key 应回 neutral");
   assert.equal(guide.lineColor("#123456", content), "#123456", "未知 key 原样透传");
+  assert.equal(guide.lineInk("l2", content), "#111111", "2 号线默认黑字");
+  assert.equal(guide.lineInk("l7", content), "#111111", "7 号线默认黑字");
+  assert.equal(guide.lineInk("l1", content), "#ffffff", "1 号线默认白字");
+  assert.equal(guide.lineColor("l2", {
+    lineColors: { l2: { fill: "#82BF25", text: "#111111", label: "2号线" } },
+  }), "#82BF25", "对象色库取 fill");
+  assert.equal(guide.lineInk("custom", {
+    lineColors: { custom: { fill: "#000000", text: "#ffee00" } },
+  }), "#ffee00", "色库显式字色优先");
 
   // parseGuideQuery
   assert.deepEqual(guide.parseGuideQuery({ h: "pudong-airport", c: "jiading" }), {
@@ -175,6 +184,7 @@ const content = guide.normalizeGuideContent(fixture.content);
   assert.equal(l1.rideLines.length, 1);
   assert.equal(l1.rideLines[0].isBus, false);
   assert.match(l1.rideLines[0].noStyle, /background: #8cc63e/);
+  assert.match(l1.rideLines[0].noStyle, /color: #111111/, "2 号线徽标应是黑字");
   assert.equal(l1.rideLines[0].no, "2");
   assert.equal(l1.rideLines[0].suffix, "号线");
   assert.equal(l1.rideLines[0].toward, "往浦东1号2号航站楼方向");

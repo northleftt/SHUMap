@@ -42,22 +42,22 @@ window.GUIDE_DATA = {
     "revisionNote": "按原稿 21 页全量重录；数字经渲染图逐页目视核对"
   },
   "lineColors": {
-    "l1": "#e4002b",
-    "l2": "#8cc63e",
-    "l3": "#ffd100",
-    "l4": "#5b2d8e",
-    "l7": "#f3901d",
-    "l9": "#71c5e8",
-    "l10": "#c1a2ca",
-    "l11": "#871c2b",
-    "l15": "#bda26b",
-    "l17": "#bc8b5e",
-    "maglev": "#ee7b23",
-    "airport": "#35689f",
-    "bus": "#f2b203",
-    "bus185": "#5cb531",
-    "walk": "#b9bfc7",
-    "neutral": "#8f98a3"
+    "l1": { "fill": "#E3002B", "text": "#ffffff", "label": "1号线" },
+    "l2": { "fill": "#82BF25", "text": "#111111", "label": "2号线" },
+    "l3": { "fill": "#FCD600", "text": "#111111", "label": "3号线" },
+    "l4": { "fill": "#461D84", "text": "#ffffff", "label": "4号线" },
+    "l7": { "fill": "#ED6F00", "text": "#111111", "label": "7号线" },
+    "l9": { "fill": "#87CAED", "text": "#111111", "label": "9号线" },
+    "l10": { "fill": "#C6AFD4", "text": "#111111", "label": "10号线" },
+    "l11": { "fill": "#871C2B", "text": "#ffffff", "label": "11号线" },
+    "l15": { "fill": "#BCA886", "text": "#111111", "label": "15号线" },
+    "l17": { "fill": "#BC796F", "text": "#ffffff", "label": "17号线" },
+    "maglev": { "fill": "#008B9A", "text": "#ffffff", "label": "磁浮线" },
+    "airport": { "fill": "#898989", "text": "#ffffff", "label": "市域线" },
+    "bus": { "fill": "#F2B203", "text": "#111111", "label": "公交" },
+    "bus185": { "fill": "#5CB531", "text": "#111111", "label": "185路" },
+    "walk": { "fill": "#B9BFC7", "text": "#111111", "label": "步行" },
+    "neutral": { "fill": "#8F98A3", "text": "#ffffff", "label": "中性" }
   },
   "campuses": [
     {
