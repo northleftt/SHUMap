@@ -1,31 +1,16 @@
-// Shuttle schedule helpers. Schedules and stop sequences come from the v2 public
-// transit API (GET /api/public/transit/journeys, /transit/trips/:tripId/stops);
+// Shuttle schedule helpers. Schedules and line structure come from the v2 public
+// transit API (GET /api/public/transit/campus-lines, 0024 校区对校区改版);
 // stop identity comes from the active release manifest via ReleaseContext —
 // stops carry geometry and are map data, the timetable is live.
 //
-// Trip identity (tripId), booking policy, and arrivalTime: null semantics are
-// preserved from the backend contract.
+// 预约与否是线路级属性（CampusLine.bookingPolicy）；时刻网格按发车时刻把
+// 预/非班次合并成一格展示（旧版 mergeSchedulesByTime 语义）。
 
 import academicCalendarData from "../../../data/academic-calendar.json";
 import { publicApi } from "../api";
-import type { Journey, TripStop } from "../api/types";
+import type { CampusJourney, CampusLine, CampusLinesResponse, TransitStop } from "../api/types";
 
 export type DateBucket = "weekday" | "weekend" | "holiday" | "winterBreak" | "summerBreak";
-
-export interface ScheduleItem {
-  /** Stable trip identity from the backend. */
-  tripId: string;
-  routeName: string;
-  departureTime: string;
-  /** null when the source only carries departure times (current data). */
-  arrivalTime: string | null;
-  isReservation: boolean;
-  bookingPolicy: string;
-  bookingUrl: string | null;
-  /** Stop sequence range within the trip's pattern (for M7 下车点列表). */
-  fromSequence: number;
-  toSequence: number;
-}
 
 // ---------------------------------------------------------------------------
 // Date helpers (display + bucket label only; schedule resolution is server-side)
@@ -120,49 +105,141 @@ export function parseTime(timeStr: string): number {
   return hours * 60 + minutes;
 }
 
-export function getRemainingBuses(schedules: ScheduleItem[], currentTime: Date = new Date()): ScheduleItem[] {
+/** 过滤掉已过发车的班次并按时刻排序；departureTime 为 null 的班次排最后。 */
+export function getRemainingJourneys<T extends { departureTime: string | null }>(
+  journeys: T[],
+  currentTime: Date = new Date(),
+): T[] {
   const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
-  return schedules
-    .filter((s) => parseTime(s.departureTime) > currentMinutes)
-    .sort((a, b) => parseTime(a.departureTime) - parseTime(b.departureTime));
+  return journeys
+    .filter((journey) => journey.departureTime !== null && parseTime(journey.departureTime) > currentMinutes)
+    .sort((a, b) => parseTime(a.departureTime as string) - parseTime(b.departureTime as string));
 }
 
 // ---------------------------------------------------------------------------
-// Journey loading
+// 校区对校区线路加载（0024 改版）
 // ---------------------------------------------------------------------------
 
-function journeyToScheduleItem(journey: Journey): ScheduleItem {
-  return {
-    tripId: journey.tripId,
-    routeName: journey.routeName,
-    departureTime: journey.departureTime,
-    arrivalTime: journey.arrivalTime,
-    isReservation: journey.bookingPolicy === "required",
-    bookingPolicy: journey.bookingPolicy,
-    bookingUrl: journey.bookingUrl,
-    fromSequence: journey.fromSequence,
-    toSequence: journey.toSequence,
-  };
+/** 校车 OD 端点：有站点的校区 + 无校区站点的伪端点（如陈太公寓）。 */
+export interface TransitEndpoint {
+  /** campus_id，或无校区站点的 `stop:<stopId>`。 */
+  id: string;
+  name: string;
 }
 
 /**
- * Fetch the day's schedules between two stops from the journeys endpoint.
- * Trip identity is preserved.
+ * 从 release manifest 推导可选端点：transit 站点出现过的校区按 manifest.campuses
+ * 顺序排列；campus_id 为 null 的站点（陈太公寓）各自成组追加在后。
  */
-export async function fetchSchedules(
-  fromStopId: string,
-  toStopId: string,
-  date: Date,
-  signal?: AbortSignal,
-): Promise<ScheduleItem[]> {
-  const response = await publicApi.getJourneys({ fromStopId, toStopId, date: toDateKey(date) }, signal);
-  return response.journeys.map(journeyToScheduleItem);
+export function listTransitEndpoints(manifest: {
+  campuses: Array<{ id: string; name: string }>;
+  transit: { stops: TransitStop[] };
+}): TransitEndpoint[] {
+  const endpoints: TransitEndpoint[] = [];
+  for (const campus of manifest.campuses) {
+    if (manifest.transit.stops.some((stop) => stop.campus_id === campus.id)) {
+      endpoints.push({ id: campus.id, name: campus.name });
+    }
+  }
+  for (const stop of manifest.transit.stops) {
+    if (stop.campus_id === null) endpoints.push({ id: `stop:${stop.id}`, name: stop.name });
+  }
+  return endpoints;
 }
 
-/** 取某班次的停靠序列（M7 预览的数据源）。 */
-export async function fetchTripStops(tripId: string, signal?: AbortSignal): Promise<TripStop[]> {
-  const response = await publicApi.getTripStops(tripId, signal);
-  return response.stops;
+/** 拉取某校区对当日的全部线路（含停靠序列与班次逐站时刻）。 */
+export async function fetchCampusLines(
+  fromEndpointId: string,
+  toEndpointId: string,
+  date: Date,
+  signal?: AbortSignal,
+): Promise<CampusLinesResponse> {
+  return publicApi.getCampusLines({ from: fromEndpointId, to: toEndpointId, date: toDateKey(date) }, signal);
+}
+
+/** 线路的全部上车点（跨 pattern 去重，保持停靠顺序）。 */
+export function lineBoardingStops(line: CampusLine): Array<{ stopId: string; stopName: string }> {
+  const seen = new Set<string>();
+  const stops: Array<{ stopId: string; stopName: string }> = [];
+  for (const pattern of line.patterns) {
+    for (const stop of pattern.stops) {
+      if (stop.pickupType === "none" || seen.has(stop.stopId)) continue;
+      seen.add(stop.stopId);
+      stops.push({ stopId: stop.stopId, stopName: stop.stopName });
+    }
+  }
+  return stops;
+}
+
+/** 线路的全部下车点（跨 pattern 去重，保持停靠顺序）。 */
+export function lineAlightingStops(line: CampusLine): Array<{ stopId: string; stopName: string }> {
+  const seen = new Set<string>();
+  const stops: Array<{ stopId: string; stopName: string }> = [];
+  for (const pattern of line.patterns) {
+    for (const stop of pattern.stops) {
+      if (stop.dropoffType === "none" || seen.has(stop.stopId)) continue;
+      seen.add(stop.stopId);
+      stops.push({ stopId: stop.stopId, stopName: stop.stopName });
+    }
+  }
+  return stops;
+}
+
+/** 多条线路的站点列表合并去重（按 stopId，保持首次出现顺序）。 */
+function mergeStopLists(
+  lists: Array<Array<{ stopId: string; stopName: string }>>,
+): Array<{ stopId: string; stopName: string }> {
+  const seen = new Set<string>();
+  const stops: Array<{ stopId: string; stopName: string }> = [];
+  for (const list of lists) {
+    for (const stop of list) {
+      if (seen.has(stop.stopId)) continue;
+      seen.add(stop.stopId);
+      stops.push(stop);
+    }
+  }
+  return stops;
+}
+
+/** 同类多条线路的上车点合并去重（「上下车点」区块按预约类别拆行用）。 */
+export function linesBoardingStops(lines: CampusLine[]): Array<{ stopId: string; stopName: string }> {
+  return mergeStopLists(lines.map(lineBoardingStops));
+}
+
+/** 同类多条线路的下车点合并去重。 */
+export function linesAlightingStops(lines: CampusLine[]): Array<{ stopId: string; stopName: string }> {
+  return mergeStopLists(lines.map(lineAlightingStops));
+}
+
+// ---------------------------------------------------------------------------
+// 班次展示：跨线路摊平 + 时刻合并（旧版「最近一班 / 今日其他班次」语义，
+// 预约与否读所属线路的 bookingPolicy）
+// ---------------------------------------------------------------------------
+
+/** 预约车 = required / optional 线路；非预约车 = not_required。 */
+export function isReservationLine(line: CampusLine): boolean {
+  return line.bookingPolicy === "required" || line.bookingPolicy === "optional";
+}
+
+/** 摊平到班次粒度的展示条目：携带所属线路与预约类别。 */
+export interface FlatLineJourney {
+  line: CampusLine;
+  journey: CampusJourney;
+  /** 已过滤 null，保证非空。 */
+  departureTime: string;
+  isReservation: boolean;
+}
+
+/** 某校区对全部线路的当日班次合并：剔除无发车时刻的班次，按时刻升序。 */
+export function flattenLineJourneys(lines: CampusLine[]): FlatLineJourney[] {
+  const flat: FlatLineJourney[] = [];
+  for (const line of lines) {
+    for (const journey of line.journeys) {
+      if (journey.departureTime === null) continue;
+      flat.push({ line, journey, departureTime: journey.departureTime, isReservation: isReservationLine(line) });
+    }
+  }
+  return flat.sort((a, b) => parseTime(a.departureTime) - parseTime(b.departureTime));
 }
 
 /** Same departure time can carry both a 预约 and a 非预约 trip — merge for the grid. */
@@ -173,14 +250,14 @@ export interface DisplayScheduleItem {
   status: ScheduleStatus;
 }
 
-export function mergeSchedulesByTime(schedules: ScheduleItem[]): DisplayScheduleItem[] {
+export function mergeSchedulesByTime(journeys: FlatLineJourney[]): DisplayScheduleItem[] {
   const merged = new Map<string, { hasReservation: boolean; hasNonReservation: boolean }>();
 
-  schedules.forEach((schedule) => {
-    const current = merged.get(schedule.departureTime) ?? { hasReservation: false, hasNonReservation: false };
-    if (schedule.isReservation) current.hasReservation = true;
+  journeys.forEach((item) => {
+    const current = merged.get(item.departureTime) ?? { hasReservation: false, hasNonReservation: false };
+    if (item.isReservation) current.hasReservation = true;
     else current.hasNonReservation = true;
-    merged.set(schedule.departureTime, current);
+    merged.set(item.departureTime, current);
   });
 
   return Array.from(merged.entries()).map(([departureTime, availability]) => ({
@@ -195,55 +272,70 @@ export function mergeSchedulesByTime(schedules: ScheduleItem[]): DisplaySchedule
 }
 
 // ---------------------------------------------------------------------------
-// M7 班次路线预览 — GET /api/public/transit/trips/:tripId/stops
-//
-// 停靠序列与时刻此前读 release manifest 里冻结的那一份。班次改了要立刻生效，
-// 所以这里和 journeys 一样走实时读；manifest 只留站点。
+// 班次路线预览 — 数据随 campus-lines 响应一次到位，不再二次请求
 // ---------------------------------------------------------------------------
 
-export interface TripPreviewStop {
+export interface LinePreviewStop {
   stopId: string;
   stopName: string;
   sequence: number;
   role: "boarding" | "alighting" | "intermediate";
   time: string | null;
   timeLabel: "发车" | "到达" | null;
+  /**
+   * true 表示这一站的 time 是推算值（发车时刻 + 历史区间用时中位数），不是排班
+   * 时刻。UI 必须把它和排班时刻区分开——把推算值显示成确定时刻会让人按它掐点
+   * 到站。见 worker/modules/travel-time.ts。
+   */
+  isEstimated: boolean;
+  /** 推算到达跨到次日（如 22:00 发车的末班车）。仅 isEstimated 时有意义。 */
+  dayOffset: number;
 }
 
 /**
- * Build the M7 preview: ordered stops of the trip's pattern between the
- * journey's from/to sequence, annotated with times from stop_times.
- * Current data only carries the first departure time — later times are null.
+ * 用线路的 pattern 停靠序列 + 班次逐站时刻拼预览时间线。
+ *
+ * 时刻的优先级：排班到达时刻 > 排班发车时刻 > 推算到达时刻。源数据（返校指南
+ * 原稿）只有首站发车时刻，中间站与末站的到达列基本全空，所以除首站之外基本都
+ * 落到推算值上；推算值来自定时采样的区间用时中位数，缺样本时为 null（显示「暂无」）。
  */
-export function buildTripPreview(
-  tripStops: TripStop[],
-  schedule: ScheduleItem,
-): { stops: TripPreviewStop[]; durationMinutes: number | null } {
-  const inRange = tripStops
-    .filter((row) => row.stopSequence >= schedule.fromSequence && row.stopSequence <= schedule.toSequence)
-    .sort((a, b) => a.stopSequence - b.stopSequence);
-
-  const stops: TripPreviewStop[] = inRange.map((row) => {
-    const isFirst = row.stopSequence === schedule.fromSequence;
-    const isLast = row.stopSequence === schedule.toSequence;
-    const depart = row.departureTime;
-    const arrive = row.arrivalTime;
+export function buildLinePreview(
+  line: CampusLine,
+  journey: CampusJourney,
+): { stops: LinePreviewStop[]; durationMinutes: number | null; hasEstimated: boolean } {
+  const pattern = line.patterns.find((candidate) => candidate.patternId === journey.patternId);
+  if (!pattern) throw new Error(`班次 ${journey.tripId} 的 pattern 不在线路 ${line.routeId} 内`);
+  const times = new Map(journey.stopTimes.map((time) => [time.stopSequence, time]));
+  const ordered = [...pattern.stops].sort((a, b) => a.stopSequence - b.stopSequence);
+  const stops: LinePreviewStop[] = ordered.map((stop, index) => {
+    const time = times.get(stop.stopSequence);
+    const isFirst = index === 0;
+    const isLast = index === ordered.length - 1;
+    const scheduled = isFirst ? (time?.departureTime ?? null) : (time?.arrivalTime ?? time?.departureTime ?? null);
+    // 首站不推算：它的发车时刻就是排班本身，没有未知量。
+    const estimated = isFirst ? null : (time?.estimatedArrivalTime ?? null);
+    const value = scheduled ?? estimated;
+    const isEstimated = scheduled === null && estimated !== null;
     return {
-      stopId: row.stopId,
-      stopName: row.stopName,
-      sequence: row.stopSequence,
+      stopId: stop.stopId,
+      stopName: stop.stopName,
+      sequence: stop.stopSequence,
       role: isFirst ? "boarding" : isLast ? "alighting" : "intermediate",
-      time: isFirst ? depart : (arrive ?? depart),
-      timeLabel: isFirst ? (depart ? "发车" : null) : arrive || depart ? "到达" : null,
+      time: value,
+      timeLabel: value === null ? null : isFirst ? "发车" : "到达",
+      isEstimated,
+      dayOffset: isEstimated ? (time?.estimatedArrivalDayOffset ?? 0) : 0,
     };
   });
 
-  const firstTime = stops.find((s) => s.time)?.time;
-  const lastTime = [...stops].reverse().find((s) => s.time)?.time;
-  const durationMinutes =
-    firstTime && lastTime && lastTime !== firstTime && stops.length > 1
+  // 全程用时优先用班次级的估算（服务端按整链累加得出，跨零点也已处理）；
+  // 没有估算时退回「首末两个已知时刻之差」的老算法。
+  const firstTime = stops.find((stop) => stop.time)?.time;
+  const lastTime = [...stops].reverse().find((stop) => stop.time)?.time;
+  const durationMinutes = journey.estimatedDurationMinutes
+    ?? (firstTime && lastTime && lastTime !== firstTime && stops.length > 1
       ? Math.max(0, parseTime(lastTime) - parseTime(firstTime))
-      : null;
+      : null);
 
-  return { stops, durationMinutes };
+  return { stops, durationMinutes, hasEstimated: stops.some((stop) => stop.isEstimated) };
 }

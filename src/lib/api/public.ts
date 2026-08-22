@@ -7,6 +7,7 @@ import { parseReleaseManifest } from "../release/manifestContract";
 import { parseFacilityStatusResponse, parseOperationalEventsResponse } from "./publicContract";
 import type {
   CampaignsResponse,
+  CampusLinesResponse,
   CollectionTasksResponse,
   OwnedCollectionTaskDto,
   FacilityStatusResponse,
@@ -182,6 +183,17 @@ export function getJourneys(
  */
 export function getTripStops(tripId: string, signal?: AbortSignal): Promise<TripStopsResponse> {
   return apiFetch<TripStopsResponse>(`/api/public/transit/trips/${encodeURIComponent(tripId)}/stops`, { signal });
+}
+
+/** GET /api/public/transit/campus-lines — 校区对校区的线路 + 当日班次（0024 改版）。 */
+export function getCampusLines(
+  params: { from: string; to: string; date?: string },
+  signal?: AbortSignal,
+): Promise<CampusLinesResponse> {
+  return apiFetch<CampusLinesResponse>("/api/public/transit/campus-lines", {
+    query: { from: params.from, to: params.to, date: params.date },
+    signal,
+  });
 }
 
 /**

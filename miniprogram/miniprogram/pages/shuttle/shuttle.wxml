@@ -6,16 +6,16 @@
     <view class="booking-link" bindtap="openBookingSite">预约网站 ›</view>
   </view>
 
-  <!-- 线路卡：从/到站点选择 + 交换 + 日期 -->
+  <!-- 校区选择卡：从/到校区端点 + 交换 + 日期 -->
   <view class="route-card">
-    <picker class="stop-picker" mode="selector" range="{{stopNames}}" value="{{fromIndex}}" bindchange="onFromChange">
+    <picker class="stop-picker" mode="selector" range="{{endpointNames}}" value="{{fromIndex}}" bindchange="onFromChange">
       <view class="stop-label">从</view>
-      <view class="stop-value">{{stopNames[fromIndex] || '选择'}} ▾</view>
+      <view class="stop-value">{{endpointNames[fromIndex] || '选择'}} ▾</view>
     </picker>
     <view class="swap-btn" bindtap="onSwap">⇅</view>
-    <picker class="stop-picker" mode="selector" range="{{stopNames}}" value="{{toIndex}}" bindchange="onToChange">
+    <picker class="stop-picker" mode="selector" range="{{endpointNames}}" value="{{toIndex}}" bindchange="onToChange">
       <view class="stop-label">到</view>
-      <view class="stop-value">{{stopNames[toIndex] || '选择'}} ▾</view>
+      <view class="stop-value">{{endpointNames[toIndex] || '选择'}} ▾</view>
     </picker>
     <view class="date-divider"></view>
     <picker class="date-picker" mode="date" value="{{dateKey}}" bindchange="onDateChange">
@@ -91,21 +91,26 @@
       </view>
     </block>
 
-    <!-- 上下车点 -->
-    <block wx:if="{{fromStopName && toStopName && fromStopName !== toStopName}}">
+    <!-- 上下车点：按乘车方式拆四行，每行可挂多个站点 -->
+    <block wx:if="{{spotRows.length > 0}}">
       <view class="section-header">上下车点</view>
       <view class="stop-card">
-        <view class="stop-row stop-row-border" data-role="from" bindtap="openSelectedStopOnMap">
-          <text class="stop-row-label">上车点</text>
-          <text class="stop-row-pin">📍</text>
-          <text class="stop-row-name">{{fromStopName}}</text>
-          <text wx:if="{{fromStopCanMap}}" class="stop-row-action">查看地图 ›</text>
-        </view>
-        <view class="stop-row" data-role="to" bindtap="openSelectedStopOnMap">
-          <text class="stop-row-label">下车点</text>
-          <text class="stop-row-pin">📍</text>
-          <text class="stop-row-name">{{toStopName}}</text>
-          <text wx:if="{{toStopCanMap}}" class="stop-row-action">查看地图 ›</text>
+        <view wx:for="{{spotRows}}" wx:key="label" class="stop-row {{item.showBorder ? 'stop-row-border' : ''}}">
+          <text class="stop-row-label">{{item.label}}</text>
+          <view class="stop-row-stops">
+            <view
+              wx:for="{{item.stops}}"
+              wx:for-item="stop"
+              wx:key="stopId"
+              class="stop-entry"
+              data-stop-id="{{stop.stopId}}"
+              bindtap="openStopOnMap"
+            >
+              <text class="stop-row-pin">📍</text>
+              <text class="stop-row-name">{{stop.name}}</text>
+              <text wx:if="{{stop.canMap}}" class="stop-row-action">查看地图 ›</text>
+            </view>
+          </view>
         </view>
       </view>
     </block>
@@ -125,12 +130,7 @@
       <view class="sheet-close" bindtap="closePreview">✕</view>
     </view>
 
-    <view wx:if="{{previewLoading}}" class="state-block">正在加载停靠站点…</view>
-    <view wx:elif="{{previewError}}" class="state-block">
-      <view class="state-title">停靠站点加载失败</view>
-      <view class="state-sub">{{previewError}}</view>
-    </view>
-    <view wx:elif="{{previewOffline}}" class="sheet-offline">离线快照数据，暂无停靠站点信息</view>
+    <view wx:if="{{previewOffline}}" class="sheet-offline">离线快照数据，暂无停靠站点信息</view>
 
     <!-- 站点时间线 -->
     <view wx:if="{{previewBoarding}}" class="timeline">

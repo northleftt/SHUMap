@@ -17,8 +17,12 @@ import {
 import { normalizeLocationInputs } from "../lib/revision-contracts";
 import { audit } from "./audit";
 import { listEntityLocationsByType, planLocation } from "./locations";
+import { estimateStopArrivals, loadSegmentMedians, scopeSegmentMedians } from "./travel-time";
 
-const PICKUP_TYPES = ["regular", "reservation_only", "none"] as const;
+// reservation_only 是旧模型的残留（0024 起停用）：预约与否是线路级属性
+// （transit_routes.booking_policy），不再允许写在停靠行上。读侧（journeys 查询）
+// 仍兼容旧值，迁移前的存量数据不至于匹配不到。
+const PICKUP_WRITE_TYPES = ["regular", "none"] as const;
 const DROPOFF_TYPES = ["regular", "none"] as const;
 const BOOKING_POLICIES = ["required", "optional", "not_required"] as const;
 const STOP_STATUSES = ["active", "temporarily_closed", "retired"] as const;
@@ -109,7 +113,7 @@ export async function listTransit(env: Env): Promise<Response> {
     // the editor needs to show (and be able to restore) it rather than fail to
     // resolve the name.
     all(env.DB, "select id,place_id as placeId,campus_id as campusId,code,name,status from transit_stops order by status='retired',name"),
-    all(env.DB, "select id,code,name,operator_id as operatorId,status from transit_routes order by status='retired',name"),
+    all(env.DB, "select id,code,name,operator_id as operatorId,status,booking_policy as bookingPolicy,booking_url as bookingUrl from transit_routes order by status='retired',name"),
     all(env.DB, "select id,route_id as routeId,direction_id as directionId,name,route_anchor_id as routeAnchorId from transit_patterns order by route_id,direction_id"),
     all(env.DB, "select pattern_id as patternId,stop_id as stopId,stop_sequence as stopSequence,pickup_type as pickupType,dropoff_type as dropoffType from transit_pattern_stops order by pattern_id,stop_sequence"),
     all(env.DB, "select id,name,timezone,valid_from as validFrom,valid_to as validTo,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id as sourceId from service_calendars order by valid_from desc,id"),
@@ -308,17 +312,21 @@ export async function deleteStop(
 }
 
 export async function createRoute(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = exactObject(await readJson<unknown>(request), "transitRoute", ["name", "code", "operatorId"]);
+  const body = exactObject(await readJson<unknown>(request), "transitRoute", ["name", "code", "operatorId", "bookingPolicy", "bookingUrl"]);
   const id = makeId("route");
   const now = isoNow();
   const operatorId = optionalString(body.operatorId, "operatorId", 100);
   const code = optionalString(body.code, "code", 100);
+  const bookingUrl = optionalString(body.bookingUrl, "bookingUrl", 1000);
+  const bookingPolicy = body.bookingPolicy === undefined || body.bookingPolicy === null
+    ? "not_required"
+    : oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES);
   await Promise.all([
     assertExists(env.DB, "organizations", operatorId, "Operator"),
     assertCodeAvailable(env, "transit_routes", code, null),
   ]);
-  await env.DB.prepare("insert into transit_routes(id,code,name,operator_id,status,created_at,updated_at) values(?,?,?,?,'active',?,?)")
-    .bind(id, code, requiredString(body.name, "name", 200), operatorId, now, now).run();
+  await env.DB.prepare("insert into transit_routes(id,code,name,operator_id,status,booking_policy,booking_url,created_at,updated_at) values(?,?,?,?,'active',?,?,?,?)")
+    .bind(id, code, requiredString(body.name, "name", 200), operatorId, bookingPolicy, bookingUrl, now, now).run();
   await audit(env, principal, "transit.route.create", "transit_route", id, requestId, null, body);
   return json({ id }, { status: 201 });
 }
@@ -330,25 +338,40 @@ export async function updateRoute(
   routeId: string,
   requestId: string,
 ): Promise<Response> {
-  const before = await first<{ id: string; code: string | null; name: string; operator_id: string | null; status: string }>(
+  const before = await first<{ id: string; code: string | null; name: string; operator_id: string | null; status: string; booking_policy: string; booking_url: string | null }>(
     env.DB,
-    "select id,code,name,operator_id,status from transit_routes where id=?",
+    "select id,code,name,operator_id,status,booking_policy,booking_url from transit_routes where id=?",
     [routeId],
   );
   if (!before) throw new HttpError(404, "not_found", "Route does not exist");
-  const body = partialObject(await readJson<unknown>(request), "transitRouteUpdate", ["name", "code", "operatorId", "status"]);
+  const body = partialObject(await readJson<unknown>(request), "transitRouteUpdate", ["name", "code", "operatorId", "status", "bookingPolicy", "bookingUrl"]);
   const name = Object.hasOwn(body, "name") ? requiredString(body.name, "name", 200) : before.name;
   const code = Object.hasOwn(body, "code") ? optionalString(body.code, "code", 100) : before.code;
   const operatorId = Object.hasOwn(body, "operatorId") ? optionalString(body.operatorId, "operatorId", 100) : before.operator_id;
   const status = Object.hasOwn(body, "status") ? oneOf(body.status, "status", ROUTE_STATUSES) : before.status;
+  const bookingPolicy = Object.hasOwn(body, "bookingPolicy")
+    ? oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES)
+    : before.booking_policy;
+  const bookingUrl = Object.hasOwn(body, "bookingUrl")
+    ? optionalString(body.bookingUrl, "bookingUrl", 1000)
+    : before.booking_url;
   await Promise.all([
     assertExists(env.DB, "organizations", operatorId, "Operator"),
     assertCodeAvailable(env, "transit_routes", code, routeId),
   ]);
   const now = isoNow();
-  await env.DB.prepare("update transit_routes set code=?,name=?,operator_id=?,status=?,updated_at=? where id=?")
-    .bind(code, name, operatorId, status, now, routeId).run();
-  await audit(env, principal, "transit.route.update", "transit_route", routeId, requestId, before, { name, code, operatorId, status });
+  await env.DB.batch([
+    env.DB.prepare("update transit_routes set code=?,name=?,operator_id=?,status=?,booking_policy=?,booking_url=?,updated_at=? where id=?")
+      .bind(code, name, operatorId, status, bookingPolicy, bookingUrl, now, routeId),
+    // 班次的 booking_policy 是线路级的冗余副本（列保留是因为 CHECK 约束重建代价大），
+    // 线路改预约属性时必须同步覆盖，否则公共查询两边读到不同答案。
+    env.DB.prepare(
+      `update transit_trips set booking_policy=?
+        where status='active' and booking_policy<>?
+          and pattern_id in (select id from transit_patterns where route_id=?)`,
+    ).bind(bookingPolicy, bookingPolicy, routeId),
+  ]);
+  await audit(env, principal, "transit.route.update", "transit_route", routeId, requestId, before, { name, code, operatorId, status, bookingPolicy, bookingUrl });
   return json({ id: routeId });
 }
 
@@ -400,7 +423,7 @@ export async function createPattern(request: Request, env: Env, principal: Sessi
     await assertExists(env.DB, "transit_stops", stopId, "Stop");
     if (seen.has(stopId)) throw new HttpError(400, "validation_error", "A stop can appear only once in a pattern");
     seen.add(stopId);
-    const pickupType = oneOf(stop.pickupType, `stops[${index}].pickupType`, PICKUP_TYPES);
+    const pickupType = oneOf(stop.pickupType, `stops[${index}].pickupType`, PICKUP_WRITE_TYPES);
     const dropoffType = oneOf(stop.dropoffType, `stops[${index}].dropoffType`, DROPOFF_TYPES);
     plannedStops.push({ stopId, pickupType, dropoffType });
   }
@@ -676,7 +699,14 @@ export async function createTrip(request: Request, env: Env, principal: SessionP
   const times = arrayValue(body.stopTimes, "stopTimes", MAX_PATTERN_STOPS);
   if (times.length !== patternStops.length) throw new HttpError(400, "validation_error", "stopTimes must contain one item for every pattern stop");
   const id = makeId("trip");
-  const policy = oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES);
+  // 预约与否是线路级属性（0024）：请求里的 bookingPolicy 仅作向后兼容收下，
+  // 落库一律以所属线路为准。
+  const route = await first<{ booking_policy: string }>(
+    env.DB,
+    "select r.booking_policy from transit_patterns p join transit_routes r on r.id=p.route_id where p.id=?",
+    [patternId],
+  );
+  const policy = route?.booking_policy ?? "not_required";
   const statements = [env.DB.prepare(
     `insert into transit_trips(id,pattern_id,service_calendar_id,public_label,booking_policy,booking_url,status,source_id)
      values(?,?,?,?,?,?,'active',?)`,
@@ -731,7 +761,7 @@ export async function replacePatternStops(
     seen.add(stopId);
     planned.push({
       stopId,
-      pickupType: oneOf(stop.pickupType, `stops[${index}].pickupType`, PICKUP_TYPES),
+      pickupType: oneOf(stop.pickupType, `stops[${index}].pickupType`, PICKUP_WRITE_TYPES),
       dropoffType: oneOf(stop.dropoffType, `stops[${index}].dropoffType`, DROPOFF_TYPES),
     });
   }
@@ -801,9 +831,13 @@ export async function updateTrip(
     const calendar = await first<{ id: string }>(env.DB, "select id from service_calendars where id=?", [calendarId]);
     if (!calendar) throw new HttpError(400, "validation_error", "serviceCalendarId does not exist");
   }
-  const policy = Object.hasOwn(body, "bookingPolicy")
-    ? oneOf(body.bookingPolicy, "bookingPolicy", BOOKING_POLICIES)
-    : trip.booking_policy;
+  // 同 createTrip：bookingPolicy 以所属线路为准，请求里的值不再生效。
+  const route = await first<{ booking_policy: string }>(
+    env.DB,
+    "select r.booking_policy from transit_patterns p join transit_routes r on r.id=p.route_id where p.id=?",
+    [trip.pattern_id],
+  );
+  const policy = route?.booking_policy ?? trip.booking_policy;
   const bookingUrl = Object.hasOwn(body, "bookingUrl")
     ? optionalString(body.bookingUrl, "bookingUrl", 1000)
     : trip.booking_url;
@@ -918,4 +952,222 @@ export async function publicTripStops(env: Env, tripId: string): Promise<Respons
     [tripId, trip.patternId],
   );
   return json({ tripId, patternId: trip.patternId, stops }, { headers: { "cache-control": "public, max-age=60" } });
+}
+
+// ---------------------------------------------------------------------------
+// 校区对校区模型（0024 改版）
+//
+// 校车线路的真实结构是「校区 A → 校区 B」，每条线路挂多个上/下车点（pattern 的
+// 停靠序列），预约与否是线路属性。客户端按校区选 OD，不再按乘车点选。
+//
+// 端点 id：校区的 campus_id 直接用；campus_id 为 null 的乘车点（如陈太公寓）
+// 自成一组，用 `stop:<stopId>` 作伪端点 id，免得为它造一条 campuses 行污染
+// 校区列表。
+// ---------------------------------------------------------------------------
+
+interface TransitEndpoint {
+  id: string;
+  name: string;
+  stopIds: string[];
+}
+
+async function resolveTransitEndpoint(env: Env, endpointId: string): Promise<TransitEndpoint | null> {
+  if (endpointId.startsWith("stop:")) {
+    const stopId = endpointId.slice("stop:".length);
+    const stop = await first<{ id: string; name: string }>(
+      env.DB,
+      "select id,name from transit_stops where id=? and status='active'",
+      [stopId],
+    );
+    return stop ? { id: endpointId, name: stop.name, stopIds: [stop.id] } : null;
+  }
+  const campus = await first<{ id: string; name: string }>(
+    env.DB,
+    "select id,name from campuses where id=? and status='active'",
+    [endpointId],
+  );
+  if (!campus) return null;
+  const stops = await all<{ id: string }>(
+    env.DB,
+    "select id from transit_stops where campus_id=? and status='active'",
+    [campus.id],
+  );
+  return { id: campus.id, name: campus.name, stopIds: stops.map((stop) => stop.id) };
+}
+
+function shanghaiWeekday(date: string): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", weekday: "long" })
+    .format(new Date(`${date}T12:00:00+08:00`))
+    .toLowerCase();
+}
+
+/**
+ * GET /api/public/transit/campus-lines?from=<endpointId>&to=<endpointId>&date=YYYY-MM-DD
+ *
+ * 返回该校区对下的全部线路（预约线/非预约线分开），每条线路带完整停靠序列和
+ * 当日班次（含逐站时刻，班次预览不必再回源 trips/:id/stops）。日历过滤规则与
+ * publicJourneys 完全一致。
+ */
+export async function publicCampusLines(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const date = url.searchParams.get("date") ?? new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+  const fromId = url.searchParams.get("from");
+  const toId = url.searchParams.get("to");
+  if (!fromId || !toId) throw new HttpError(400, "validation_error", "from and to are required");
+  if (fromId === toId) throw new HttpError(400, "validation_error", "from and to must differ");
+  const [from, to] = await Promise.all([resolveTransitEndpoint(env, fromId), resolveTransitEndpoint(env, toId)]);
+  if (!from || !to) throw new HttpError(404, "not_found", "One or both endpoints do not exist");
+  const weekday = shanghaiWeekday(date);
+  if (!(WEEKDAYS as readonly string[]).includes(weekday)) throw new HttpError(400, "validation_error", "Invalid date");
+  const headers = { "cache-control": "public, max-age=60" };
+  const payload = { date, timezone: "Asia/Shanghai", from: { id: from.id, name: from.name }, to: { id: to.id, name: to.name } };
+  if (from.stopIds.length === 0 || to.stopIds.length === 0) return json({ ...payload, lines: [] }, { headers });
+
+  const fromMarks = from.stopIds.map(() => "?").join(",");
+  const toMarks = to.stopIds.map(() => "?").join(",");
+  const patterns = await all<{
+    patternId: string; patternName: string; routeId: string; routeName: string;
+    bookingPolicy: string; bookingUrl: string | null;
+  }>(
+    env.DB,
+    `select p.id as patternId,p.name as patternName,r.id as routeId,r.name as routeName,
+            r.booking_policy as bookingPolicy,r.booking_url as bookingUrl
+       from transit_patterns p
+       join transit_routes r on r.id=p.route_id and r.status='active'
+      where (select ps.stop_id from transit_pattern_stops ps where ps.pattern_id=p.id order by ps.stop_sequence limit 1) in (${fromMarks})
+        and (select ps.stop_id from transit_pattern_stops ps where ps.pattern_id=p.id order by ps.stop_sequence desc limit 1) in (${toMarks})
+      order by r.name,p.id`,
+    [...from.stopIds, ...to.stopIds],
+  );
+  if (patterns.length === 0) return json({ ...payload, lines: [] }, { headers });
+
+  const patternIds = patterns.map((pattern) => pattern.patternId);
+  const patternMarks = patternIds.map(() => "?").join(",");
+  const [patternStops, trips] = await Promise.all([
+    all<{
+      patternId: string; stopId: string; stopName: string; stopSequence: number;
+      pickupType: string; dropoffType: string;
+    }>(
+      env.DB,
+      `select ps.pattern_id as patternId,ps.stop_id as stopId,s.name as stopName,ps.stop_sequence as stopSequence,
+              ps.pickup_type as pickupType,ps.dropoff_type as dropoffType
+         from transit_pattern_stops ps join transit_stops s on s.id=ps.stop_id
+        where ps.pattern_id in (${patternMarks})
+        order by ps.pattern_id,ps.stop_sequence`,
+      patternIds,
+    ),
+    all<{ tripId: string; patternId: string; publicLabel: string | null; bookingUrl: string | null }>(
+      env.DB,
+      `select t.id as tripId,t.pattern_id as patternId,t.public_label as publicLabel,t.booking_url as bookingUrl
+         from transit_trips t join service_calendars c on c.id=t.service_calendar_id
+        where t.status='active' and t.pattern_id in (${patternMarks})
+          and c.valid_from<=? and c.valid_to>=?
+          and (c.${weekday}=1 or exists(
+            select 1 from service_calendar_exceptions a
+             where a.calendar_id=c.id and a.service_date=? and a.exception_type='added'
+          ))
+          and not exists(select 1 from service_calendar_exceptions e where e.calendar_id=c.id and e.service_date=? and e.exception_type='removed')`,
+      [...patternIds, date, date, date, date],
+    ),
+  ]);
+
+  const tripIds = trips.map((trip) => trip.tripId);
+  const stopTimes = tripIds.length === 0 ? [] : await all<{
+    tripId: string; stopSequence: number; arrivalTime: string | null; departureTime: string | null;
+  }>(
+    env.DB,
+    `select trip_id as tripId,stop_sequence as stopSequence,arrival_time as arrivalTime,departure_time as departureTime
+       from transit_stop_times where trip_id in (${tripIds.map(() => "?").join(",")})
+       order by trip_id,stop_sequence`,
+    tripIds,
+  );
+  const timesByTrip = new Map<string, typeof stopTimes>();
+  for (const time of stopTimes) {
+    const list = timesByTrip.get(time.tripId) ?? [];
+    list.push(time);
+    timesByTrip.set(time.tripId, list);
+  }
+
+  // 区间用时中位数：给每个下车站补一个**估算**到达时间。
+  //
+  // 为什么要估：源数据（返校指南 PDF / 管理端录入）只有首站发车时刻，
+  // transit_stop_times 的到达列基本全空（实测线上 157 个班次里 seq>=2 全空），
+  // 所以「几点能到」在页面上一直是空的。校车按表发车，唯一的未知量是行驶耗时，
+  // 由 worker/modules/travel-time.ts 的定时采样攒下来（见那边的文件头）。
+  //
+  // 没有样本时这里返回的 estimated* 全是 null，页面按「暂无」渲染 —— 采样还没跑
+  // 或某段缺样本都不影响这个接口的其余内容。
+  const segmentMedians = await loadSegmentMedians(env, patternIds);
+  const sequencesByPattern = new Map<string, number[]>();
+  for (const stop of patternStops) {
+    const list = sequencesByPattern.get(stop.patternId) ?? [];
+    list.push(stop.stopSequence);
+    sequencesByPattern.set(stop.patternId, list);
+  }
+
+  const lines = new Map<string, {
+    routeId: string; routeName: string; bookingPolicy: string; bookingUrl: string | null;
+    patterns: Array<{ patternId: string; name: string; stops: unknown[] }>;
+    journeys: Array<Record<string, unknown>>;
+  }>();
+  for (const pattern of patterns) {
+    const line = lines.get(pattern.routeId) ?? {
+      routeId: pattern.routeId,
+      routeName: pattern.routeName,
+      bookingPolicy: pattern.bookingPolicy,
+      bookingUrl: pattern.bookingUrl,
+      patterns: [],
+      journeys: [],
+    };
+    line.patterns.push({
+      patternId: pattern.patternId,
+      name: pattern.patternName,
+      stops: patternStops
+        .filter((stop) => stop.patternId === pattern.patternId)
+        .map(({ patternId: _patternId, ...stop }) => stop),
+    });
+    lines.set(pattern.routeId, line);
+  }
+  for (const trip of trips) {
+    const pattern = patterns.find((candidate) => candidate.patternId === trip.patternId);
+    if (!pattern) continue;
+    const line = lines.get(pattern.routeId);
+    if (!line) continue;
+    if (line.bookingUrl === null && trip.bookingUrl !== null) line.bookingUrl = trip.bookingUrl;
+    const times = timesByTrip.get(trip.tripId) ?? [];
+    // 发车时刻取该班次第一个有值的 departure_time：线上只有首站录了时刻。
+    const departureTime = times.find((time) => time.departureTime !== null)?.departureTime ?? null;
+    const sequences = (sequencesByPattern.get(trip.patternId) ?? []).slice().sort((a, b) => a - b);
+    const arrivals = departureTime === null
+      ? new Map<number, { time: string; dayOffset: number; durationSeconds: number }>()
+      : estimateStopArrivals(
+        sequences,
+        scopeSegmentMedians(segmentMedians, trip.patternId, departureTime),
+        departureTime.slice(0, 5),
+      );
+    const lastSequence = sequences.length ? sequences[sequences.length - 1] : null;
+    const finalArrival = lastSequence === null ? undefined : arrivals.get(lastSequence);
+    line.journeys.push({
+      tripId: trip.tripId,
+      patternId: trip.patternId,
+      publicLabel: trip.publicLabel,
+      departureTime: times[0]?.departureTime ?? null,
+      arrivalTime: times.length ? times[times.length - 1].arrivalTime : null,
+      // 末站的估算到达时间与全程估算用时（分钟）。录了真实到达时刻时客户端优先用
+      // arrivalTime，这两个字段只在它为 null 时兜底。
+      estimatedArrivalTime: finalArrival?.time ?? null,
+      estimatedArrivalDayOffset: finalArrival?.dayOffset ?? null,
+      estimatedDurationMinutes: finalArrival ? Math.round(finalArrival.durationSeconds / 60) : null,
+      stopTimes: times.map(({ tripId: _tripId, ...time }) => ({
+        ...time,
+        // 逐站估算：断链之后的站为 null（见 estimateStopArrivals 的注释）。
+        estimatedArrivalTime: arrivals.get(time.stopSequence)?.time ?? null,
+        estimatedArrivalDayOffset: arrivals.get(time.stopSequence)?.dayOffset ?? null,
+      })),
+    });
+  }
+  for (const line of lines.values()) {
+    line.journeys.sort((a, b) => String(a.departureTime ?? "99:99").localeCompare(String(b.departureTime ?? "99:99")));
+  }
+  return json({ ...payload, lines: [...lines.values()] }, { headers });
 }

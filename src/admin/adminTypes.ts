@@ -282,6 +282,9 @@ export interface TransitRouteRow {
   name: string;
   operatorId: string | null;
   status: string;
+  /** 预约是线路级属性（0024）；班次的同名列是它的冗余副本，由服务端强制同步。 */
+  bookingPolicy: TransitBookingPolicy;
+  bookingUrl: string | null;
 }
 
 export interface TransitPatternRow {

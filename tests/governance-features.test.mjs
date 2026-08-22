@@ -64,6 +64,20 @@ test("journeys enforce boarding and alighting rules plus added dates", () => {
   assert.match(source, /exception_type='added'/);
 });
 
+test("campus-lines 校区对校区模型：线路级预约与写入侧收紧（0024）", () => {
+  const source = read("worker/modules/transit.ts");
+  const router = read("worker/index-v2.ts");
+  // 写入侧 pickup_type 收紧：拒 reservation_only（读侧 journeys 查询保留兼容）
+  assert.match(source, /PICKUP_WRITE_TYPES = \["regular", "none"\]/);
+  // 预约是线路级属性：transit_routes 写入带 booking_policy/booking_url
+  assert.match(source, /insert into transit_routes\([^)]*booking_policy[^)]*booking_url[^)]*\)/);
+  // updateRoute 级联覆盖 active 班次的 booking_policy
+  assert.match(source, /update transit_trips set booking_policy=\?/);
+  // campus-lines 公共端点注册到路由
+  assert.match(router, /path === "\/api\/public\/transit\/campus-lines"/);
+  assert.match(router, /publicCampusLines\(request, env\)/);
+});
+
 test("release manifest publishes dynamic filters and aliases are searchable", () => {
   const source = read("worker/modules/releases.ts");
   assert.match(source, /map_filter_categories where active=1/);
@@ -101,10 +115,11 @@ test("revision hashes cover structural data and floor media rehash keeps it", ()
   assert.match(review, /\$\{row\.structureJson\}/);
 });
 
-test("new transit directions submit the complete chosen stop sequence", () => {
+test("transit stop sequence editor submits the complete chosen sequence", () => {
   const page = read("src/admin/pages/TransitPage.tsx");
   const worker = read("worker/modules/transit.ts");
-  assert.match(page, /stops: directionStops/);
+  // 站点顺序编辑器把完整序列交给 replace-transit-pattern-stops（增删改都走这一个调用）
+  assert.match(page, /replaceTransitPatternStops\(selectedPatternId, sequence\)/);
   assert.doesNotMatch(page, /stops\.slice\(0, 2\)/);
   assert.match(worker, /A stop can appear only once in a pattern/);
   assert.match(worker, /MAX_PATTERN_STOPS/);

@@ -222,30 +222,45 @@ for (const name of stops) {
 
 const academicYear = calendar.academicYears[0].id.trim();
 for (const [routeIndex, route] of shuttle.routes.entries()) {
-  const routeId = `route_${slug(route.id)}`;
-  const patternId = `pattern_${slug(route.id)}`;
-  const fromStop = stopId(route.from);
-  const toStop = stopId(route.to);
-  lines.push(
-    `insert or ignore into transit_routes(id,code,name,status,created_at,updated_at) values(${q(routeId)},${q(route.id)},${q(`${route.from} → ${route.to}`)},'active',${now},${now});`,
-    `insert or ignore into transit_patterns(id,route_id,direction_id,name) values(${q(patternId)},${q(routeId)},${routeIndex % 2},${q(`${route.from} → ${route.to}`)});`,
-    `insert or ignore into transit_pattern_stops(pattern_id,stop_id,stop_sequence,pickup_type,dropoff_type) values(${q(patternId)},${q(fromStop)},0,'regular','none');`,
-    `insert or ignore into transit_pattern_stops(pattern_id,stop_id,stop_sequence,pickup_type,dropoff_type) values(${q(patternId)},${q(toStop)},1,'none','regular');`,
+  // 0024 校区对校区改版：预约是线路级属性。混合预约的方向拆成普通线 + 「（预约）」线
+  // （对齐 generate_transit_route_split.mjs 对线上数据的拆分命名：code 加 -reservation 后缀）；
+  // 纯预约/纯普通方向只出一条线，保留原名。
+  const totals = [false, true].map((reservation) =>
+    Object.values(route.schedules).flat().filter((entry) => entry.isReservation === reservation).length,
   );
-  for (const [bucket, departures] of Object.entries(route.schedules)) {
-    const calendarId = `calendar_${slug(academicYear)}_${bucket}`;
-    const calendarName = CALENDAR_NAMES.get(bucket);
-    if (!calendarName) throw new Error(`Unknown shuttle calendar bucket: ${bucket}`);
-    const weekday = bucket === "weekday";
-    const weekend = bucket === "weekend";
-    lines.push(`insert or ignore into service_calendars(id,name,timezone,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id) values(${q(calendarId)},${q(`${academicYear} ${calendarName}`)},'Asia/Shanghai','2025-01-01','2026-12-31',${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekend ? 1 : 0},${weekend ? 1 : 0},'source_academic_calendar');`);
-    for (const [tripIndex, departure] of departures.entries()) {
-      const tripId = `trip_${slug(route.id)}_${bucket}_${tripIndex + 1}`;
-      lines.push(
-        `insert or ignore into transit_trips(id,pattern_id,service_calendar_id,public_label,booking_policy,status,source_id) values(${q(tripId)},${q(patternId)},${q(calendarId)},${q(departure.departureTime)},${q(departure.isReservation ? "required" : "not_required")},'active','source_shuttle_pdf');`,
-        `insert or ignore into transit_stop_times(trip_id,stop_id,stop_sequence,departure_time) values(${q(tripId)},${q(fromStop)},0,${q(departure.departureTime)});`,
-        `insert or ignore into transit_stop_times(trip_id,stop_id,stop_sequence) values(${q(tripId)},${q(toStop)},1);`,
-      );
+  const mixed = totals[0] > 0 && totals[1] > 0;
+  const variants = [false, true].filter((reservation) => totals[reservation ? 1 : 0] > 0);
+  for (const reservation of variants) {
+    const suffix = mixed && reservation ? "-reservation" : "";
+    const routeId = `route_${slug(route.id)}${suffix}`;
+    const patternId = `pattern_${slug(route.id)}${suffix}`;
+    const routeName = `${route.from} → ${route.to}${mixed && reservation ? "（预约）" : ""}`;
+    const routeCode = `${route.id}${suffix}`;
+    const bookingPolicy = reservation ? "required" : "not_required";
+    const fromStop = stopId(route.from);
+    const toStop = stopId(route.to);
+    lines.push(
+      `insert or ignore into transit_routes(id,code,name,status,booking_policy,created_at,updated_at) values(${q(routeId)},${q(routeCode)},${q(routeName)},'active',${q(bookingPolicy)},${now},${now});`,
+      `insert or ignore into transit_patterns(id,route_id,direction_id,name) values(${q(patternId)},${q(routeId)},${routeIndex % 2},${q(routeName)});`,
+      `insert or ignore into transit_pattern_stops(pattern_id,stop_id,stop_sequence,pickup_type,dropoff_type) values(${q(patternId)},${q(fromStop)},0,'regular','none');`,
+      `insert or ignore into transit_pattern_stops(pattern_id,stop_id,stop_sequence,pickup_type,dropoff_type) values(${q(patternId)},${q(toStop)},1,'none','regular');`,
+    );
+    for (const [bucket, departures] of Object.entries(route.schedules)) {
+      const calendarId = `calendar_${slug(academicYear)}_${bucket}`;
+      const calendarName = CALENDAR_NAMES.get(bucket);
+      if (!calendarName) throw new Error(`Unknown shuttle calendar bucket: ${bucket}`);
+      const weekday = bucket === "weekday";
+      const weekend = bucket === "weekend";
+      lines.push(`insert or ignore into service_calendars(id,name,timezone,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id) values(${q(calendarId)},${q(`${academicYear} ${calendarName}`)},'Asia/Shanghai','2025-01-01','2026-12-31',${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekend ? 1 : 0},${weekend ? 1 : 0},'source_academic_calendar');`);
+      for (const [tripIndex, departure] of departures.entries()) {
+        if (departure.isReservation !== reservation) continue;
+        const tripId = `trip_${slug(route.id)}${suffix}_${bucket}_${tripIndex + 1}`;
+        lines.push(
+          `insert or ignore into transit_trips(id,pattern_id,service_calendar_id,public_label,booking_policy,status,source_id) values(${q(tripId)},${q(patternId)},${q(calendarId)},${q(departure.departureTime)},${q(bookingPolicy)},'active','source_shuttle_pdf');`,
+          `insert or ignore into transit_stop_times(trip_id,stop_id,stop_sequence,departure_time) values(${q(tripId)},${q(fromStop)},0,${q(departure.departureTime)});`,
+          `insert or ignore into transit_stop_times(trip_id,stop_id,stop_sequence) values(${q(tripId)},${q(toStop)},1);`,
+        );
+      }
     }
   }
 }

@@ -32,7 +32,7 @@ page {
   padding-bottom: 8rpx;
 }
 
-/* 线路卡 */
+/* 校区选择卡 */
 .route-card {
   display: flex;
   align-items: center;
@@ -246,7 +246,7 @@ page {
 
 .stop-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 20rpx;
   padding: 24rpx 0;
 }
@@ -255,11 +255,29 @@ page {
   border-bottom: 2rpx solid #e2e8f0;
 }
 
+/* 标签列放「上车点-预约车」这类复合标签，比旧版「上车点」宽 */
 .stop-row-label {
-  width: 96rpx;
+  width: 160rpx;
   flex-shrink: 0;
+  padding-top: 6rpx;
   font-size: 22rpx;
   color: #64748b;
+}
+
+/* 一行可挂多个站点：纵向排列 */
+.stop-row-stops {
+  flex: 1;
+  min-width: 0;
+}
+
+.stop-entry {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.stop-entry + .stop-entry {
+  margin-top: 12rpx;
 }
 
 .stop-row-pin {
@@ -281,8 +299,11 @@ page {
   font-size: 22rpx;
 }
 
+/* 自定义 tabBar 是页面渲染层内的覆盖组件（bottom:0 参照完整窗口），
+   内容底部需抬 64px + 安全区，否则滚动到底时末行被 tab 栏遮住（同 .sheet 的处理） */
 .page-footer-space {
-  height: 48rpx;
+  height: calc(48rpx + 64px + constant(safe-area-inset-bottom));
+  height: calc(48rpx + 64px + env(safe-area-inset-bottom));
 }
 
 /* 班次预览弹层 */

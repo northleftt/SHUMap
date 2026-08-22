@@ -318,6 +318,20 @@
 
 ## 工程现状（校车部分留下的可复用资产）
 
+- **2026-08-21 校车 0024 改版（校区对校区）**：数据模型从「乘车点点对点」改为「校区 A → 校区 B」，
+  预约是线路级属性。`lib/transit/schedule.ts` 对齐 Web 端新版
+  `src/lib/transit/schedule.ts`：端点 = campus_id（陈太公寓用 `stop:<stopId>` 伪端点）、
+  `fetchCampusLines`（GET /api/public/transit/campus-lines）+ 包内快照兜底
+  （`fetchCampusLinesWithFallback`/`loadTransitEndpoints`，快照线路 patterns 为空，
+  上下车点 chips 与预览时间线离线态降级不渲染）。快照改为「校区对 → lines[] → 分桶时刻」，
+  由 `scripts/generate_miniprogram_shuttle_snapshot.mjs`（主仓库）从 data/shuttle-schedule.json
+  生成，预约班次拆独立「（预约）」线，改数据后重跑即可。单测仍 `tests/miniprogram-shuttle.test.mjs`。
+  **页面布局用回旧版**（线路卡设计已否决）：校区 OD 选择 + 「最近一班」双 hero
+  （预约=required/optional 合并、非预约=not_required，各取剩余首班）+ 时刻网格
+  （`flattenLineJourneys` 跨线路摊平 + `mergeSchedulesByTime` 同时刻预/非合并一格）
+  + 「上下车点」四行（上车/下车 × 预约/非预约，同类多线按 stopId 合并去重，
+  某类无线路则该行不出）+ 班次预览弹层（`buildLinePreview` 本地构建，无二次请求）。
+
 - `pages/webview/webview`：通用外链容器（web-view + 复制链接降级），其他页面打开外链直接复用
 - `lib/api.ts`：API client 封装（`apiGet` JSON / `apiGetText` 原文，后者给 SVG 底图用）；`config.ts`：全局配置
 - `data/`：数据快照的 `.ts` 模块范式（离线兜底数据照此办理）

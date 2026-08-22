@@ -770,6 +770,8 @@ export interface TransitRouteCreateInput {
   name: string;
   code: string | null;
   operatorId: string | null;
+  bookingPolicy?: TransitBookingPolicy;
+  bookingUrl?: string | null;
 }
 
 export interface TransitRouteUpdateInput {
@@ -777,6 +779,8 @@ export interface TransitRouteUpdateInput {
   code?: string | null;
   operatorId?: string | null;
   status?: TransitRouteStatus;
+  bookingPolicy?: TransitBookingPolicy;
+  bookingUrl?: string | null;
 }
 
 export function updateTransitRoute(routeId: string, body: TransitRouteUpdateInput): Promise<{ id: string }> {
@@ -844,7 +848,8 @@ export interface TransitTripCreateInput {
   patternId: string;
   serviceCalendarId: string;
   publicLabel: string | null;
-  bookingPolicy: TransitBookingPolicy;
+  /** 0024 起为线路级属性：这里传了也会被服务端按所属线路覆盖。 */
+  bookingPolicy?: TransitBookingPolicy;
   bookingUrl: string | null;
   sourceId: string | null;
   stopTimes: TransitStopTimeInput[];
@@ -852,6 +857,7 @@ export interface TransitTripCreateInput {
 
 export interface TransitTripUpdateInput {
   serviceCalendarId?: string;
+  /** 0024 起为线路级属性：这里传了也会被服务端按所属线路覆盖。 */
   bookingPolicy?: TransitBookingPolicy;
   bookingUrl?: string | null;
   stopTimes?: TransitStopTimeInput[];

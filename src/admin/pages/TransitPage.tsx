@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Check, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as admin from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
 import type {
@@ -12,6 +12,7 @@ import type {
   TransitPickupType,
   TransitResponse,
   TransitRouteRow,
+  TransitStopRow,
   TransitStopStatus,
 } from "../adminTypes";
 import {
@@ -44,14 +45,15 @@ import type { LocationRole } from "../../../shared/revision-contract";
 // A8 校车管理
 //
 // 四个分区共用一次 GET /api/admin/transit：
-//   · 班次时刻 —— 选一条线路方向，编辑它的停靠顺序与每日班次
-//   · 站点     —— 站点的增删改，含地点绑定与上/下车点坐标
-//   · 线路     —— 线路及其方向（去程 / 回程）的增删改
+//   · 班次时刻 —— 选一条线路，编辑它的站点顺序与每日班次
+//   · 站点     —— 站点的增删改，含地点绑定与候车点 / 导航坐标
+//   · 线路     —— 线路（校区对 + 乘车方式）的增删改
 //   · 服务日历 —— 运行日、日期范围与例外日期
 //
-// 「线路」与「方向」在数据库里是 transit_routes → transit_patterns 两层，但对运营
-// 同学而言一条线路就是一个走向。所以这里不再让人分两步选：选择器直接列出「线路 ·
-// 去程」这样的条目，方向名称由线路名与去/回程自动生成，不用再手填一次。
+// 线路的真实模型是「校区对 + 是否预约」，与去程 / 回程无关：属于哪个校区对由
+// 站点序列首末站所属校区决定，名称自动派生为「起点校区 → 终点校区」（预约线加
+// 「（预约）」后缀），不由用户填写。数据库里 transit_routes → transit_patterns
+// 是 1:1，pattern 只是实现细节，界面上不出现「方向」概念。
 // ---------------------------------------------------------------------------
 
 type Tab = "schedule" | "stops" | "lines" | "calendars";
@@ -66,15 +68,8 @@ const TABS: Array<{ key: Tab; label: string }> = [
 const WEEK_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
 const WEEK_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
-/** 站点自身的锚点：候车点，外加可选的导航终点。上 / 下车安排归线路方向（pickup/dropoff），不归站点。 */
+/** 站点自身的锚点：候车点，外加可选的导航终点。上 / 下车安排归线路（pattern 的 pickup/dropoff），不归站点。 */
 const STOP_LOCATION_ROLES: readonly LocationRole[] = ["boarding_point", "navigation_target"];
-
-const DIRECTION_LABELS: Record<number, string> = { 0: "去程", 1: "回程" };
-
-const DIRECTION_OPTIONS = [
-  { value: "0", label: "去程" },
-  { value: "1", label: "回程" },
-];
 
 const POLICY_META: Record<TransitBookingPolicy, { label: string; tone: "info" | "neutral" }> = {
   required: { label: "需预约", tone: "info" },
@@ -90,7 +85,6 @@ const POLICY_OPTIONS = [
 
 const PICKUP_OPTIONS = [
   { value: "regular", label: "可上车" },
-  { value: "reservation_only", label: "仅预约班次可上车" },
   { value: "none", label: "不可上车" },
 ];
 
@@ -128,10 +122,10 @@ const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 /** 后端的 409 都带专用 code，这里翻成运营同学能照着做的说明。 */
 const ERROR_TEXT: Record<string, string> = {
   transit_code_taken: "这个代码已经被另一条记录占用了，换一个或留空。",
-  transit_stop_in_use: "还有线路方向或班次时刻停靠这个站点。先把它从这些方向里移除，再停用或删除。",
-  transit_route_in_use: "这条线路下面还有方向。先删掉方向，或者把线路改成「暂停运行」。",
-  transit_pattern_in_use: "这个方向下面还有班次。先删掉班次，再删除方向。",
-  transit_pattern_duplicate: "这条线路已经有同名同走向的方向了。",
+  transit_stop_in_use: "还有线路或班次停靠这个站点。先把它从线路的站点顺序里移除，再停用或删除。",
+  transit_route_in_use: "这条线路已配置站点序列，不能直接删除。如不再开行，请改为「暂停运行」。",
+  transit_pattern_in_use: "这条线路下面还有班次。先删掉班次，再删除线路的站点序列。",
+  transit_pattern_duplicate: "这条线路已经有同名同走向的站点序列了。",
   service_calendar_in_use: "还有班次挂在这个日历上。先把它们改到别的日历或删掉。",
   calendar_range_excludes_exceptions: "有例外日期落在新的日期范围之外。请连同例外日期一起调整。",
   validation_error: "填写的内容不完整或不正确，请检查后重试。",
@@ -161,6 +155,17 @@ function sameSequence(a: StopDraft[], b: StopDraft[]): boolean {
   );
 }
 
+/** 班次编辑表的一行：tripId 为 null 表示本轮新增的班次。 */
+interface TripDraft {
+  key: string;
+  tripId: string | null;
+  times: string[];
+}
+
+function sameTimes(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((time, index) => time.trim() === b[index].trim());
+}
+
 function today(): string {
   return new Date().toLocaleDateString("en-CA");
 }
@@ -184,10 +189,18 @@ export function TransitPage() {
     return { spaces, ref, mapVersions: maps.items };
   }, []);
 
-  if (transit.state.status === "loading" || meta.state.status === "loading") return <LoadingState label="加载校车数据…" />;
-  if (transit.state.status === "error") return <ErrorBanner message={transit.state.message} />;
+  // reload 会把 useAsyncData 重置回 loading；若此时直接渲染 LoadingState，整个
+  // ReadyTransitPage 会被卸载重挂，线路 / 日历选择和草稿全部回到默认。这里留住
+  // 最近一次成功数据，刷新期间继续渲染旧数据，直到新数据到达。
+  const [lastTransit, setLastTransit] = useState<TransitResponse | null>(null);
+  useEffect(() => {
+    if (transit.state.status === "ready") setLastTransit(transit.state.data);
+  }, [transit.state]);
+
+  if (transit.state.status === "error" && lastTransit === null) return <ErrorBanner message={transit.state.message} />;
   if (meta.state.status === "error") return <ErrorBanner message={meta.state.message} />;
-  return <ReadyTransitPage data={transit.state.data} meta={meta.state.data} reload={transit.reload} />;
+  if (lastTransit === null || meta.state.status !== "ready") return <LoadingState label="加载校车数据…" />;
+  return <ReadyTransitPage data={lastTransit} meta={meta.state.data} reload={transit.reload} />;
 }
 
 function ReadyTransitPage({ data, meta, reload }: { data: TransitResponse; meta: TransitMeta; reload: () => void }) {
@@ -220,18 +233,29 @@ function ReadyTransitPage({ data, meta, reload }: { data: TransitResponse; meta:
     };
   }, [data.stops]);
 
-  const routeById = useMemo(() => new Map(data.routes.map((route) => [route.id, route])), [data.routes]);
+  const campusName = useMemo(() => {
+    const map = new Map(meta.spaces.campuses.map((campus) => [campus.id, campus.name]));
+    return (id: string) => map.get(id) ?? id;
+  }, [meta.spaces.campuses]);
 
-  /** 「线路 · 去程」这样的一行标签；方向另有名称时补在后面。 */
-  const lineLabel = useMemo(() => {
-    return (pattern: TransitPatternRow) => {
-      const route = routeById.get(pattern.routeId);
-      if (!route) throw new Error(`方向 ${pattern.id} 引用了不存在的线路`);
-      const direction = DIRECTION_LABELS[pattern.directionId] ?? `方向 ${pattern.directionId}`;
-      const base = `${route.name} · ${direction}`;
-      return pattern.name.trim() && pattern.name.trim() !== route.name.trim() ? `${base}（${pattern.name.trim()}）` : base;
+  /** 站点的线路端点名：campus_id 指向校区名；无校区站点（如陈太公寓）自己就是端点。 */
+  const stopEndpointName = useMemo(() => {
+    const stopById = new Map(data.stops.map((stop) => [stop.id, stop]));
+    return (stopId: string) => {
+      const stop = stopById.get(stopId);
+      if (!stop) throw new Error(`校车数据引用了不存在的站点 ${stopId}`);
+      return stop.campusId ? campusName(stop.campusId) : stop.name;
     };
-  }, [routeById]);
+  }, [data.stops, campusName]);
+
+  /** 线路名自动派生：「首站端点 → 末站端点」，预约线加「（预约）」。站点不足两个返回 null。 */
+  const deriveRouteName = useMemo(() => {
+    return (stopIds: string[], bookingPolicy: TransitBookingPolicy): string | null => {
+      if (stopIds.length < 2) return null;
+      const base = `${stopEndpointName(stopIds[0])} → ${stopEndpointName(stopIds[stopIds.length - 1])}`;
+      return bookingPolicy === "required" ? `${base}（预约）` : base;
+    };
+  }, [stopEndpointName]);
 
   return (
     <div className="space-y-4">
@@ -246,10 +270,12 @@ function ReadyTransitPage({ data, meta, reload }: { data: TransitResponse; meta:
       <ErrorBanner message={error} />
 
       {tab === "schedule" ? (
-        <SchedulePanel busy={busy} data={data} lineLabel={lineLabel} mutate={mutate} stopName={stopName} />
+        <SchedulePanel busy={busy} data={data} deriveRouteName={deriveRouteName} mutate={mutate} stopName={stopName} />
       ) : null}
       {tab === "stops" ? <StopsPanel busy={busy} data={data} meta={meta} mutate={mutate} /> : null}
-      {tab === "lines" ? <LinesPanel busy={busy} data={data} meta={meta} mutate={mutate} stopName={stopName} /> : null}
+      {tab === "lines" ? (
+        <LinesPanel busy={busy} data={data} deriveRouteName={deriveRouteName} meta={meta} mutate={mutate} />
+      ) : null}
       {tab === "calendars" ? <CalendarsPanel busy={busy} data={data} meta={meta} mutate={mutate} /> : null}
     </div>
   );
@@ -270,10 +296,10 @@ function SchedulePanel({
   busy,
   mutate,
   stopName,
-  lineLabel,
+  deriveRouteName,
 }: PanelProps & {
   stopName: (id: string) => string;
-  lineLabel: (pattern: TransitPatternRow) => string;
+  deriveRouteName: (stopIds: string[], bookingPolicy: TransitBookingPolicy) => string | null;
 }) {
   const [patternId, setPatternId] = useState("");
   const [calendarId, setCalendarId] = useState("");
@@ -282,17 +308,19 @@ function SchedulePanel({
   const [addStopId, setAddStopId] = useState("");
   const [sequenceSaved, setSequenceSaved] = useState(false);
 
-  const [editing, setEditing] = useState<"new" | string | null>(null);
-  const [times, setTimes] = useState<string[]>([]);
-  const [policy, setPolicy] = useState<TransitBookingPolicy>("not_required");
-  const [formCalendarId, setFormCalendarId] = useState("");
+  // 班次表按线路 + 日历批量编辑：rows 是整表草稿，deletedIds 是待删除的已落库班次。
+  const [rows, setRows] = useState<TripDraft[]>([]);
+  const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [tripError, setTripError] = useState("");
+  const [tripSaved, setTripSaved] = useState(false);
   const [pendingDelete, setPendingDelete] = useState("");
 
   const { patterns, calendars, stops } = data;
   const selectedPatternId = patterns.some((pattern) => pattern.id === patternId) ? patternId : patterns[0]?.id ?? "";
   const selectedCalendarId = calendars.some((calendar) => calendar.id === calendarId) ? calendarId : calendars[0]?.id ?? "";
   const activeCalendar = calendars.find((calendar) => calendar.id === selectedCalendarId);
+  // 预约与否是线路级属性（0024）：班次不再单独选乘车方式，这里只读回显。
+  const selectedRoute = data.routes.find((route) => route.id === patterns.find((pattern) => pattern.id === selectedPatternId)?.routeId);
 
   /** 已落库的站点顺序，用作草稿基线。 */
   const savedSequence = useMemo<StopDraft[]>(
@@ -304,14 +332,15 @@ function SchedulePanel({
     [data.patternStops, selectedPatternId],
   );
 
-  // 切换走向或数据刷新后回到已落库状态，避免草稿串到别的走向。
+  // 只在切换线路时回到已落库状态，避免草稿串到别的线路；数据刷新不重置站点顺序草稿。
+  const lastSequencePatternId = useRef<string | null>(null);
   useEffect(() => {
+    if (lastSequencePatternId.current === selectedPatternId) return;
+    lastSequencePatternId.current = selectedPatternId;
     setSequence(savedSequence);
     setAddStopId("");
     setSequenceSaved(false);
-    setEditing(null);
-    setPendingDelete("");
-  }, [savedSequence]);
+  }, [savedSequence, selectedPatternId]);
 
   const trips = useMemo(
     () => data.trips.filter((trip) => trip.patternId === selectedPatternId && trip.serviceCalendarId === selectedCalendarId),
@@ -343,6 +372,154 @@ function SchedulePanel({
     return savedSequence.map((_, index) => (rows[index]?.departureTime ?? rows[index]?.arrivalTime ?? "").slice(0, 5));
   }
 
+  /** 已落库班次的表格基线，按首站发车时间升序。 */
+  const savedRows = useMemo<TripDraft[]>(
+    () =>
+      trips
+        .map((trip) => ({ key: trip.id, tripId: trip.id as string | null, times: tripTimes(trip.id) }))
+        .sort((a, b) => a.times[0].localeCompare(b.times[0])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [trips, savedSequence, timesByTrip],
+  );
+
+  const selectionKey = `${selectedPatternId}:${selectedCalendarId}`;
+  const lastSelectionKey = useRef<string | null>(null);
+  // 保存成功后下一次数据刷新到达时，整表重建为最新的已落库状态。
+  const resyncOnRefresh = useRef(false);
+
+  // 切换线路或日历时整表重建；数据刷新时按 tripId 保留能对上的未保存草稿，
+  // 对不上的（如刚删的行）丢弃。
+  useEffect(() => {
+    if (lastSelectionKey.current !== selectionKey) {
+      lastSelectionKey.current = selectionKey;
+      setRows(savedRows);
+      setDeletedIds([]);
+      setPendingDelete("");
+      setTripError("");
+      setTripSaved(false);
+      return;
+    }
+    if (resyncOnRefresh.current) {
+      resyncOnRefresh.current = false;
+      setRows(savedRows);
+      setDeletedIds([]);
+      setPendingDelete("");
+      return;
+    }
+    const savedIds = new Set(savedRows.map((row) => row.tripId));
+    setRows((current) => current.filter((row) => row.tripId === null || savedIds.has(row.tripId)));
+    setDeletedIds((current) => current.filter((id) => savedIds.has(id)));
+  }, [selectionKey, savedRows]);
+
+  /** 相对已落库状态是否有改动：待删除、新增非空行、或时刻被改过。 */
+  const tripsDirty = deletedIds.length > 0
+    || rows.some((row) => {
+      if (row.tripId === null) return row.times.some((time) => time.trim() !== "");
+      const saved = savedRows.find((item) => item.tripId === row.tripId);
+      return !saved || !sameTimes(row.times, saved.times);
+    });
+
+  const newRowKey = useRef(0);
+
+  function addTripRow() {
+    setRows((current) => [
+      ...current,
+      { key: `new-${++newRowKey.current}`, tripId: null, times: savedSequence.map(() => "") },
+    ]);
+    setTripSaved(false);
+  }
+
+  function patchTripTime(rowKey: string, index: number, value: string) {
+    setRows((current) =>
+      current.map((row) =>
+        row.key === rowKey
+          ? { ...row, times: row.times.map((time, i) => (i === index ? value : time)) }
+          : row));
+    setTripSaved(false);
+  }
+
+  /** 删除暂存：新增行直接移除；已落库班次记入 deletedIds，保存时才真正删除。 */
+  function stageDelete(row: TripDraft) {
+    const tripId = row.tripId;
+    setRows((current) => current.filter((item) => item.key !== row.key));
+    if (tripId !== null) setDeletedIds((current) => [...current, tripId]);
+    setPendingDelete("");
+    setTripSaved(false);
+  }
+
+  function discardTripChanges() {
+    setRows(savedRows);
+    setDeletedIds([]);
+    setPendingDelete("");
+    setTripError("");
+    setTripSaved(false);
+  }
+
+  /** 全量校验：所有行首站必填且 HH:MM，其余站可空但非空必须 HH:MM；全空的新增行忽略。 */
+  function validateRows(): boolean {
+    for (const [index, row] of rows.entries()) {
+      const trimmed = row.times.map((time) => time.trim());
+      if (row.tripId === null && trimmed.every((time) => time === "")) continue;
+      const label = `第 ${index + 1} 班（${trimmed[0] || "未填发车时间"}）`;
+      if (!TIME_PATTERN.test(trimmed[0] ?? "")) {
+        setTripError(`${label}：请填写发车时间，格式为 07:30`);
+        return false;
+      }
+      const invalid = trimmed.findIndex((time, stopIndex) => stopIndex > 0 && time !== "" && !TIME_PATTERN.test(time));
+      if (invalid >= 0) {
+        setTripError(`${label}「${stopName(savedSequence[invalid].stopId)}」的时间格式应为 07:30`);
+        return false;
+      }
+    }
+    setTripError("");
+    return true;
+  }
+
+  async function saveTrips() {
+    if (!validateRows()) return;
+    const ok = await mutate(async () => {
+      // 按序执行：先删除，再更新改过的行，最后新增。某行失败时报错带上是第几班。
+      for (const tripId of deletedIds) {
+        const saved = savedRows.find((row) => row.tripId === tripId);
+        try {
+          await admin.deleteTransitTrip(tripId);
+        } catch (err) {
+          throw new Error(`删除 ${saved ? saved.times[0] : tripId} 班次失败：${transitError(err, "请稍后重试")}`);
+        }
+      }
+      for (const [index, row] of rows.entries()) {
+        const trimmed = row.times.map((time) => time.trim());
+        if (row.tripId === null && trimmed.every((time) => time === "")) continue;
+        if (row.tripId !== null) {
+          const saved = savedRows.find((item) => item.tripId === row.tripId);
+          if (saved && sameTimes(trimmed, saved.times)) continue;
+        }
+        const stopTimes = trimmed.map((time) => ({ arrivalTime: time || null, departureTime: time || null }));
+        const label = `第 ${index + 1} 班（${trimmed[0]}）`;
+        try {
+          if (row.tripId === null) {
+            await admin.createTransitTrip({
+              patternId: selectedPatternId,
+              serviceCalendarId: selectedCalendarId,
+              publicLabel: null,
+              bookingUrl: null,
+              sourceId: null,
+              stopTimes,
+            });
+          } else {
+            await admin.updateTransitTrip(row.tripId, { serviceCalendarId: selectedCalendarId, stopTimes });
+          }
+        } catch (err) {
+          throw new Error(`${label}保存失败：${transitError(err, "请稍后重试")}`);
+        }
+      }
+    }, "保存班次失败，请稍后重试");
+    if (ok) {
+      resyncOnRefresh.current = true;
+      setTripSaved(true);
+    }
+  }
+
   // 停用的站点不再作为新增选项，但已经排进顺序里的照常显示。
   const availableStops = stops.filter((stop) => stop.status !== "retired" && !sequence.some((item) => item.stopId === stop.id));
   const sequenceDirty = !sameSequence(sequence, savedSequence);
@@ -365,118 +542,41 @@ function SchedulePanel({
 
   async function saveSequence() {
     setSequenceSaved(false);
-    const ok = await mutate(() => admin.replaceTransitPatternStops(selectedPatternId, sequence), "保存站点顺序失败，请稍后重试");
+    const ok = await mutate(async () => {
+      await admin.replaceTransitPatternStops(selectedPatternId, sequence);
+      // 首末站变化会改变线路所属的校区对；线路名是派生值，顺手改回最新派生名。
+      const derived = deriveRouteName(
+        sequence.map((stop) => stop.stopId),
+        selectedRoute?.bookingPolicy ?? "not_required",
+      );
+      if (selectedRoute && derived !== null && derived !== selectedRoute.name) {
+        await admin.updateTransitRoute(selectedRoute.id, { name: derived });
+      }
+    }, "保存站点顺序失败，请稍后重试");
     if (ok) setSequenceSaved(true);
-  }
-
-  function startAddTrip() {
-    setEditing("new");
-    setTimes(savedSequence.map(() => ""));
-    setPolicy("not_required");
-    setFormCalendarId(selectedCalendarId);
-    setTripError("");
-  }
-
-  function startEditTrip(tripId: string, bookingPolicy: TransitBookingPolicy, tripCalendarId: string) {
-    setEditing(tripId);
-    setTimes(tripTimes(tripId));
-    setPolicy(bookingPolicy);
-    setFormCalendarId(tripCalendarId);
-    setTripError("");
-  }
-
-  async function saveTrip() {
-    const trimmed = times.map((time) => time.trim());
-    if (!TIME_PATTERN.test(trimmed[0])) {
-      setTripError("请填写发车时间，格式为 07:30");
-      return;
-    }
-    const invalid = trimmed.findIndex((time, index) => index > 0 && time !== "" && !TIME_PATTERN.test(time));
-    if (invalid >= 0) {
-      setTripError(`「${stopName(savedSequence[invalid].stopId)}」的时间格式应为 07:30`);
-      return;
-    }
-    const serviceCalendarId = formCalendarId || selectedCalendarId;
-    if (!serviceCalendarId) {
-      setTripError("请选择服务日历");
-      return;
-    }
-    setTripError("");
-    const stopTimes = trimmed.map((time) => ({ arrivalTime: time || null, departureTime: time || null }));
-    const ok = await mutate(
-      () =>
-        editing === "new"
-          ? admin.createTransitTrip({
-            patternId: selectedPatternId,
-            serviceCalendarId,
-            publicLabel: null,
-            bookingPolicy: policy,
-            bookingUrl: null,
-            sourceId: null,
-            stopTimes,
-          })
-          : admin.updateTransitTrip(String(editing), { serviceCalendarId, bookingPolicy: policy, stopTimes }),
-      editing === "new" ? "添加班次失败，请稍后重试" : "保存班次失败，请稍后重试",
-    );
-    if (ok) setEditing(null);
   }
 
   if (patterns.length === 0) {
     return (
       <Panel title="班次时刻">
-        <InfoNote tone="warning">还没有线路。请先在「线路」里新建一条线路，再回来编辑停靠顺序与班次。</InfoNote>
+        <InfoNote tone="warning">还没有线路。请先在「线路」里新建一条线路，再回来编辑站点顺序与班次。</InfoNote>
       </Panel>
     );
   }
 
-  const tripEditor = (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-end gap-2">
-        {savedSequence.map((stop, index) => (
-          <label key={stop.stopId} className="block">
-            <span className="mb-1 block text-label text-sub">
-              {stopName(stop.stopId)}
-              {index === 0 ? " 发车" : " 到达"}
-            </span>
-            <input
-              aria-label={`${stopName(stop.stopId)}${index === 0 ? "发车" : "到达"}时间`}
-              className="h-9 w-24 rounded-lg border border-line bg-surface px-3 text-body text-ink outline-none focus:border-primary"
-              onChange={(e) => setTimes((current) => current.map((time, i) => (i === index ? e.target.value : time)))}
-              placeholder={index === 0 ? "07:30" : "可留空"}
-              value={times[index]}
-            />
-          </label>
-        ))}
-        <div className="w-32">
-          <SelectField label="乘车方式" onChange={(value) => setPolicy(value as TransitBookingPolicy)} options={POLICY_OPTIONS} value={policy} />
-        </div>
-        <div className="w-32">
-          <SelectField
-            label="服务日历"
-            onChange={setFormCalendarId}
-            options={calendars.map((calendar) => ({ value: calendar.id, label: calendar.name }))}
-            value={formCalendarId}
-          />
-        </div>
-      </div>
-      <div className="flex items-center gap-2">
-        <PrimaryButton disabled={busy} onClick={() => void saveTrip()}>
-          <Check size={15} /> {editing === "new" ? "添加" : "保存"}
-        </PrimaryButton>
-        <GhostButton disabled={busy} onClick={() => setEditing(null)}>取消</GhostButton>
-      </div>
-      <ErrorBanner message={tripError} />
-    </div>
-  );
+  const canEditTrips = savedSequence.length >= 2 && activeCalendar !== undefined;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div className="w-72">
           <SelectField
-            label="线路方向"
+            label="线路"
             onChange={setPatternId}
-            options={patterns.map((pattern) => ({ value: pattern.id, label: lineLabel(pattern) }))}
+            options={patterns.map((pattern) => ({
+              value: pattern.id,
+              label: data.routes.find((route) => route.id === pattern.routeId)?.name ?? pattern.name,
+            }))}
             value={selectedPatternId}
           />
         </div>
@@ -570,7 +670,7 @@ function SchedulePanel({
               </div>
             ))}
 
-            {sequence.length === 0 ? <EmptyState label="该方向还没有站点" /> : null}
+            {sequence.length === 0 ? <EmptyState label="这条线路还没有站点" /> : null}
 
             <div className="flex items-end gap-2 pt-1">
               <div className="flex-1">
@@ -594,7 +694,7 @@ function SchedulePanel({
               </GhostButton>
             </div>
 
-            {sequence.length === 1 ? <InfoNote tone="warning">一个方向至少需要两个站点才能保存</InfoNote> : null}
+            {sequence.length === 1 ? <InfoNote tone="warning">一条线路至少需要两个站点才能保存</InfoNote> : null}
 
             <div className="flex items-center gap-2">
               <PrimaryButton disabled={!sequenceDirty || sequence.length < 2 || busy} onClick={() => void saveSequence()}>
@@ -604,8 +704,6 @@ function SchedulePanel({
                 <GhostButton disabled={busy} onClick={() => setSequence(savedSequence)}>还原</GhostButton>
               ) : null}
             </div>
-
-            <InfoNote tone="warning">「仅预约班次可上车」的站点，非预约班次不会停靠</InfoNote>
           </div>
         </Panel>
 
@@ -613,8 +711,8 @@ function SchedulePanel({
           <Panel
             title={activeCalendar ? `班次时刻 · ${activeCalendar.name}` : "班次时刻"}
             action={
-              editing === null && savedSequence.length >= 2 && activeCalendar ? (
-                <button className="flex items-center gap-1 text-aux font-medium text-primary" onClick={startAddTrip} type="button">
+              canEditTrips ? (
+                <button className="flex items-center gap-1 text-aux font-medium text-primary" onClick={addTripRow} type="button">
                   <Plus size={14} /> 添加班次
                 </button>
               ) : null
@@ -625,46 +723,45 @@ function SchedulePanel({
               <div className="p-5">
                 <InfoNote tone="warning">还没有服务日历。请先在「服务日历」里建一个，再添加班次。</InfoNote>
               </div>
+            ) : savedSequence.length < 2 ? (
+              <div className="p-5">
+                <EmptyState label="先保存站点顺序，再添加班次" />
+              </div>
             ) : (
               <>
-                <table className="w-full border-collapse text-left text-body">
-                  <thead>
-                    <tr className="text-label text-sub">
-                      {["发车", "到达", "乘车方式", ""].map((header, index) => (
-                        <th key={index} className="px-5 pb-2 pt-1 font-medium">{header}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line">
-                    {trips.map((trip) => {
-                      const rows = rowsForTrip(trip.id);
-                      const first = rows[0];
-                      const last = rows[rows.length - 1];
-                      const policyMeta = POLICY_META[trip.bookingPolicy];
-                      if (editing === trip.id) {
-                        return (
-                          <tr key={trip.id} className="bg-primary-container/40">
-                            <td className="px-5 py-3" colSpan={4}>{tripEditor}</td>
-                          </tr>
-                        );
-                      }
-                      return (
-                        <tr key={trip.id}>
-                          <td className="px-5 py-3 font-semibold">{first?.departureTime?.slice(0, 5) ?? "—"}</td>
-                          <td className="px-5 py-3">
-                            {(rows.length > 1 ? (last?.arrivalTime ?? last?.departureTime) : null)?.slice(0, 5) ?? "—"}
-                          </td>
-                          <td className="px-5 py-3"><Pill tone={policyMeta.tone}>{policyMeta.label}</Pill></td>
-                          <td className="px-5 py-3">
-                            {pendingDelete === trip.id ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-left text-body">
+                    <thead>
+                      <tr className="text-label text-sub">
+                        {savedSequence.map((stop, index) => (
+                          <th key={stop.stopId} className="whitespace-nowrap px-3 pb-2 pt-1 font-medium first:pl-5">
+                            {stopName(stop.stopId)}{index === 0 ? " 发车" : " 到达"}
+                          </th>
+                        ))}
+                        <th className="px-3 pb-2 pt-1 pr-5 font-medium" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-line">
+                      {rows.map((row) => (
+                        <tr key={row.key} className={row.tripId === null ? "bg-primary-container/40" : undefined}>
+                          {savedSequence.map((stop, index) => (
+                            <td key={stop.stopId} className="px-3 py-2 first:pl-5">
+                              <input
+                                aria-label={`${stopName(stop.stopId)}${index === 0 ? "发车" : "到达"}时间`}
+                                className="h-9 w-24 rounded-lg border border-line bg-surface px-3 text-body text-ink outline-none focus:border-primary"
+                                onChange={(e) => patchTripTime(row.key, index, e.target.value)}
+                                placeholder={index === 0 ? "07:30" : "可留空"}
+                                value={row.times[index] ?? ""}
+                              />
+                            </td>
+                          ))}
+                          <td className="whitespace-nowrap px-3 py-2 pr-5">
+                            {row.tripId !== null && pendingDelete === row.key ? (
                               <span className="flex items-center gap-2">
                                 <button
                                   className="text-aux font-medium text-error disabled:opacity-50"
                                   disabled={busy}
-                                  onClick={() => void mutate(async () => {
-                                    await admin.deleteTransitTrip(trip.id);
-                                    setPendingDelete("");
-                                  }, "删除班次失败，请稍后重试")}
+                                  onClick={() => stageDelete(row)}
                                   type="button"
                                 >
                                   确认删除
@@ -672,44 +769,40 @@ function SchedulePanel({
                                 <button className="text-aux text-sub" onClick={() => setPendingDelete("")} type="button">取消</button>
                               </span>
                             ) : (
-                              <span className="flex items-center gap-1">
-                                <button
-                                  aria-label="编辑班次"
-                                  className="grid h-7 w-7 place-items-center rounded-md text-sub hover:bg-chip"
-                                  onClick={() => startEditTrip(trip.id, trip.bookingPolicy, trip.serviceCalendarId)}
-                                  type="button"
-                                >
-                                  <Pencil size={14} />
-                                </button>
-                                <button
-                                  aria-label="删除班次"
-                                  className="grid h-7 w-7 place-items-center rounded-md text-error hover:bg-error-bg"
-                                  onClick={() => setPendingDelete(trip.id)}
-                                  type="button"
-                                >
-                                  <X size={15} />
-                                </button>
-                              </span>
+                              <button
+                                aria-label="删除班次"
+                                className="grid h-7 w-7 place-items-center rounded-md text-error hover:bg-error-bg"
+                                onClick={() => (row.tripId === null ? stageDelete(row) : setPendingDelete(row.key))}
+                                type="button"
+                              >
+                                <X size={15} />
+                              </button>
                             )}
                           </td>
                         </tr>
-                      );
-                    })}
-                    {editing === "new" ? (
-                      <tr className="bg-primary-container/40">
-                        <td className="px-5 py-3" colSpan={4}>{tripEditor}</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-                {trips.length === 0 && editing !== "new" ? (
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {rows.length === 0 ? (
                   <div className="p-5">
-                    <EmptyState label={savedSequence.length >= 2 ? "该日历下暂无班次" : "先保存站点顺序，再添加班次"} />
+                    <EmptyState label="该日历下暂无班次，点右上角「添加班次」排班" />
                   </div>
                 ) : null}
-                {trips.length > 0 ? (
-                  <div className="px-5 pb-4 pt-1"><p className="text-label text-sub">共 {trips.length} 班</p></div>
-                ) : null}
+                <div className="space-y-3 px-5 pb-4 pt-2">
+                  <InfoNote>乘车方式由线路决定：当前线路为「{selectedRoute ? POLICY_META[selectedRoute.bookingPolicy].label : "—"}」，要改请到「线路」页调整。</InfoNote>
+                  <div className="flex items-center gap-2">
+                    <PrimaryButton disabled={!tripsDirty || busy} onClick={() => void saveTrips()}>
+                      <Check size={15} /> 保存班次
+                    </PrimaryButton>
+                    {tripsDirty ? (
+                      <GhostButton disabled={busy} onClick={discardTripChanges}>放弃更改</GhostButton>
+                    ) : null}
+                    {tripSaved && !tripsDirty ? <span className="text-aux text-success">已保存</span> : null}
+                    {rows.length > 0 ? <span className="ml-auto text-label text-sub">共 {rows.length} 班</span> : null}
+                  </div>
+                  <ErrorBanner message={tripError} />
+                </div>
               </>
             )}
           </Panel>
@@ -804,7 +897,7 @@ function StopsPanel({
           <InfoNote>
             站点绑定一处地点后，名称、照片、联系方式、地图图钉与导航都默认跟随那条地点（地点在「内容管理」里维护）；
             这里只需要维护停靠状态。实际候车点不在地点那里时，才需要单独标一个候车点；
-            哪个方向上车、哪个方向下车在线路方向里维护。
+            哪站上车、哪站下车在「班次时刻」的站点顺序里维护。
           </InfoNote>
 
           {editing === "new" ? (
@@ -900,7 +993,7 @@ function StopsPanel({
                       className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-error/40 px-3 text-aux font-medium text-error disabled:opacity-40"
                       disabled={busy || usage > 0}
                       onClick={() => setConfirmDelete(stop.id)}
-                      title={usage > 0 ? "还有线路方向停靠这个站点，只能先移除停靠或改为已停用" : "彻底删除"}
+                      title={usage > 0 ? "还有线路停靠这个站点，只能先移除停靠或改为已停用" : "彻底删除"}
                       type="button"
                     >
                       <Trash2 size={13} />删除
@@ -1096,7 +1189,7 @@ function StopEditor({
 }
 
 // ===========================================================================
-// 线路（含方向）
+// 线路（校区对 + 乘车方式；pattern 1:1 是实现细节，界面不出现「方向」）
 // ===========================================================================
 
 function LinesPanel({
@@ -1104,30 +1197,25 @@ function LinesPanel({
   meta,
   busy,
   mutate,
-  stopName,
-}: PanelProps & { meta: TransitMeta; stopName: (id: string) => string }) {
+  deriveRouteName,
+}: PanelProps & {
+  meta: TransitMeta;
+  deriveRouteName: (stopIds: string[], bookingPolicy: TransitBookingPolicy) => string | null;
+}) {
   const [creatingRoute, setCreatingRoute] = useState(false);
-  const [newRouteName, setNewRouteName] = useState("");
-  const [newRouteCode, setNewRouteCode] = useState("");
-  const [newRouteOperator, setNewRouteOperator] = useState("");
+  const [newFromEndpoint, setNewFromEndpoint] = useState("");
+  const [newToEndpoint, setNewToEndpoint] = useState("");
+  const [newRouteBooking, setNewRouteBooking] = useState<TransitBookingPolicy>("not_required");
+  const [newRouteBookingUrl, setNewRouteBookingUrl] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const [editingRoute, setEditingRoute] = useState("");
-  const [routeName, setRouteName] = useState("");
-  const [routeCode, setRouteCode] = useState("");
   const [routeOperator, setRouteOperator] = useState("");
   const [routeStatus, setRouteStatus] = useState("active");
+  const [routeBooking, setRouteBooking] = useState<TransitBookingPolicy>("not_required");
+  const [routeBookingUrl, setRouteBookingUrl] = useState("");
   const [confirmRouteDelete, setConfirmRouteDelete] = useState("");
-
-  // 新方向：属于哪条线路、去程还是回程、按顺序有哪些站
-  const [addingDirectionFor, setAddingDirectionFor] = useState("");
-  const [directionId, setDirectionId] = useState("0");
-  const [directionStops, setDirectionStops] = useState<StopDraft[]>([]);
-  const [directionStopId, setDirectionStopId] = useState("");
-
-  const [editingPattern, setEditingPattern] = useState("");
-  const [patternName, setPatternName] = useState("");
-  const [patternDirection, setPatternDirection] = useState("0");
-  const [confirmPatternDelete, setConfirmPatternDelete] = useState("");
 
   const patternsByRoute = useMemo(() => {
     const map = new Map<string, TransitPatternRow[]>();
@@ -1136,7 +1224,6 @@ function LinesPanel({
       list.push(pattern);
       map.set(pattern.routeId, list);
     }
-    for (const list of map.values()) list.sort((a, b) => a.directionId - b.directionId);
     return map;
   }, [data.patterns]);
 
@@ -1150,32 +1237,107 @@ function LinesPanel({
     return map;
   }, [data.patternStops]);
 
-  const tripCountByPattern = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const trip of data.trips) map.set(trip.patternId, (map.get(trip.patternId) ?? 0) + 1);
-    return map;
-  }, [data.trips]);
+  const stopById = useMemo(() => new Map(data.stops.map((stop) => [stop.id, stop])), [data.stops]);
 
   const operatorName = useMemo(() => {
     const map = new Map(meta.ref.organizations.map((org) => [org.id, org.name]));
     return (id: string) => map.get(id) ?? id;
   }, [meta.ref.organizations]);
 
-  const selectableStops = data.stops.filter((stop) => stop.status !== "retired");
+  /** 可选端点：有 active 站点的校区（按 campuses 顺序）+ 无校区站站点（如陈太公寓）各自成端点。 */
+  const endpoints = useMemo(() => {
+    const list: Array<{ id: string; name: string }> = [];
+    for (const campus of meta.spaces.campuses) {
+      if (data.stops.some((stop) => stop.campusId === campus.id && stop.status === "active")) {
+        list.push({ id: campus.id, name: campus.name });
+      }
+    }
+    for (const stop of data.stops) {
+      if (stop.campusId === null && stop.status === "active") list.push({ id: `stop:${stop.id}`, name: stop.name });
+    }
+    return list;
+  }, [meta.spaces.campuses, data.stops]);
 
-  function startAddDirection(route: TransitRouteRow) {
-    const existing = patternsByRoute.get(route.id) ?? [];
-    // 已经有去程时默认补回程，反之默认去程。
-    const hasOutbound = existing.some((pattern) => pattern.directionId === 0);
-    setAddingDirectionFor(route.id);
-    setDirectionId(hasOutbound ? "1" : "0");
-    // 补反向时用已有方向的倒序作为起点，省掉重新点一遍站点。
-    const mirror = existing.find((pattern) => pattern.directionId === (hasOutbound ? 0 : 1));
-    const mirrorStops = mirror ? [...(stopsByPattern.get(mirror.id) ?? [])].reverse() : [];
-    setDirectionStops(mirrorStops.map((stopId) => ({ stopId, pickupType: "regular", dropoffType: "regular" })));
-    setDirectionStopId("");
-    setEditingPattern("");
-    setEditingRoute("");
+  /** 端点下的 active 站点（按 data.stops 数组序）。 */
+  function activeStopsOfEndpoint(endpointId: string): TransitStopRow[] {
+    if (endpointId.startsWith("stop:")) {
+      const stop = stopById.get(endpointId.slice("stop:".length));
+      return stop && stop.status === "active" ? [stop] : [];
+    }
+    return data.stops.filter((stop) => stop.campusId === endpointId && stop.status === "active");
+  }
+
+  /** 站点的端点 key：campus_id，或无校区站点的 `stop:<stopId>`。 */
+  function endpointKeyOfStop(stopId: string): string {
+    const stop = stopById.get(stopId);
+    if (!stop) throw new Error(`校车数据引用了不存在的站点 ${stopId}`);
+    return stop.campusId ?? `stop:${stop.id}`;
+  }
+
+  /** 线路的站点序列（取第一个有 ≥2 站的 pattern；1:1 模型下就是它）。 */
+  function routeStopIds(route: TransitRouteRow): string[] {
+    for (const pattern of patternsByRoute.get(route.id) ?? []) {
+      const stopIds = stopsByPattern.get(pattern.id) ?? [];
+      if (stopIds.length >= 2) return stopIds;
+    }
+    return [];
+  }
+
+  /** 线路的校区对 key（首末站所属端点）；旧数据没有有效 pattern 时返回 null。 */
+  function routePairKey(route: TransitRouteRow): string | null {
+    const stopIds = routeStopIds(route);
+    if (stopIds.length < 2) return null;
+    return `${endpointKeyOfStop(stopIds[0])}>${endpointKeyOfStop(stopIds[stopIds.length - 1])}`;
+  }
+
+  async function createLine() {
+    setCreateError("");
+    setNotice("");
+    if (!newFromEndpoint || !newToEndpoint) { setCreateError("请选择起点和终点"); return; }
+    if (newFromEndpoint === newToEndpoint) { setCreateError("起点和终点不能相同"); return; }
+    const fromStops = activeStopsOfEndpoint(newFromEndpoint);
+    const toStops = activeStopsOfEndpoint(newToEndpoint);
+    if (fromStops.length === 0 || toStops.length === 0) {
+      setCreateError("该校区还没有乘车点，请先在「站点」页添加");
+      return;
+    }
+    // 重复校验：同校区对 + 同乘车方式的线路只允许一条（按现有线路首末站判定校区对）
+    const pairKey = `${newFromEndpoint}>${newToEndpoint}`;
+    if (data.routes.some((route) => route.bookingPolicy === newRouteBooking && routePairKey(route) === pairKey)) {
+      setCreateError("该校区对已有相同乘车方式的线路");
+      return;
+    }
+
+    // 名称自动派生：「起点端点 → 终点端点」，预约线加「（预约）」；代码不填。
+    const name = deriveRouteName([fromStops[0].id, toStops[toStops.length - 1].id], newRouteBooking);
+    if (name === null) { setCreateError("端点站点数据不完整，请刷新后重试"); return; }
+    const ok = await mutate(async () => {
+      const created = await admin.createTransitRoute({
+        name,
+        code: null,
+        operatorId: null,
+        bookingPolicy: newRouteBooking,
+        bookingUrl: newRouteBookingUrl.trim() || null,
+      });
+      // 初始站点序列：起点端点的第一个 active 站点 → 终点端点的最后一个 active 站点
+      await admin.createTransitPattern({
+        routeId: created.id,
+        directionId: 0,
+        name,
+        stops: [
+          { stopId: fromStops[0].id, pickupType: "regular", dropoffType: "none" },
+          { stopId: toStops[toStops.length - 1].id, pickupType: "none", dropoffType: "regular" },
+        ],
+      });
+    }, "新建线路失败");
+    if (ok) {
+      setCreatingRoute(false);
+      setNewFromEndpoint("");
+      setNewToEndpoint("");
+      setNewRouteBooking("not_required");
+      setNewRouteBookingUrl("");
+      setNotice(`线路「${name}」已创建。请到「班次时刻」页调整站点顺序和班次。`);
+    }
   }
 
   return (
@@ -1190,39 +1352,44 @@ function LinesPanel({
       >
         <div className="space-y-4">
           <InfoNote>
-            一条线路包含去程与回程两个方向，班次时刻挂在方向上。方向的名称由线路名和去 / 回程自动生成，不用另起一个。
+            线路 = 校区对 + 乘车方式：名称按「起点 → 终点」自动派生（预约线带「（预约）」后缀），不用手填。
+            站点顺序与班次在「班次时刻」里维护。
           </InfoNote>
 
+          {notice ? <InfoNote tone="info">{notice}</InfoNote> : null}
+
           {creatingRoute ? (
-            <div className="grid grid-cols-[1fr_180px_200px_auto] items-end gap-3 rounded-xl bg-page p-4">
-              <Field label="线路名称" onChange={setNewRouteName} placeholder="如 宝山 ↔ 延长" value={newRouteName} />
-              <Field label="代码（可选）" onChange={setNewRouteCode} placeholder="如 bs-yc" value={newRouteCode} />
-              <SelectField
-                label="运营单位（可选）"
-                onChange={setNewRouteOperator}
-                options={meta.ref.organizations.map((org) => ({ value: org.id, label: org.name }))}
-                placeholder="不指定"
-                value={newRouteOperator}
-              />
-              <div className="flex gap-2">
-                <PrimaryButton
-                  disabled={busy || !newRouteName.trim()}
-                  onClick={() => void (async () => {
-                    const ok = await mutate(
-                      () => admin.createTransitRoute({
-                        name: newRouteName.trim(),
-                        code: newRouteCode.trim() || null,
-                        operatorId: newRouteOperator || null,
-                      }),
-                      "新建线路失败",
-                    );
-                    if (ok) { setCreatingRoute(false); setNewRouteName(""); setNewRouteCode(""); setNewRouteOperator(""); }
-                  })()}
-                >
-                  保存
-                </PrimaryButton>
-                <GhostButton onClick={() => setCreatingRoute(false)}>取消</GhostButton>
+            <div className="space-y-3 rounded-xl bg-page p-4">
+              <div className="grid grid-cols-[170px_170px_130px_1fr_auto] items-end gap-3">
+                <SelectField
+                  label="起点"
+                  onChange={setNewFromEndpoint}
+                  options={endpoints.map((endpoint) => ({ value: endpoint.id, label: endpoint.name }))}
+                  placeholder="选择校区或站点"
+                  value={newFromEndpoint}
+                />
+                <SelectField
+                  label="终点"
+                  onChange={setNewToEndpoint}
+                  options={endpoints.map((endpoint) => ({ value: endpoint.id, label: endpoint.name }))}
+                  placeholder="选择校区或站点"
+                  value={newToEndpoint}
+                />
+                <SelectField
+                  label="乘车方式"
+                  onChange={(value) => setNewRouteBooking(value as TransitBookingPolicy)}
+                  options={POLICY_OPTIONS}
+                  value={newRouteBooking}
+                />
+                <Field label="预约链接（可选）" onChange={setNewRouteBookingUrl} placeholder="留空用默认预约网站" value={newRouteBookingUrl} />
+                <div className="flex gap-2">
+                  <PrimaryButton disabled={busy} onClick={() => void createLine()}>
+                    保存
+                  </PrimaryButton>
+                  <GhostButton onClick={() => { setCreatingRoute(false); setCreateError(""); }}>取消</GhostButton>
+                </div>
               </div>
+              <ErrorBanner message={createError} />
             </div>
           ) : null}
 
@@ -1230,14 +1397,13 @@ function LinesPanel({
 
           <div className="space-y-3">
             {data.routes.map((route) => {
-              const patterns = patternsByRoute.get(route.id) ?? [];
+              const stopIds = routeStopIds(route);
+              const hasPattern = (patternsByRoute.get(route.id) ?? []).length > 0;
               const statusMeta = ROUTE_STATUS_META[route.status] ?? { label: route.status, tone: "neutral" as const };
               return (
                 <div className="rounded-xl border border-line" key={route.id}>
                   {editingRoute === route.id ? (
-                    <div className="grid grid-cols-[1fr_160px_180px_160px_auto] items-end gap-3 p-4">
-                      <Field label="线路名称" onChange={setRouteName} value={routeName} />
-                      <Field label="代码" onChange={setRouteCode} value={routeCode} />
+                    <div className="grid grid-cols-[170px_130px_130px_1fr_auto] items-end gap-3 p-4">
                       <SelectField
                         label="运营单位"
                         onChange={setRouteOperator}
@@ -1246,16 +1412,26 @@ function LinesPanel({
                         value={routeOperator}
                       />
                       <SelectField label="运行状态" onChange={setRouteStatus} options={ROUTE_STATUS_OPTIONS} value={routeStatus} />
+                      <SelectField
+                        label="乘车方式"
+                        onChange={(value) => setRouteBooking(value as TransitBookingPolicy)}
+                        options={POLICY_OPTIONS}
+                        value={routeBooking}
+                      />
+                      <Field label="预约链接（可选）" onChange={setRouteBookingUrl} placeholder="留空用默认预约网站" value={routeBookingUrl} />
                       <div className="flex gap-2">
                         <PrimaryButton
-                          disabled={busy || !routeName.trim()}
+                          disabled={busy}
                           onClick={() => void (async () => {
+                            // 乘车方式变了名称也要跟上：名称始终是派生值（站点序列没动，只重拼后缀）
+                            const derived = deriveRouteName(stopIds, routeBooking);
                             const ok = await mutate(
                               () => admin.updateTransitRoute(route.id, {
-                                name: routeName.trim(),
-                                code: routeCode.trim() || null,
+                                ...(derived !== null ? { name: derived } : {}),
                                 operatorId: routeOperator || null,
                                 status: routeStatus as admin.TransitRouteStatus,
+                                bookingPolicy: routeBooking,
+                                bookingUrl: routeBookingUrl.trim() || null,
                               }),
                               "保存线路失败",
                             );
@@ -1270,32 +1446,23 @@ function LinesPanel({
                   ) : (
                     <div className="flex items-center gap-3 px-4 py-3">
                       <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink">{route.name}</span>
-                      <span className="w-24 shrink-0 truncate text-aux text-sub">{route.code ?? "—"}</span>
                       <span className="w-40 shrink-0 truncate text-aux text-sub">
                         {route.operatorId ? operatorName(route.operatorId) : "未指定运营单位"}
                       </span>
-                      <span className="w-20 shrink-0 text-aux text-sub">{patterns.length} 个方向</span>
+                      <span className="w-20 shrink-0 text-aux text-sub">{hasPattern ? `${stopIds.length} 站` : "—"}</span>
+                      <Pill tone={POLICY_META[route.bookingPolicy].tone}>{POLICY_META[route.bookingPolicy].label}</Pill>
                       <Pill tone={statusMeta.tone}>{statusMeta.label}</Pill>
-                      <GhostButton
-                        className="h-8"
-                        disabled={busy || patterns.length >= 2}
-                        onClick={() => startAddDirection(route)}
-                        title={patterns.length >= 2 ? "去程与回程都已存在" : "补一个方向"}
-                      >
-                        <Plus size={13} />方向
-                      </GhostButton>
                       <button
                         aria-label={`编辑线路 ${route.name}`}
                         className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line px-3 text-aux font-medium text-ink disabled:opacity-40"
                         disabled={busy}
                         onClick={() => {
                           setEditingRoute(route.id);
-                          setRouteName(route.name);
-                          setRouteCode(route.code ?? "");
                           setRouteOperator(route.operatorId ?? "");
                           setRouteStatus(route.status);
+                          setRouteBooking(route.bookingPolicy);
+                          setRouteBookingUrl(route.bookingUrl ?? "");
                           setConfirmRouteDelete("");
-                          setAddingDirectionFor("");
                         }}
                         type="button"
                       >
@@ -1304,9 +1471,9 @@ function LinesPanel({
                       <button
                         aria-label={`删除线路 ${route.name}`}
                         className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-error/40 px-3 text-aux font-medium text-error disabled:opacity-40"
-                        disabled={busy || patterns.length > 0}
+                        disabled={busy || hasPattern}
                         onClick={() => setConfirmRouteDelete(route.id)}
-                        title={patterns.length > 0 ? "先删除这条线路下的方向，或改为「暂停运行」" : "彻底删除"}
+                        title={hasPattern ? "这条线路已配置站点与班次，不能直接删除；如不再开行请改为「暂停运行」" : "彻底删除"}
                         type="button"
                       >
                         <Trash2 size={13} />删除
@@ -1339,216 +1506,6 @@ function LinesPanel({
                       </div>
                     </div>
                   ) : null}
-
-                  {/* 方向列表 */}
-                  <div className="border-t border-line px-4 py-2">
-                    {patterns.length === 0 && addingDirectionFor !== route.id ? (
-                      <p className="py-2 text-aux text-sub">还没有方向。点上面的「+ 方向」，按顺序选好站点即可。</p>
-                    ) : null}
-                    <div className="divide-y divide-line">
-                      {patterns.map((pattern) => {
-                        const stopIds = stopsByPattern.get(pattern.id) ?? [];
-                        const tripCount = tripCountByPattern.get(pattern.id) ?? 0;
-                        if (editingPattern === pattern.id) {
-                          return (
-                            <div className="grid grid-cols-[1fr_160px_auto] items-end gap-3 py-3" key={pattern.id}>
-                              <Field label="方向名称" onChange={setPatternName} value={patternName} />
-                              <SelectField label="走向" onChange={setPatternDirection} options={DIRECTION_OPTIONS} value={patternDirection} />
-                              <div className="flex gap-2">
-                                <PrimaryButton
-                                  disabled={busy || !patternName.trim()}
-                                  onClick={() => void (async () => {
-                                    const ok = await mutate(
-                                      () => admin.updateTransitPattern(pattern.id, {
-                                        name: patternName.trim(),
-                                        directionId: patternDirection === "0" ? 0 : 1,
-                                      }),
-                                      "保存方向失败",
-                                    );
-                                    if (ok) setEditingPattern("");
-                                  })()}
-                                >
-                                  <Check size={14} />保存
-                                </PrimaryButton>
-                                <GhostButton onClick={() => setEditingPattern("")}>取消</GhostButton>
-                              </div>
-                            </div>
-                          );
-                        }
-                        return (
-                          <div key={pattern.id}>
-                            <div className="flex items-center gap-3 py-2.5">
-                              <Pill tone="info">{DIRECTION_LABELS[pattern.directionId] ?? `方向 ${pattern.directionId}`}</Pill>
-                              <span className="min-w-0 flex-1 truncate text-aux text-sub">
-                                {stopIds.length ? stopIds.map(stopName).join(" → ") : "还没有站点顺序"}
-                              </span>
-                              <span className="w-20 shrink-0 text-aux text-sub">{tripCount} 班</span>
-                              <button
-                                aria-label="重命名方向"
-                                className="grid h-7 w-7 place-items-center rounded-md text-sub hover:bg-chip"
-                                onClick={() => {
-                                  setEditingPattern(pattern.id);
-                                  setPatternName(pattern.name);
-                                  setPatternDirection(String(pattern.directionId));
-                                  setConfirmPatternDelete("");
-                                }}
-                                type="button"
-                              >
-                                <Pencil size={14} />
-                              </button>
-                              <button
-                                aria-label="删除方向"
-                                className="grid h-7 w-7 place-items-center rounded-md text-error hover:bg-error-bg disabled:opacity-30"
-                                disabled={busy || tripCount > 0}
-                                onClick={() => setConfirmPatternDelete(pattern.id)}
-                                title={tripCount > 0 ? "先在「班次时刻」里删掉这个方向的班次" : "删除方向"}
-                                type="button"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                            {confirmPatternDelete === pattern.id ? (
-                              <div className="mb-2.5 rounded-lg bg-error-bg px-4 py-3">
-                                <p className="text-body font-medium text-error">
-                                  确认删除这个方向？它的站点顺序会一并删除。
-                                </p>
-                                <div className="mt-2.5 flex gap-2">
-                                  <button
-                                    className="h-8 rounded-lg bg-error px-3 text-aux font-semibold text-white disabled:opacity-40"
-                                    disabled={busy}
-                                    onClick={() => void mutate(async () => {
-                                      await admin.deleteTransitPattern(pattern.id);
-                                      setConfirmPatternDelete("");
-                                    }, "删除方向失败")}
-                                    type="button"
-                                  >
-                                    {busy ? "删除中…" : "确认删除"}
-                                  </button>
-                                  <button
-                                    className="h-8 rounded-lg border border-line bg-surface px-3 text-aux font-medium text-ink"
-                                    onClick={() => setConfirmPatternDelete("")}
-                                    type="button"
-                                  >
-                                    取消
-                                  </button>
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {addingDirectionFor === route.id ? (
-                      <div className="my-3 space-y-3 rounded-lg bg-page p-3">
-                        <div className="grid grid-cols-[160px_1fr] items-end gap-3">
-                          <SelectField label="走向" onChange={setDirectionId} options={DIRECTION_OPTIONS} value={directionId} />
-                          <p className="text-aux text-sub">
-                            方向名称会记为「{route.name} · {DIRECTION_LABELS[directionId === "0" ? 0 : 1]}」
-                          </p>
-                        </div>
-                        {directionStops.map((stop, index) => (
-                          <div className="rounded-lg border border-line bg-surface p-3" key={stop.stopId}>
-                            <div className="flex items-center gap-2">
-                              <span className="grid h-6 w-6 place-items-center rounded-full bg-chip text-aux font-semibold text-sub">
-                                {index + 1}
-                              </span>
-                              <span className="flex-1 text-body font-semibold text-ink">{stopName(stop.stopId)}</span>
-                              <GhostButton
-                                className="h-8"
-                                disabled={index === 0}
-                                onClick={() => setDirectionStops((current) => {
-                                  const next = [...current];
-                                  [next[index - 1], next[index]] = [next[index], next[index - 1]];
-                                  return next;
-                                })}
-                              >
-                                <ArrowUp size={14} />
-                              </GhostButton>
-                              <GhostButton
-                                className="h-8"
-                                disabled={index === directionStops.length - 1}
-                                onClick={() => setDirectionStops((current) => {
-                                  const next = [...current];
-                                  [next[index], next[index + 1]] = [next[index + 1], next[index]];
-                                  return next;
-                                })}
-                              >
-                                <ArrowDown size={14} />
-                              </GhostButton>
-                              <GhostButton
-                                className="h-8"
-                                danger
-                                onClick={() => setDirectionStops((current) => current.filter((_, i) => i !== index))}
-                              >
-                                <Trash2 size={14} />
-                              </GhostButton>
-                            </div>
-                            <div className="mt-2 grid grid-cols-2 gap-2">
-                              <SelectField
-                                label="上车规则"
-                                onChange={(pickupType) => setDirectionStops((current) =>
-                                  current.map((row, i) => i === index ? { ...row, pickupType: pickupType as TransitPickupType } : row))}
-                                options={PICKUP_OPTIONS}
-                                value={stop.pickupType}
-                              />
-                              <SelectField
-                                label="下车规则"
-                                onChange={(dropoffType) => setDirectionStops((current) =>
-                                  current.map((row, i) => i === index ? { ...row, dropoffType: dropoffType as TransitDropoffType } : row))}
-                                options={DROPOFF_OPTIONS}
-                                value={stop.dropoffType}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                        <div className="flex items-end gap-2">
-                          <div className="flex-1">
-                            <SelectField
-                              label="添加站点"
-                              onChange={setDirectionStopId}
-                              options={selectableStops
-                                .filter((stop) => !directionStops.some((item) => item.stopId === stop.id))
-                                .map((stop) => ({ value: stop.id, label: stop.name }))}
-                              placeholder="选择站点"
-                              value={directionStopId}
-                            />
-                          </div>
-                          <GhostButton
-                            disabled={!directionStopId}
-                            onClick={() => {
-                              setDirectionStops((current) => [...current, { stopId: directionStopId, pickupType: "regular", dropoffType: "regular" }]);
-                              setDirectionStopId("");
-                            }}
-                          >
-                            <Plus size={14} />添加
-                          </GhostButton>
-                        </div>
-                        {directionStops.length < 2 ? <InfoNote tone="warning">一个方向至少需要两个站点</InfoNote> : null}
-                        <div className="flex gap-2">
-                          <PrimaryButton
-                            disabled={busy || directionStops.length < 2}
-                            onClick={() => void (async () => {
-                              const direction = directionId === "0" ? 0 : 1;
-                              const ok = await mutate(
-                                () => admin.createTransitPattern({
-                                  routeId: route.id,
-                                  directionId: direction,
-                                  name: `${route.name} · ${DIRECTION_LABELS[direction]}`,
-                                  stops: directionStops,
-                                }),
-                                "新建方向失败",
-                              );
-                              if (ok) { setAddingDirectionFor(""); setDirectionStops([]); setDirectionStopId(""); }
-                            })()}
-                          >
-                            保存方向
-                          </PrimaryButton>
-                          <GhostButton onClick={() => setAddingDirectionFor("")}>取消</GhostButton>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
                 </div>
               );
             })}

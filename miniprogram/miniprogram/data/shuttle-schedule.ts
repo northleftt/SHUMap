@@ -1,786 +1,392 @@
-// 数据文件（原 .json，改为 TS 模块以兼容小程序编译器的模块解析）
-// 内容与原 data/shuttle-schedule.json 一致。
+// 数据文件（.ts 模块 export default，小程序编译器不打包 .json，见 miniprogram/AGENTS.md 坑 #2）
+// 由 scripts/generate_miniprogram_shuttle_snapshot.mjs 生成，请勿手改。
+// 0024 校区对校区改版结构：pairs 的键是「fromEndpointId>toEndpointId」，值是 lines[]
+// （线路级预约；快照无站点粒度，上下车点以线上 campus-lines 接口为准）。
 export default {
-  "sourceFile": "/docs/shuttle-schedule.pdf",
   "version": "Ver2025.11",
-  "normalizationNotes": [
-    "源表中的“双休/假日/寒假”已同步拆分到 weekend、holiday、winterBreak 三个字段，三者时刻相同。",
-    "嘉定校区->延长校区、延长校区->嘉定校区页面中，工作日橙色班次表示经停宝山校区。",
-    "经停宝山校区的全程车，在宝山校区的对应发车时刻等于全程起点发车时刻加 30 分钟；这些班次已经体现在宝山校区<->延长校区、宝山校区<->嘉定校区页面里，因此不再额外拆分“全程/前半程/后半程”线路。"
-  ],
-  "routes": [
+  "endpoints": [
     {
-      "id": "baoshan-to-yanchang",
-      "from": "宝山校区",
-      "to": "延长校区",
-      "sourcePage": 1,
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "07:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "09:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "10:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "12:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "13:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "14:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "15:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "18:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "21:30",
-            "isReservation": true
-          },
-          {
-            "departureTime": "22:00",
-            "isReservation": false
-          }
-        ],
-        "weekend": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "holiday": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "winterBreak": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "summerBreak": [
-          {
-            "departureTime": "07:45",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:30",
-            "isReservation": false
-          }
-        ]
-      }
+      "id": "campus_baoshan",
+      "name": "宝山校区"
     },
     {
-      "id": "yanchang-to-baoshan",
-      "from": "延长校区",
-      "to": "宝山校区",
-      "sourcePage": 2,
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "07:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "07:10",
-            "isReservation": true
-          },
-          {
-            "departureTime": "09:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "09:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "10:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "13:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "14:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "15:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "weekend": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "holiday": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "winterBreak": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "summerBreak": [
-          {
-            "departureTime": "07:15",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ]
-      }
+      "id": "campus_jiading",
+      "name": "嘉定校区"
     },
     {
-      "id": "baoshan-to-jiading",
-      "from": "宝山校区",
-      "to": "嘉定校区",
-      "sourcePage": 3,
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "07:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "08:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "09:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "10:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "12:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "13:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "13:30",
-            "isReservation": true
-          },
-          {
-            "departureTime": "14:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "15:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:30",
-            "isReservation": true
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:30",
-            "isReservation": true
-          },
-          {
-            "departureTime": "18:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "20:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "21:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "21:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "22:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "22:00",
-            "isReservation": true
-          }
-        ],
-        "weekend": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "holiday": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "winterBreak": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "summerBreak": [
-          {
-            "departureTime": "07:45",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:30",
-            "isReservation": false
-          }
-        ]
-      }
+      "id": "campus_yanchang",
+      "name": "延长校区"
     },
     {
-      "id": "jiading-to-baoshan",
-      "from": "嘉定校区",
-      "to": "宝山校区",
-      "sourcePage": 4,
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "07:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "07:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "08:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "09:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "09:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "10:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "13:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "14:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "14:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "15:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "21:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "22:00",
-            "isReservation": false
-          }
-        ],
-        "weekend": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "holiday": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "winterBreak": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "summerBreak": [
-          {
-            "departureTime": "07:15",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ]
-      }
-    },
-    {
-      "id": "baoshan-to-chentaigongyu",
-      "from": "宝山校区",
-      "to": "陈太公寓",
-      "sourcePage": 5,
-      "note": "源表仅给出工作日与节假日时刻，未单独给出周末时刻；本线路按页面说明统一视为预约车。",
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "11:45",
-            "isReservation": true
-          },
-          {
-            "departureTime": "14:45",
-            "isReservation": true
-          },
-          {
-            "departureTime": "17:45",
-            "isReservation": true
-          },
-          {
-            "departureTime": "20:45",
-            "isReservation": true
-          },
-          {
-            "departureTime": "21:45",
-            "isReservation": true
-          }
-        ],
-        "weekend": [],
-        "holiday": [
-          {
-            "departureTime": "12:45",
-            "isReservation": true
-          },
-          {
-            "departureTime": "18:45",
-            "isReservation": true
-          }
-        ],
-        "winterBreak": [],
-        "summerBreak": []
-      }
-    },
-    {
-      "id": "chentaigongyu-to-baoshan",
-      "from": "陈太公寓",
-      "to": "宝山校区",
-      "sourcePage": 6,
-      "note": "源表仅给出工作日与节假日时刻，未单独给出周末时刻；本线路按页面说明统一视为预约车。",
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "07:15",
-            "isReservation": true
-          },
-          {
-            "departureTime": "09:15",
-            "isReservation": true
-          },
-          {
-            "departureTime": "11:15",
-            "isReservation": true
-          },
-          {
-            "departureTime": "14:15",
-            "isReservation": true
-          },
-          {
-            "departureTime": "17:15",
-            "isReservation": true
-          }
-        ],
-        "weekend": [],
-        "holiday": [
-          {
-            "departureTime": "08:15",
-            "isReservation": true
-          },
-          {
-            "departureTime": "11:15",
-            "isReservation": true
-          },
-          {
-            "departureTime": "17:15",
-            "isReservation": true
-          }
-        ],
-        "winterBreak": [],
-        "summerBreak": []
-      }
-    },
-    {
-      "id": "jiading-to-yanchang",
-      "from": "嘉定校区",
-      "to": "延长校区",
-      "sourcePage": 7,
-      "note": "工作日带 viaCampus=宝山校区 的班次为经停宝山校区的全程车；其对应的宝山校区发车时刻为当前时刻加 30 分钟。",
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "07:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "08:00",
-            "isReservation": true
-          },
-          {
-            "departureTime": "09:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "10:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "13:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "14:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "15:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "18:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "21:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          }
-        ],
-        "weekend": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "holiday": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "winterBreak": [
-          {
-            "departureTime": "07:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ],
-        "summerBreak": [
-          {
-            "departureTime": "07:15",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ]
-      }
-    },
-    {
-      "id": "yanchang-to-jiading",
-      "from": "延长校区",
-      "to": "嘉定校区",
-      "sourcePage": 8,
-      "note": "工作日带 viaCampus=宝山校区 的班次为经停宝山校区的全程车；其对应的宝山校区发车时刻为当前时刻加 30 分钟。",
-      "schedules": {
-        "weekday": [
-          {
-            "departureTime": "07:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "09:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "10:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "12:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "13:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "14:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "15:00",
-            "isReservation": false,
-            "viaCampus": "宝山校区"
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "22:00",
-            "isReservation": false
-          }
-        ],
-        "weekend": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "holiday": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "winterBreak": [
-          {
-            "departureTime": "08:30",
-            "isReservation": false
-          },
-          {
-            "departureTime": "17:00",
-            "isReservation": false
-          }
-        ],
-        "summerBreak": [
-          {
-            "departureTime": "07:15",
-            "isReservation": false
-          },
-          {
-            "departureTime": "11:00",
-            "isReservation": false
-          },
-          {
-            "departureTime": "16:00",
-            "isReservation": false
-          }
-        ]
-      }
+      "id": "stop:stop_陈太公寓",
+      "name": "陈太公寓"
     }
-  ]
-};
+  ],
+  "pairs": {
+    "campus_baoshan>campus_yanchang": [
+      {
+        "routeName": "宝山校区 → 延长校区",
+        "bookingPolicy": "not_required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:00",
+            "09:30",
+            "10:30",
+            "11:30",
+            "12:30",
+            "13:30",
+            "14:30",
+            "15:30",
+            "17:00",
+            "18:00",
+            "22:00"
+          ],
+          "weekend": [
+            "08:30",
+            "17:00"
+          ],
+          "holiday": [
+            "08:30",
+            "17:00"
+          ],
+          "winterBreak": [
+            "08:30",
+            "17:00"
+          ],
+          "summerBreak": [
+            "07:45",
+            "11:30",
+            "16:30"
+          ]
+        }
+      },
+      {
+        "routeName": "宝山校区 → 延长校区（预约）",
+        "bookingPolicy": "required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "12:00",
+            "17:00",
+            "21:30"
+          ],
+          "weekend": [],
+          "holiday": [],
+          "winterBreak": [],
+          "summerBreak": []
+        }
+      }
+    ],
+    "campus_yanchang>campus_baoshan": [
+      {
+        "routeName": "延长校区 → 宝山校区",
+        "bookingPolicy": "not_required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:00",
+            "09:00",
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:00",
+            "14:00",
+            "15:00",
+            "17:00"
+          ],
+          "weekend": [
+            "07:30",
+            "16:00"
+          ],
+          "holiday": [
+            "07:30",
+            "16:00"
+          ],
+          "winterBreak": [
+            "07:30",
+            "16:00"
+          ],
+          "summerBreak": [
+            "07:15",
+            "11:00",
+            "16:00"
+          ]
+        }
+      },
+      {
+        "routeName": "延长校区 → 宝山校区（预约）",
+        "bookingPolicy": "required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:10",
+            "09:00",
+            "12:00"
+          ],
+          "weekend": [],
+          "holiday": [],
+          "winterBreak": [],
+          "summerBreak": []
+        }
+      }
+    ],
+    "campus_baoshan>campus_jiading": [
+      {
+        "routeName": "宝山校区 → 嘉定校区",
+        "bookingPolicy": "not_required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:00",
+            "08:00",
+            "09:30",
+            "10:30",
+            "11:30",
+            "12:30",
+            "13:30",
+            "14:30",
+            "15:30",
+            "17:00",
+            "18:00",
+            "21:00",
+            "22:00"
+          ],
+          "weekend": [
+            "08:30",
+            "17:00"
+          ],
+          "holiday": [
+            "08:30",
+            "17:00"
+          ],
+          "winterBreak": [
+            "08:30",
+            "17:00"
+          ],
+          "summerBreak": [
+            "07:45",
+            "11:30",
+            "16:30"
+          ]
+        }
+      },
+      {
+        "routeName": "宝山校区 → 嘉定校区（预约）",
+        "bookingPolicy": "required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "12:00",
+            "13:30",
+            "16:30",
+            "17:30",
+            "20:00",
+            "21:00",
+            "22:00"
+          ],
+          "weekend": [],
+          "holiday": [],
+          "winterBreak": [],
+          "summerBreak": []
+        }
+      }
+    ],
+    "campus_jiading>campus_baoshan": [
+      {
+        "routeName": "嘉定校区 → 宝山校区",
+        "bookingPolicy": "not_required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:00",
+            "09:00",
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:00",
+            "14:00",
+            "15:00",
+            "17:00",
+            "21:00",
+            "22:00"
+          ],
+          "weekend": [
+            "07:30",
+            "16:00"
+          ],
+          "holiday": [
+            "07:30",
+            "16:00"
+          ],
+          "winterBreak": [
+            "07:30",
+            "16:00"
+          ],
+          "summerBreak": [
+            "07:15",
+            "11:00",
+            "16:00"
+          ]
+        }
+      },
+      {
+        "routeName": "嘉定校区 → 宝山校区（预约）",
+        "bookingPolicy": "required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:00",
+            "08:00",
+            "09:00",
+            "12:00",
+            "14:00",
+            "17:00"
+          ],
+          "weekend": [],
+          "holiday": [],
+          "winterBreak": [],
+          "summerBreak": []
+        }
+      }
+    ],
+    "campus_baoshan>stop:stop_陈太公寓": [
+      {
+        "routeName": "宝山校区 → 陈太公寓",
+        "bookingPolicy": "required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "11:45",
+            "14:45",
+            "17:45",
+            "20:45",
+            "21:45"
+          ],
+          "weekend": [],
+          "holiday": [
+            "12:45",
+            "18:45"
+          ],
+          "winterBreak": [],
+          "summerBreak": []
+        }
+      }
+    ],
+    "stop:stop_陈太公寓>campus_baoshan": [
+      {
+        "routeName": "陈太公寓 → 宝山校区",
+        "bookingPolicy": "required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:15",
+            "09:15",
+            "11:15",
+            "14:15",
+            "17:15"
+          ],
+          "weekend": [],
+          "holiday": [
+            "08:15",
+            "11:15",
+            "17:15"
+          ],
+          "winterBreak": [],
+          "summerBreak": []
+        }
+      }
+    ],
+    "campus_jiading>campus_yanchang": [
+      {
+        "routeName": "嘉定校区 → 延长校区",
+        "bookingPolicy": "not_required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:00",
+            "09:00",
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:00",
+            "14:00",
+            "15:00",
+            "17:00",
+            "18:00",
+            "21:00"
+          ],
+          "weekend": [
+            "07:30",
+            "16:00"
+          ],
+          "holiday": [
+            "07:30",
+            "16:00"
+          ],
+          "winterBreak": [
+            "07:30",
+            "16:00"
+          ],
+          "summerBreak": [
+            "07:15",
+            "11:00",
+            "16:00"
+          ]
+        }
+      },
+      {
+        "routeName": "嘉定校区 → 延长校区（预约）",
+        "bookingPolicy": "required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "08:00"
+          ],
+          "weekend": [],
+          "holiday": [],
+          "winterBreak": [],
+          "summerBreak": []
+        }
+      }
+    ],
+    "campus_yanchang>campus_jiading": [
+      {
+        "routeName": "延长校区 → 嘉定校区",
+        "bookingPolicy": "not_required",
+        "bookingUrl": null,
+        "schedules": {
+          "weekday": [
+            "07:00",
+            "09:00",
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:00",
+            "14:00",
+            "15:00",
+            "17:00",
+            "22:00"
+          ],
+          "weekend": [
+            "08:30",
+            "17:00"
+          ],
+          "holiday": [
+            "08:30",
+            "17:00"
+          ],
+          "winterBreak": [
+            "08:30",
+            "17:00"
+          ],
+          "summerBreak": [
+            "07:15",
+            "11:00",
+            "16:00"
+          ]
+        }
+      }
+    ]
+  }
+} as const;

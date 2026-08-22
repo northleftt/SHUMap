@@ -27,43 +27,77 @@ export interface ReleaseNavigationLocation {
 }
 
 export interface ReleaseTransitManifest {
+  campuses: Array<{ id: string; name: string }>;
   transit: { stops: TransitStop[] };
   locations?: ReleaseNavigationLocation[];
 }
 
-export interface Journey {
-  tripId: string;
-  routeId: string;
-  routeName: string;
-  patternId: string;
-  bookingPolicy: string;
-  bookingUrl: string | null;
-  departureTime: string;
-  /** null when the source only carries departure times. */
-  arrivalTime: string | null;
-  fromSequence: number;
-  toSequence: number;
+// ---------------------------------------------------------------------------
+// GET /api/public/transit/campus-lines — 校区对校区模型（0024 改版）
+// ---------------------------------------------------------------------------
+
+/** 端点 id：校区直接用 campus_id；无校区的乘车点用 `stop:<stopId>` 伪端点。 */
+export interface TransitEndpointInfo {
+  id: string;
+  name: string;
 }
 
-export interface JourneysResponse {
-  date: string;
-  timezone: string;
-  journeys: Journey[];
-}
-
-/** 一个班次的完整停靠序列（pattern 顺序 + 该班次的到发时刻）。 */
-export interface TripStop {
+export interface CampusLineStop {
   stopId: string;
   stopName: string;
   stopSequence: number;
   pickupType: string;
   dropoffType: string;
-  arrivalTime: string | null;
-  departureTime: string | null;
 }
 
-export interface TripStopsResponse {
+export interface CampusLinePattern {
+  patternId: string;
+  name: string;
+  stops: CampusLineStop[];
+}
+
+export interface CampusJourneyStopTime {
+  stopSequence: number;
+  arrivalTime: string | null;
+  departureTime: string | null;
+  /**
+   * 估算到达时刻（HH:MM）。来自 worker/modules/travel-time.ts 的区间用时采样，
+   * 不是排班时刻——校车按表发车，未知量只有行驶耗时。缺样本或断链时为 null。
+   */
+  estimatedArrivalTime: string | null;
+  /** 估算到达跨天数：末班车 22:00 发车 + 40 分钟是次日，此时为 1。 */
+  estimatedArrivalDayOffset: number | null;
+}
+
+export interface CampusJourney {
   tripId: string;
   patternId: string;
-  stops: TripStop[];
+  publicLabel: string | null;
+  /** 首站发车时刻；源数据只有发车列时到达为 null。 */
+  departureTime: string | null;
+  arrivalTime: string | null;
+  /** 末站的估算到达时刻；`arrivalTime` 有真实值时不用它。 */
+  estimatedArrivalTime: string | null;
+  estimatedArrivalDayOffset: number | null;
+  /** 全程估算用时（分钟）。 */
+  estimatedDurationMinutes: number | null;
+  stopTimes: CampusJourneyStopTime[];
+}
+
+export interface CampusLine {
+  routeId: string;
+  routeName: string;
+  /** 预约是线路级属性：required / not_required / optional。 */
+  bookingPolicy: string;
+  bookingUrl: string | null;
+  patterns: CampusLinePattern[];
+  journeys: CampusJourney[];
+}
+
+export interface CampusLinesResponse {
+  date: string;
+  timezone: string;
+  from: TransitEndpointInfo;
+  to: TransitEndpointInfo;
+  lines: CampusLine[];
 }

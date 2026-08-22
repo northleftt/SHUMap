@@ -61,6 +61,7 @@ import {
   deleteTrip,
   listTransit,
   publicJourneys,
+  publicCampusLines,
   publicTripStops,
   replacePatternStops,
   updateCalendar,
@@ -72,6 +73,7 @@ import {
 
 import { listReleases, pendingReleaseChanges } from "./modules/releases";
 import { purgeQuarantineMedia } from "./modules/maintenance";
+import { sampleTravelTimes } from "./modules/travel-time";
 
 export { ReleaseCoordinator } from "./modules/releases";
 
@@ -100,11 +102,14 @@ export default {
   async queue(batch: MessageBatch<QueueJobMessage>, env: Env): Promise<void> {
     await processQueue(batch, env);
   },
-  // 定时清理隔离区照片（wrangler.jsonc triggers.crons，每天一次）。
+  // 定时任务（wrangler.jsonc triggers.crons，每天一次）：
+  //   1. 清理隔离区照片；
+  //   2. 校车区间用时采样（问腾讯 matrix 未来各发车时刻的预测耗时）。
   // scheduled 里不能抛——抛了这次 cron 算失败，但没有人工盯着告警，
-  // 所以维护模块内部自己吞错并打日志。
+  // 所以两个模块内部各自吞错并打日志。两件事互不依赖，并行跑。
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(purgeQuarantineMedia(env));
+    ctx.waitUntil(sampleTravelTimes(env));
   },
 };
 
@@ -130,6 +135,7 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "GET" && path === "/api/public/operations") return listOperationalEvents(env, true);
   if (method === "GET" && path === "/api/public/campaigns") return listCampaigns(env, true);
   if (method === "GET" && path === "/api/public/transit/journeys") return publicJourneys(request, env);
+  if (method === "GET" && path === "/api/public/transit/campus-lines") return publicCampusLines(request, env);
   const publicTrip = match(path, "/api/public/transit/trips/:tripId/stops");
   if (method === "GET" && publicTrip) return publicTripStops(env, publicTrip.tripId);
   // 反馈可匿名也可署名：登录了就把账号记进 submitter_user_id，没登录照样能提。
