@@ -4,6 +4,7 @@ import { loadReleaseWithCache } from "../../lib/release/loader";
 import type { LoadedRelease } from "../../lib/release/mapData";
 import { addSubmission } from "../../lib/submissions-log";
 import type { MapBuilding, TransitStop } from "../../lib/release/types";
+import { APP_SHARE_TITLE, enableShareMenus, sharePath } from "../../lib/share";
 
 type FeedbackType = "correction" | "new_place" | "shuttle" | "other";
 type PhotoStatus = "uploading" | "done" | "error";
@@ -64,11 +65,24 @@ Page({
   },
 
   onLoad() {
+    enableShareMenus();
     this.loadedRelease = null as LoadedRelease | null;
     this.buildings = [] as MapBuilding[];
     this.stops = [] as TransitStop[];
     this.syncTypes("correction");
     this.loadTargets();
+  },
+
+  /** 转发：反馈内容是本人填写的草稿，卡片一律落到地图首页，不带表单状态。 */
+  onShareAppMessage() {
+    return {
+      title: APP_SHARE_TITLE,
+      path: sharePath("/pages/map/map"),
+    };
+  },
+
+  onShareTimeline() {
+    return { title: APP_SHARE_TITLE };
   },
 
   async loadTargets() {

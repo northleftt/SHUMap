@@ -31,6 +31,7 @@ import {
 } from "../../lib/map/viewport";
 import { apiGetBinary, apiGetText } from "../../lib/api";
 import { requestErrorRetryText } from "../../lib/request-error";
+import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
 import {
   mediaExtension,
   removeLocalAsset,
@@ -92,11 +93,14 @@ Page({
   },
 
   onLoad(options: Record<string, string | undefined>) {
+    enableShareMenus();
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20 };
     this.setData({
       statusBarHeight: windowInfo.statusBarHeight ?? 20,
       placeId: options.placeId ?? "",
     });
+    // 转发深链带的楼层（?floor=）：boot 里优先选它，匹配不上回落最低层。
+    this.pendingFloorId = options.floor ? decodeURIComponent(options.floor) : "";
 
     // 视口共享变量：JS 线程触摸处理器直写，UI 线程 applyAnimatedStyle 跟随
     // （worklet:ongesture 真机不触发，手势识别在 JS 线程，见 AGENTS.md 坑 #7）。
@@ -126,6 +130,34 @@ Page({
     this.planFilePath = null;
     for (const path of this.mediaFilePaths) removeLocalAsset(path);
     this.mediaFilePaths.clear();
+  },
+
+  /** 转发：标题带楼宇 + 当前层，路径带 placeId/floor 还原到同一层。 */
+  onShareAppMessage() {
+    return {
+      title: shareTitle(this.floorShareSubject(), "楼层图"),
+      path: sharePath("/pages/floors/floors", this.floorShareParams()),
+    };
+  },
+
+  /** 分享到朋友圈：本页只读 release 数据，单页模式下无 tabBar/web-view 依赖。 */
+  onShareTimeline() {
+    return {
+      title: shareTitle(this.floorShareSubject(), "楼层图"),
+      query: shareQuery(this.floorShareParams()),
+    };
+  },
+
+  /** 卡片主题：「HA 楼 3F」；楼宇名未就绪时空串走 App 名兜底。 */
+  floorShareSubject(): string {
+    const name = this.data.buildingName;
+    if (!name) return "";
+    const floor = (this.data.floors as FloorRow[]).find((item) => item.id === this.data.activeFloorId);
+    return floor ? `${name} ${floor.displayName}` : name;
+  },
+
+  floorShareParams(): Record<string, string> {
+    return { placeId: this.data.placeId, floor: this.data.activeFloorId };
   },
 
   async boot() {
@@ -158,8 +190,13 @@ Page({
           hasPlan: plansByFloor.has(floor.id),
         })),
       });
-      // 默认选 levelOrder 最小的层
-      await this.setupFloor(floorRows[0].id);
+      // 深链指定的楼层优先（转发卡片带 ?floor=），匹配不上回落 levelOrder 最小的层
+      const pendingFloor = this.pendingFloorId;
+      this.pendingFloorId = "";
+      const target = pendingFloor && floorRows.some((floor) => floor.id === pendingFloor)
+        ? pendingFloor
+        : floorRows[0].id;
+      await this.setupFloor(target);
     } catch (error) {
       this.setData({
         loading: false,

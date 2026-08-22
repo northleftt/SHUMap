@@ -6,6 +6,7 @@
 // 这里再校验一次协议与域名（纵深防御），不在白名单内直接走降级页。
 
 import { config } from "../../config";
+import { APP_SHARE_TITLE, enableShareMenus, sharePath, shareTitle } from "../../lib/share";
 
 /** web-view 允许加载的地址前缀：本站网页 + 校车预约系统（含 API 下发的 bookingUrl）。 */
 const ALLOWED_URL_PREFIXES = [
@@ -26,11 +27,29 @@ Page({
   },
 
   onLoad(options: Record<string, string | undefined>) {
+    // 本页不开朋友圈：朋友圈是单页模式，web-view 组件在该模式下不可用，
+    // 分享出去只会得到一个空白容器页，所以只请求「转发」菜单（复制链接随之解锁）。
+    enableShareMenus(false);
     const url = options.url ? decodeURIComponent(options.url) : "";
     const title = options.title ? decodeURIComponent(options.title) : "预约乘车";
     // 域名不在白名单：不加载，直接展示「复制链接」降级页（与 web-view 加载失败同形态）。
     this.setData({ url, title, loadFailed: !isAllowedUrl(url) });
     wx.setNavigationBarTitle({ title });
+  },
+
+  /**
+   * 转发：白名单内的地址原样带过去（接收方 onLoad 会再校验一次），
+   * 白名单外（降级页）不外传 url，卡片落回地图首页。
+   */
+  onShareAppMessage() {
+    const url = this.data.url as string;
+    if (!url || !isAllowedUrl(url)) {
+      return { title: APP_SHARE_TITLE, path: sharePath("/pages/map/map") };
+    }
+    return {
+      title: shareTitle(this.data.title as string, ""),
+      path: sharePath("/pages/webview/webview", { url, title: this.data.title as string }),
+    };
   },
 
   onWebViewError() {

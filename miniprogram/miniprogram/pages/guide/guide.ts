@@ -41,6 +41,7 @@ import {
   type ViewerPoint,
   type ViewerTransform,
 } from "../../lib/image-viewer";
+import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
 
 interface HubOption {
   id: string;
@@ -125,10 +126,42 @@ Page({
   viewerMoved: false,
 
   onLoad(options: Record<string, string | undefined>) {
+    enableShareMenus();
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20 };
     this.setData({ statusBarHeight: windowInfo.statusBarHeight ?? 20 });
     this.pendingQuery = parseGuideQuery(options || {});
     this.load();
+  },
+
+  /** 转发：带当前枢纽 × 校区（?h=&c=，与网页版深链同参数），标题用枢纽名。 */
+  onShareAppMessage() {
+    return {
+      title: shareTitle(this.guideShareSubject(), "返校指南"),
+      path: sharePath("/pages/guide/guide", this.guideShareParams()),
+    };
+  },
+
+  /** 分享到朋友圈：本页纯内容展示，单页模式下无 tabBar/web-view 依赖。 */
+  onShareTimeline() {
+    return {
+      title: shareTitle(this.guideShareSubject(), "返校指南"),
+      query: shareQuery(this.guideShareParams()),
+    };
+  },
+
+  /** 卡片主题：「虹桥枢纽 到 宝山」；数据未就绪时空串走「返校指南」兜底。 */
+  guideShareSubject(): string {
+    const content = this.content;
+    if (!content) return "";
+    const hub = hubById(content, this.hubId);
+    const campus = (content.campuses || []).find((item) => item.id === this.campusId);
+    if (!hub) return "";
+    const campusLabel = campus ? campus.label || campus.id : "";
+    return campusLabel ? `${hub.name} 到 ${campusLabel}` : hub.name;
+  },
+
+  guideShareParams(): Record<string, string> {
+    return { h: this.hubId, c: this.campusId };
   },
 
   goBack() {

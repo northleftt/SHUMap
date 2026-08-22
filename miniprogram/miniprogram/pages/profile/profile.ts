@@ -3,6 +3,7 @@ import { listRecents } from "../../lib/recents";
 import { listFavorites } from "../../lib/favorites";
 import { loadReleaseWithCache } from "../../lib/release/loader";
 import { readSubmissions, type LocalSubmission } from "../../lib/submissions-log";
+import { APP_SHARE_TITLE, enableShareMenus, sharePath } from "../../lib/share";
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -29,9 +30,22 @@ Page({
   },
 
   onLoad() {
+    enableShareMenus();
     loadReleaseWithCache()
       .then((loaded) => this.setData({ releaseVersion: loaded.version }))
       .catch(() => {});
+  },
+
+  /** 转发：本页是个人数据（收藏/最近查看都存本机），卡片一律落到地图首页。 */
+  onShareAppMessage() {
+    return {
+      title: APP_SHARE_TITLE,
+      path: sharePath("/pages/map/map"),
+    };
+  },
+
+  onShareTimeline() {
+    return { title: APP_SHARE_TITLE };
   },
 
   onShow() {

@@ -86,6 +86,7 @@ import {
 } from "../../lib/map/sheet";
 import { apiGet, apiGetBinary } from "../../lib/api";
 import { requestErrorRetryText } from "../../lib/request-error";
+import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
 import {
   GUIDE_DISMISS_KEY,
   GUIDE_SLUG,
@@ -359,7 +360,50 @@ Page({
     if (this.data.ready) this.startUserLocationPolling();
   },
 
-  onLoad() {
+  /** 转发：详情开着就分享该地点（带 poi 深链），否则分享当前校区。 */
+  onShareAppMessage() {
+    const detail = this.data.detail as DetailSheetData | null;
+    if (detail) {
+      return {
+        title: shareTitle(detail.name),
+        path: sharePath("/pages/map/map", { poi: detail.poiKey, campus: this.data.activeCampusKey }),
+      };
+    }
+    return {
+      title: shareTitle(this.data.activeCampusLabel ? `${this.data.activeCampusLabel}校园地图` : ""),
+      path: sharePath("/pages/map/map", { campus: this.data.activeCampusKey }),
+    };
+  },
+
+  /** 分享到朋友圈：单页模式下自定义 tabBar 不渲染，地图本体不依赖它。 */
+  onShareTimeline() {
+    const detail = this.data.detail as DetailSheetData | null;
+    return {
+      title: detail
+        ? shareTitle(detail.name)
+        : shareTitle(this.data.activeCampusLabel ? `${this.data.activeCampusLabel}校园地图` : ""),
+      query: shareQuery(
+        detail
+          ? { poi: detail.poiKey, campus: this.data.activeCampusKey }
+          : { campus: this.data.activeCampusKey },
+      ),
+    };
+  },
+
+  onLoad(options: Record<string, string | undefined>) {
+    // 转发卡片/朋友圈进来的深链（?poi=&campus=）：复用其他 tab 那套一次性 storage 通道，
+    // boot 完成后由 openPendingPoi 消费。poi 优先——openPoi 会按 poi.campusKey 自己切校区，
+    // 所以只在没有 poi 时才用 campus: 前缀单独切校区。
+    const sharedPoi = options?.poi ? decodeURIComponent(options.poi) : "";
+    const sharedCampus = options?.campus ? decodeURIComponent(options.campus) : "";
+    if (sharedPoi || sharedCampus) {
+      try {
+        wx.setStorageSync("shumap.pending-map-poi", sharedPoi || `campus:${sharedCampus}`);
+      } catch {
+        // 写不进去只是深链失效，地图仍按默认校区打开。
+      }
+    }
+    enableShareMenus();
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20 };
     const statusBarHeight = windowInfo.statusBarHeight ?? 20;
     // 底部安全区（与 custom-tab-bar 同口径）：自定义 tabBar 总高 = 64 内容 + safeBottom，
@@ -516,8 +560,11 @@ Page({
       returnTab = "";
     }
     if (pending.startsWith("campus:")) {
-      const campusId = pending.slice("campus:".length);
-      const campus = this.loadedRelease.campuses.find((item) => item.id === campusId);
+      // 转发卡片带的是 campus.key（activeCampusKey），原有调用方按 campus.id 写，两者都认。
+      const campusRef = pending.slice("campus:".length);
+      const campus = this.loadedRelease.campuses.find(
+        (item) => item.id === campusRef || item.key === campusRef,
+      );
       if (campus) this.setupCampus(campus.key);
       return;
     }

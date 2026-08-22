@@ -4,6 +4,7 @@
 // （Skyline 页面没有 webview 层，automator 的 page.data() 不可用）。
 
 import { loadReleaseWithCache, selectCampus } from "../../lib/release/loader";
+import { APP_SHARE_TITLE, enableShareMenus, sharePath } from "../../lib/share";
 
 Page({
   data: {
@@ -31,9 +32,22 @@ Page({
   },
 
   onLoad() {
+    enableShareMenus();
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20 };
     this.setData({ statusBarHeight: windowInfo.statusBarHeight ?? 20 });
     this.boot();
+  },
+
+  /** 转发：调试页对外没有意义，卡片落到地图首页（只为解锁菜单里的复制链接）。 */
+  onShareAppMessage() {
+    return {
+      title: APP_SHARE_TITLE,
+      path: sharePath("/pages/map/map"),
+    };
+  },
+
+  onShareTimeline() {
+    return { title: APP_SHARE_TITLE };
   },
 
   async boot() {
