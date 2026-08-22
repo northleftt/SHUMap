@@ -213,7 +213,7 @@ export function locationDraftFromApi(raw: Record<string, unknown>, index: number
   };
 }
 
-const ALL_ROLES = [
+export const ALL_ROLES = [
   "primary_display", "footprint", "centroid", "main_entrance", "accessible_entrance",
   "navigation_target", "service_position", "boarding_point", "alighting_point", "event_location",
   "impact_area", "route_shape", "other",

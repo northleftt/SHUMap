@@ -29,7 +29,7 @@ import {
   fmtDateTime,
   useAsyncData,
 } from "../components/primitives";
-import { LocationEditor, isLocationDraftBlank, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { LocationEditor, ALL_ROLES, isLocationDraftBlank, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
 import type { PlaceContent } from "../../../shared/revision-contract";
 
@@ -498,6 +498,7 @@ export function PlaceEditorPage() {
           isBuilding={hasBuildingStructure}
           mapVersions={meta.state.data.mapVersions}
           onChange={setLocationDrafts}
+          roles={hasBuildingStructure ? undefined : ALL_ROLES.filter((role) => role !== "footprint")}
           spaces={meta.state.data.spaces}
           value={locationDrafts}
         />

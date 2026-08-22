@@ -179,3 +179,30 @@ test("new building review binds an imported SVG feature through canonical locati
   });
   databaseSync.close();
 });
+
+test("non-building place cannot declare a footprint location", async () => {
+  const databaseSync = database();
+  const feature = databaseSync.prepare(
+    `select id from map_features
+      where map_version_id='map_version_campus_baoshan' and feature_kind='building_footprint'
+      order by id limit 1`,
+  ).get();
+  assert.ok(feature);
+  const env = { DB: new D1Database(databaseSync) };
+
+  const draft = revision(feature.id);
+  const nonBuilding = {
+    ...draft,
+    structure: { ...draft.structure, building: null },
+  };
+  await assert.rejects(
+    handlers.createPlaceHandler(request(nonBuilding), env, principal, "request_create_non_building"),
+    (error) => {
+      assert.equal(error.status, 400);
+      assert.equal(error.code, "validation_error");
+      assert.match(error.message, /Only a building place can have a footprint location/);
+      return true;
+    },
+  );
+  databaseSync.close();
+});

@@ -495,7 +495,14 @@ async function validateLocations(env: Env, locations: RevisionLocationInput[]): 
 function validatePlaceLocationContract(structure: PlaceStructure, placeId: string | null): void {
   const navigationTargets = structure.locations.filter((location) => location.role === "navigation_target");
   if (navigationTargets.length > 1) validation("A place can have at most one navigation target");
-  if (!structure.building) return;
+  if (!structure.building) {
+    // footprint 锚点触发器（0015）要求锚点挂在真实建筑上；非楼宇地点必须在这里
+    // 就拦下 footprint，否则审核通过写库时才被触发器打回成 500。
+    if (structure.locations.some((location) => location.role === "footprint")) {
+      validation("Only a building place can have a footprint location");
+    }
+    return;
+  }
   if (!structure.campusId) validation("A building must belong to a campus");
   for (const location of structure.locations) {
     if (location.campusId !== structure.campusId) validation("Every building location must use the building campus");
