@@ -37,13 +37,21 @@ export interface GuideCampus {
   short?: string;
 }
 
-/** 图标注册表项：svg 小程序用不了；uri/png 是位图 data URI（png 为编辑器派生，可能缺省）。 */
+/**
+ * 图标注册表项。svg 小程序用不了（<image> 不认矢量标记），位图才是能画的那份：
+ *   asset  素材库键（icon-<id>），位图在 R2，内容里只留这个键 —— 现行写法
+ *   uri    内联位图 data URI —— 迁移前的老稿，仍要能读
+ *   png    编辑器给 svg 派生的内联 PNG —— 同上，老稿兼容
+ * 内联字段为什么退役：一枚 3840px 的地铁标 base64 后 595KB，占整份内容 96%，
+ * 而它只画 15rpx 高；内容每次打开都整份下发，位图却是能独立缓存的。
+ */
 export interface GuideIcon {
   id: string;
   name?: string;
   group?: string;
   note?: string;
   svg?: string;
+  asset?: string;
   uri?: string;
   png?: string;
   ratio?: number;
@@ -399,7 +407,7 @@ export function lineInk(key: string | null | undefined, content: GuideContent): 
 /* ══════════════ 图标注册表（对齐网页版 iconById/lineIcon） ══════════════
  * 只用 content.icons（用户上传，随发布稿下发）；网页版还有出厂种子
  * GUIDE_ICON_SEED，小程序拿不到——icons 缺失/为空时线路一律按无图标处理。
- * svg 内联标记小程序渲染不了，src 只取 png（编辑器派生）或 uri（位图 data URI）。 */
+ * svg 内联标记小程序渲染不了，src 按 asset（素材库位图）→ png / uri（老稿内联）取。 */
 
 export function iconById(content: GuideContent, id: string | null | undefined): GuideIcon | null {
   if (!id) return null;
@@ -415,11 +423,22 @@ export interface GuideLineIcon {
 /** 交通方式图标：ln.icon 指定优先，缺省按 kind 映射（metro→metro-sh、rail→rail-sh、bus→无）。 */
 const KIND_ICON: Record<string, string | null> = { metro: "metro-sh", rail: "rail-sh", bus: null };
 
+/**
+ * 图标位图的地址。asset 走素材端点（已是 PNG，不做 figure 那套 -png 派生），
+ * png / uri 是迁移前的内联 data URI，原样透传。只有 svg 的图标返回 null ——
+ * 小程序画不了矢量，线路按无图标渲染（文字徽标仍在）。
+ */
+export function iconSrc(ic: GuideIcon | null): string | null {
+  if (!ic) return null;
+  if (ic.asset) return `${config.apiBaseUrl}/api/public/guide-assets/${encodeURIComponent(ic.asset)}`;
+  return ic.png || ic.uri || null;
+}
+
 export function lineIcon(content: GuideContent, ln: GuideRouteLegLine): GuideLineIcon | null {
   const id = ln.icon || (ln.kind ? KIND_ICON[ln.kind] : null) || null;
   const ic = iconById(content, id);
   if (!ic) return null;
-  const src = ic.png || ic.uri;
+  const src = iconSrc(ic);
   if (!src) return null;
   return { src, ratio: ic.ratio || 1, name: ic.name || "" };
 }

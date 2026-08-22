@@ -9,6 +9,7 @@
  * 对外接口（window.GuideRender）：
  *   normalizeData(raw)               → v2 数据（兼容 v1 输入）
  *   allIcons / iconById / renderIcon → 图标库（data.icons 覆盖出厂种子）
+ *   iconSrc / iconAssetKey           → 图标位图的地址与素材键（编辑器上传时共用）
  *   sanitizeRichHtml(html)           → 富文本白名单消毒（编辑器共用）
  *   renderCard / renderRouteCard / renderFigureCard / renderStepsCard
  *   renderHubGuide / renderHubVideo / renderRemark → 枢纽级区块
@@ -346,8 +347,10 @@ window.GuideRender = (function () {
 
   /* ══════════════ 图标库 ══════════════
    * 图标按 id 查注册表。data.icons 优先（用户上传，随 JSON 导出／导入），
-   * 缺失时回落到 GUIDE_ICON_SEED 出厂种子。存储格式二选一：svg（内联标记）
-   * 或 uri（data URI），都不用外部路径。 */
+   * 缺失时回落到 GUIDE_ICON_SEED 出厂种子。一枚图标最多两份表示：
+   *   svg    内联矢量标记 —— 体积小、可跟随 currentColor，网页端优先用
+   *   asset  位图在素材库里的键（icon-<id>）—— 无 svg 时用它
+   * 位图不再内联（旧稿的 uri 字段仍能读，见 iconSrc）。 */
   function allIcons(data) {
     var seed = window.GUIDE_ICON_SEED || [];
     var own = (data && data.icons) || [];
@@ -367,8 +370,34 @@ window.GuideRender = (function () {
     return null;
   }
 
+  /* 位图图标的地址。asset 是素材库键（走 /api/public/guide-assets/<key>），
+     uri 是内联 data URI —— 只在离线编辑时产生，联网保存时会换成 asset。
+     位图为什么不再内联：一枚 3840px 的地铁标 base64 后 595KB，曾占整份内容
+     96% 的体积，而它只画 15px。素材库那边有 ETag + 独立缓存，内容 JSON 却是
+     每次打开页面都整份下发的。 */
+  function iconSrc(ic) {
+    if (!ic) return null;
+    if (ic.asset) return ASSET_BASE + encodeURIComponent(ic.asset);
+    return ic.uri || null;
+  }
+
+  /* 图标位图在素材库里的键：icon-<图标 id>，按服务端 ASSET_KEY_PATTERN 收敛
+     （小写字母/数字/连字符，3-64 位，首尾不为连字符）。前缀有两个作用：
+     素材清单里一眼看出这张图属于图标库；编辑器的图示素材下拉据此把图标
+     位图筛掉，不让它们混进图示卡的候选。id 本身已以 icon- 开头时不再叠加。 */
+  function iconAssetKey(id) {
+    var base = String(id || "").toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!base) return null;
+    var key = /^icon-/.test(base) ? base : "icon-" + base;
+    if (key.length > 64) key = key.slice(0, 64);
+    key = key.replace(/-+$/, "");
+    return key.length >= 3 ? key : null;
+  }
+
   /* 把图标画成 DOM。iconOrId 可以是图标对象或 id；size 是高度（px），
-     宽度按 ratio 推算，缺省为正方。svg 走 innerHTML，uri 走 <img>。 */
+     宽度按 ratio 推算，缺省为正方。svg 走 innerHTML（矢量优先，可跟随
+     currentColor），位图走 <img>（asset 优先、uri 兜底）。 */
   function renderIcon(data, iconOrId, size) {
     var ic = typeof iconOrId === "string" ? iconById(data, iconOrId) : iconOrId;
     if (!ic) return null;
@@ -381,7 +410,10 @@ window.GuideRender = (function () {
       "aria-hidden": "true",
     });
     if (ic.svg) box.innerHTML = ic.svg;
-    else if (ic.uri) box.appendChild(h("img", { src: ic.uri, alt: ic.name || "" }));
+    else {
+      var src = iconSrc(ic);
+      if (src) box.appendChild(h("img", { src: src, alt: ic.name || "" }));
+    }
     return box;
   }
 
@@ -1333,6 +1365,7 @@ window.GuideRender = (function () {
     normalizeData: normalizeData,
     hubFigures: hubFigures, hubVideos: hubVideos, appliesTo: appliesTo,
     allIcons: allIcons, iconById: iconById, renderIcon: renderIcon,
+    iconSrc: iconSrc, iconAssetKey: iconAssetKey,
     sanitizeRichHtml: sanitizeRichHtml,
     renderCard: renderCard, renderRouteCard: renderRouteCard,
     renderFigureCard: renderFigureCard, renderStepsCard: renderStepsCard,

@@ -39,12 +39,22 @@ const MAX_CONTENT_BYTES = 2 * 1024 * 1024;
 /** 单张图示上限。原稿裁出的矢量图最大约 1.3MB（87% 是原稿置入的位图底图）。 */
 const MAX_ASSET_BYTES = 4 * 1024 * 1024;
 
-const ASSET_KINDS = ["figure_svg", "figure_png", "icon_svg"] as const;
+/**
+ * icon_png 是图标库的位图通道（见 0022）。图标本来把位图 base64 内联在
+ * content_json 里，一枚 3840px 的地铁标就占 595KB —— 整份内容 96% 的体积，
+ * 而它只画 15px。改成和图示一样按 asset_key 引用后，内容回到 30KB 量级，
+ * 位图走素材端点（ETag + 独立缓存），换图也不必重新发一版内容。
+ *
+ * 单独一种 kind 而不是复用 figure_png：编辑器的图示下拉按 kind 过滤，
+ * 图标位图混进去会让「这张图能不能当图示卡」变得要靠键名去猜。
+ */
+const ASSET_KINDS = ["figure_svg", "figure_png", "icon_svg", "icon_png"] as const;
 
 const ASSET_CONTENT_TYPE: Record<(typeof ASSET_KINDS)[number], string> = {
   figure_svg: "image/svg+xml",
   figure_png: "image/png",
   icon_svg: "image/svg+xml",
+  icon_png: "image/png",
 };
 
 /** asset_key 会出现在 URL 里，也会被内容用 card.figure 引用，所以限制成安全字符集。 */

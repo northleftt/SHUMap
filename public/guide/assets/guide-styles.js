@@ -164,7 +164,10 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
 .gc-step__t{display:block}
 .gc-step__n{display:block;font-size:11px;line-height:16px;color:var(--sub);margin-top:1px}
 
-/* 实景指引图文混排：小节级照片 + 步骤配图（双列网格，对齐原稿版式） */
+/* 实景指引图文混排：小节级照片 + 步骤配图（双列网格，对齐原稿版式）。
+   轨道必须 minmax(0,1fr) 且步骤/图组 min-width:0 —— 1fr 的轨道下限是内容的
+   min-content，实景照片按原图固有宽度（几千 px）参与计算，会把整列撑出
+   页面右边框（右列即偶数步骤看起来「超出边框」）。 */
 .gc-secfigs{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
   gap:12px;margin:0 0 12px}
 .gc-secfig{margin:0}
@@ -172,12 +175,12 @@ body{margin:0;font-family:var(--font-sans);color:var(--ink);background:var(--pag
   border-radius:var(--r-sm);border:1px solid var(--line)}
 .gc-secfig__cap{font-size:12px;font-weight:600;line-height:17px;color:var(--ink-2);
   margin-top:5px}
-.gc-sec__list--grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 18px;
+.gc-sec__list--grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px 18px;
   padding-left:0;list-style:none;counter-reset:gstep}
-.gc-sec__list--grid .gc-step{counter-increment:gstep}
+.gc-sec__list--grid .gc-step{counter-increment:gstep;min-width:0}
 .gc-sec__list--grid .gc-step__t::before{content:counter(gstep) ". ";
   color:var(--primary);font-weight:600}
-.gc-step__figs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.gc-step__figs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;min-width:0}
 .gc-step__fig{flex:1 1 30%;min-width:0;aspect-ratio:4/3;height:auto;border-radius:var(--r-sm);
   border:1px solid var(--line);object-fit:cover}
 @media screen and (max-width:640px){

@@ -215,7 +215,10 @@ const content = guide.normalizeGuideContent(fixture.content);
 }
 
 // ---------------------------------------------------------------------------
-// 5. 图标注册表：png 优先 / uri 回落 / svg-only 与缺省映射按无图标处理
+// 5. 图标注册表：asset 优先 / 内联 png|uri 回落 / svg-only 与缺省映射按无图标
+//
+// asset 是图标位图迁进素材库后的现行写法（内容里只留 icon-<id> 键，位图在 R2）。
+// png / uri 是迁移前的内联 data URI —— 线上仍有旧修订，回落分支必须留着。
 // ---------------------------------------------------------------------------
 {
   // 夹具图标只有 svg（小程序用不了）→ 线路图标一律 null，不造出厂种子
@@ -227,22 +230,31 @@ const content = guide.normalizeGuideContent(fixture.content);
   const withIcons = {
     ...content,
     icons: [
-      { id: "metro-sh", name: "上海地铁", png: "data:image/png;base64,AAA", ratio: 1.5 },
+      { id: "metro-sh", name: "上海地铁", asset: "icon-metro-sh", ratio: 1.5 },
       { id: "rail-sh", name: "市域铁路", uri: "data:image/gif;base64,BBB" },
       { id: "custom", name: "自定义", png: "data:image/png;base64,CCC", ratio: 0.8 },
       { id: "svg-only", name: "矢量", svg: "<svg/>" },
+      /* 迁移期的中间态：asset 已补上、内联还没清掉。素材键必须赢，
+         否则搬完了前台仍在下发 base64。 */
+      { id: "both", name: "都有", asset: "icon-both", uri: "data:image/png;base64,DDD" },
     ],
   };
-  // png 优先 + ratio 推算宽度（高度固定 30rpx）
+  // asset → 素材端点（图标素材本身就是 PNG，不套 figure 那套 -png 派生）
   const metroIcon = guide.lineIcon(withIcons, { kind: "metro" });
-  assert.equal(metroIcon.src, "data:image/png;base64,AAA");
+  assert.match(metroIcon.src, /\/api\/public\/guide-assets\/icon-metro-sh$/);
+  assert.doesNotMatch(metroIcon.src, /-png$/, "图标素材再拼 -png 会 404");
   assert.equal(metroIcon.ratio, 1.5);
-  // uri 回落
+  // 内联 uri / png 回落（迁移前的旧修订）
   assert.equal(guide.lineIcon(withIcons, { kind: "rail" }).src, "data:image/gif;base64,BBB");
-  // ln.icon 指定优先于 KIND_ICON 映射
   assert.equal(
     guide.lineIcon(withIcons, { kind: "metro", icon: "custom" }).src,
     "data:image/png;base64,CCC",
+    "ln.icon 指定优先于 KIND_ICON 映射",
+  );
+  // asset 与内联并存时素材键赢
+  assert.match(
+    guide.lineIcon(withIcons, { kind: "metro", icon: "both" }).src,
+    /\/api\/public\/guide-assets\/icon-both$/,
   );
   // bus 无默认图标；svg-only 视为无图标；未知 id 为 null
   assert.equal(guide.lineIcon(withIcons, { kind: "bus" }), null);
@@ -251,10 +263,11 @@ const content = guide.normalizeGuideContent(fixture.content);
 
   // buildCardView rideLines.icon 宽度 = round(30 × ratio)
   const iconCardView = guide.buildCardView(raw, withIcons);
-  assert.deepEqual(iconCardView.legs[1].rideLines[0].icon, {
-    src: "data:image/png;base64,AAA",
-    width: 45,
-  });
+  assert.equal(iconCardView.legs[1].rideLines[0].icon.width, 45);
+  assert.match(
+    iconCardView.legs[1].rideLines[0].icon.src,
+    /\/api\/public\/guide-assets\/icon-metro-sh$/,
+  );
 }
 
 // ---------------------------------------------------------------------------

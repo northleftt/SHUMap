@@ -415,9 +415,12 @@
     return fetch(path, opts).then(function (res) {
       if (!res.ok) {
         return res.json().catch(function () { return {}; }).then(function (body) {
-          var err = new Error(body.message || ("HTTP " + res.status));
+          /* 服务端的错误信封是 {error:{code,message}}（见 worker/lib/http.ts problem()）；
+             边缘层（Cloudflare）的 5xx 则连 JSON 都不是，只能报状态码。 */
+          var inner = body && typeof body.error === "object" && body.error ? body.error : null;
+          var err = new Error((inner && inner.message) || body.message || ("HTTP " + res.status));
           err.status = res.status;
-          err.code = body.error || "";
+          err.code = (inner && inner.code) || "";
           throw err;
         });
       }
@@ -426,6 +429,7 @@
   }
 
   var saveTimer = null;
+  var saveRetries = 0;
   function markState(state, text) {
     var el = document.getElementById("ge-state");
     el.className = "ge-state" +
@@ -453,6 +457,7 @@
         content: data,
       },
     }).then(function (res) {
+      saveRetries = 0;
       if (res && res.id) {
         server.workingId = res.id;
         server.workingNo = res.revisionNo;
@@ -467,6 +472,15 @@
         markState("err", "送审中，内容已冻结");
         return;
       }
+      /* 瞬时故障（网络断开 / 边缘层 5xx，如 Cloudflare 偶发 503）自动重试，
+         不打扰编辑；4xx 是内容或权限问题，重试无意义直接报错。 */
+      if ((!err.status || err.status >= 500) && saveRetries < 2) {
+        saveRetries += 1;
+        markState("dirty", "保存失败，正在重试…");
+        setTimeout(function () { saveNow(); }, 1200 * saveRetries);
+        return;
+      }
+      saveRetries = 0;
       markState("err", "服务器保存失败，已留存本地");
       R.toast("保存失败：" + err.message + "（改动已保存在本地）");
     });
@@ -2167,40 +2181,103 @@
     { value: "misc", label: "其它" },
   ];
 
-  /* 小程序的 <image> 不支持 SVG：给 SVG 图标派生一份 PNG data URI（ic.png），
-     随内容一起进修订，小程序端优先用它渲染。网页端仍用 svg 矢量，不受影响。
-     懒补策略：ensureIcons 发现缺 png 的 SVG 图标就异步光栅化补齐并保存一次；
-     位图图标（ic.uri 本身就是 data URI）小程序可直接用，不需要派生。 */
-  function rasterizeIconPng(ic) {
+  /* ── 图标位图进素材库（不再 base64 内联进内容）──────────────────────
+     为什么改：一枚 3840×3840 的地铁标 base64 后 595KB，曾占整份内容 96% 的
+     体积，而它在时间轴上只画 15px。内容是「一份文档」——前台每次打开整份下发，
+     且每改一个字就存一版新快照，位图会跟着复制 N 份。素材库那边按 asset_key
+     寻址、ETag 独立缓存，换图连内容都不必重新发一版。
+
+     一枚图标最多两份表示：
+       ic.svg    矢量标记，内联（体积小、可跟随 currentColor）—— 网页端优先用
+       ic.asset  位图在素材库里的键（icon-<id>）—— 网页端无 svg 时用它，
+                 小程序端一律用它（<image> 渲染不了 SVG）
+     位图统一在浏览器里光栅化到 96px 高再上传（显示 15–34px，3x 屏够用），
+     所以源图多大都不会带进素材库。
+
+     ic.uri / ic.png 是迁移前的内联字段：读得懂，但不再写入。离线模式没有上传
+     通道，新加的位图图标仍暂存 ic.uri，联网后由 backfillIconAssets 顶掉。 */
+  var ICON_RASTER_H = 96;
+
+  function dataUriToBlob(uri) {
+    var m = /^data:([^;,]*)(;base64)?,([\s\S]*)$/i.exec(String(uri || ""));
+    if (!m) return null;
+    var type = m[1] || "application/octet-stream";
+    if (!m[2]) return new Blob([decodeURIComponent(m[3])], { type: type });
+    var bin = atob(m[3]);
+    var buf = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    return new Blob([buf], { type: type });
+  }
+
+  /* 光栅化成 96px 高的 PNG，并回算 ratio（宽度按它推）。
+     源按 svg → 内联 uri → 旧派生 png 取第一个可用的。 */
+  function rasterizeIcon(ic) {
     return new Promise(function (resolve) {
+      var isSvg = !!ic.svg;
+      var src = isSvg
+        ? "data:image/svg+xml;charset=utf-8," + encodeURIComponent(ic.svg)
+        : (ic.uri || ic.png || null);
+      if (!src) return resolve(null);
       var img = new Image();
       img.onload = function () {
         try {
-          var hgt = 96;                       // 显示高度约 15–34px，96 够 3x 屏
-          var ratio = ic.ratio ||
-            (img.naturalHeight ? img.naturalWidth / img.naturalHeight : 1) || 1;
+          /* SVG 的 naturalWidth 在没写 width/height 时各浏览器不一（有的给
+             300×150 默认值），所以矢量优先信 viewBox 算出来的 ic.ratio；
+             位图反过来，naturalWidth 才是真的。 */
+          var natural = img.naturalHeight ? img.naturalWidth / img.naturalHeight : 0;
+          var ratio = (isSvg ? (ic.ratio || natural) : (natural || ic.ratio)) || 1;
           var cv = document.createElement("canvas");
-          cv.width = Math.max(1, Math.round(hgt * ratio));
-          cv.height = hgt;
+          cv.width = Math.max(1, Math.round(ICON_RASTER_H * ratio));
+          cv.height = ICON_RASTER_H;
           cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-          resolve(cv.toDataURL("image/png"));
+          cv.toBlob(function (blob) {
+            resolve(blob ? { blob: blob, ratio: +ratio.toFixed(4) } : null);
+          }, "image/png");
         } catch (e) { resolve(null); }
       };
       img.onerror = function () { resolve(null); };
-      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(ic.svg);
+      img.src = src;
     });
   }
-  var iconPngFilling = false;
-  function backfillIconPngs(list) {
-    if (iconPngFilling) return;
-    var pending = list.filter(function (ic) { return ic && ic.svg && !ic.png; });
+
+  /* 上传一枚图标的位图到素材库。键由 id 派生且 id 不可改，所以同一枚图标
+     永远落同一个键 —— 换图就是同键重传（服务端语义即替换），引用它的内容
+     一个字都不用动。成功后内联字段让位给 asset 键。 */
+  function uploadIconAsset(ic) {
+    var key = R.iconAssetKey(ic.id);
+    if (!key) return Promise.resolve(false);
+    return rasterizeIcon(ic).then(function (out) {
+      if (!out) return false;
+      return fetch("/api/admin/guide/assets/" + encodeURIComponent(key) + "?kind=icon_png", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "image/png" },
+        body: out.blob,
+      }).then(function (res) {
+        if (!res.ok) return false;
+        ic.asset = key;
+        ic.ratio = out.ratio;
+        delete ic.uri;
+        delete ic.png;
+        return true;
+      });
+    }).catch(function () { return false; });
+  }
+
+  /* 懒补：注册表里任何还没有 asset 的图标（出厂种子、旧内联稿、离线时新加的）
+     在联网时补传一次。失败不重试到死 —— 下次 ensureIcons 再试。 */
+  var iconAssetFilling = false;
+  function backfillIconAssets(list) {
+    if (iconAssetFilling || !server.online || server.readOnly) return;
+    var pending = list.filter(function (ic) {
+      return ic && ic.id && !ic.asset && (ic.svg || ic.uri || ic.png);
+    });
     if (!pending.length) return;
-    iconPngFilling = true;
-    Promise.all(pending.map(function (ic) {
-      return rasterizeIconPng(ic).then(function (png) { if (png) ic.png = png; });
-    })).then(function () {
-      iconPngFilling = false;
-      persist();
+    iconAssetFilling = true;
+    Promise.all(pending.map(uploadIconAsset)).then(function (results) {
+      iconAssetFilling = false;
+      /* 全失败时不 refresh：否则 ensureIcons 会把这轮再排一次，来回空转 */
+      if (results.some(Boolean)) { persist(); loadAssets(); }
     });
   }
 
@@ -2208,7 +2285,7 @@
     if (!Array.isArray(data.icons)) {
       data.icons = JSON.parse(JSON.stringify(window.GUIDE_ICON_SEED || []));
     }
-    backfillIconPngs(data.icons);
+    backfillIconAssets(data.icons);
     return data.icons;
   }
 
@@ -2310,7 +2387,7 @@
     return section("iconlib", "图标库", list.length + " 个", false, function () {
       var w = h("div", null,
         h("div", { class: "ge-hint",
-          text: "上传 SVG 或 PNG 后，乘车段的线路都能在线路「图标」下拉里选用。图标随 JSON 一起导出，换机器也不会丢；被线路引用的图标不能删除。" }));
+          text: "上传 SVG 或 PNG 后，乘车段的线路都能在线路「图标」下拉里选用。SVG 存矢量标记，位图会缩到 96px 高传进素材库（内容里只留引用，不再内嵌）。被线路引用的图标不能删除。" }));
 
       w.appendChild(h("div", { class: "ge-adds", style: "margin:0 0 10px" },
         h("button", {
@@ -2512,7 +2589,11 @@
         if (!keep) throw new Error("图标已不存在");
         /* 只换图形，保留 id / 名称 / 分组，避免引用断掉 */
         delete keep.svg; delete keep.uri; delete keep.ratio;
-        delete keep.png;   // 派生位图随图形一起失效，ensureIcons 会懒补新的
+        delete keep.png;
+        /* 素材键由 id 派生、id 又没变，所以清掉 asset 只是让 ensureIcons
+           重走一次上传 —— 落回同一个键，服务端语义即「替换这张图」，
+           引用它的内容一个字都不用改。 */
+        delete keep.asset;
         if (ic.svg) keep.svg = ic.svg;
         if (ic.uri) keep.uri = ic.uri;
         if (ic.ratio) keep.ratio = ic.ratio;
