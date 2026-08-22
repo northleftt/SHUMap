@@ -6,6 +6,12 @@ export interface Env {
   RELEASE_COORDINATOR: DurableObjectNamespace;
   ADMIN_BOOTSTRAP_SECRET?: string;
   SESSION_PEPPER: string;
+  /**
+   * 腾讯地图 WebService key，供 worker/modules/travel-time.ts 的定时采样使用
+   * （`wrangler secret put TENCENT_MAP_KEY`）。可选：未配置时采样这一轮直接跳过，
+   * 其余功能不受影响。前端只用腾讯的跳转 URI，不需要 key。
+   */
+  TENCENT_MAP_KEY?: string;
 }
 
 export type D1Value = string | number | null | ArrayBuffer;
