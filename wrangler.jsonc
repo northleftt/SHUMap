@@ -26,6 +26,12 @@
   "triggers": {
     "crons": ["0 18 * * *"]
   },
+  // 可选 secret（不列入 required，缺了不影响部署，只是功能降级）：
+  //   TENCENT_MAP_KEY           校车区间用时采样，缺则该轮 cron 跳过
+  //   MINIPROGRAM_PROXY_SECRET  与云托管代理的共享口令，让公共限流按 openid
+  //                             分桶而非按容器出口 IP 合计；缺则退回按 IP，
+  //                             全体小程序用户共享一个桶。容器侧同值环境变量为
+  //                             PROXY_SHARED_SECRET，说明见 miniprogram/cloudrun/README.md
   "secrets": {
     "required": [
       "SESSION_PEPPER"

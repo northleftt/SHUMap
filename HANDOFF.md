@@ -55,8 +55,53 @@ npm run deploy:cloudflare
 **5. 管理端运营事件审核 UI**
 后端 decide / note 强制已就绪，但没有页面调用它；运营事件目前只能建不能审。
 
-**6. 云托管代理让所有小程序用户共享限流桶**
-小程序流量经 `miniprogram/cloudrun/shumap-api` 容器代理到 Worker，Cloudflare 看到的 `cf-connecting-ip` 恒为容器出口 IP——`enforcePublicRateLimit` 的所有公共桶（照片上传 30/10min、反馈 20/10min、状态查询 120/10min）在全量小程序用户之间**合计**。用户量上来后少数人传照片就会锁死所有人。方向：代理用平台注入的 `x-wx-openid` 覆写一个约定的身份头、Worker 仅在请求来自容器出口时采信它做限流 key（不能无条件信任，直连 Worker 的攻击者可伪造该头轮换桶）；或干脆对小程序侧调高/改按 openid 计数。需要设计决策，没动手。
+**6. 云托管代理共享限流桶：代码已修，等配密钥才生效**
+原问题：小程序流量经 `miniprogram/cloudrun/shumap-api` 容器代理到 Worker，Cloudflare 看到的 `cf-connecting-ip` 恒为容器出口 IP——`enforcePublicRateLimit` 的所有公共桶（照片上传 30/10min、反馈 20/10min、状态查询 120/10min）在全量小程序用户之间**合计**，少数人用完之后所有人拿 429（Web 端各自独立 IP 不受影响，所以现象是「小程序不能提交反馈」）。
+
+已实现（2026-08-25）：代理把平台注入的 `x-wx-openid` **重新签发**成 `x-shumap-openid`，并附带共享口令 `x-shumap-proxy-secret`；Worker 的 `rateLimitSubject` 仅在口令匹配 `env.MINIPROGRAM_PROXY_SECRET` 时采信该 openid 作限流主体（一人一桶），否则退回按 IP。口令不配 / 不匹配即退回修复前行为，不会因漏配开出旁路。口令比较用逐字节等时比较。
+
+**已上线**（2026-08-25）：Worker secret 已配 + 已部署；云托管环境变量已配，容器已重新部署到
+`shumap-api-012`（镜像 tag `…-20260825020631`，流量 100%）。反馈提交的限流粒度现在是一人一桶。
+
+**这条链的可信度依赖一个代码之外的前提：容器必须关着公网访问。**
+口令只证明「请求经过了我们的代理」，不证明 `x-wx-openid` 是网关注入的真身份——代理分辨
+不出它是网关给的还是调用方自填的（代理剥的是客户端自带的 `x-shumap-*`，**管不了
+`x-wx-openid`**），会照样用真口令签发出去。之所以仍然可信，是因为该服务已关闭公网默认域名
+（2026-08-25 确认：`AccessTypes` 为空、`DefaultDomainName` 为空），只能被微信网关经
+小程序 / OA 通道调用，于是 openid 必然由网关注入。
+
+**谁要是为了排查方便打开公网访问，这里立刻退化成「自填 openid 即可无限轮换限流桶」。**
+所以 `enforcePublicRateLimit` 保留了纵深防御：细桶按主体（可信 openid 则按人，否则按 IP），
+走 openid 时**额外**过一个按出口 IP 的粗桶，额度 = 细桶 × `AGGREGATE_MULTIPLIER`(25)
+（反馈 500/10min、照片上传 750/10min，远超真实用量但封住了「无限」）。按 IP 计数时不叠粗桶，
+否则同一请求计两次、额度腰斩。
+
+（排查记录，避免重犯：部署当晚我从本机 curl 容器公网域名拿到 200，据此判断「公网可达」。
+那次测试不成立——本机 `ALL_PROXY` 指向 Clash TUN，DNS 被劫持到 fake-IP `198.18.0.57`，
+200 只说明我的代理出口节点能到，不代表公网任意主机能到。判断云端可达性别用带全局代理的
+本机 curl；看控制台的 `AccessTypes` / `DefaultDomainName` 才是可信信号。）
+
+测试：`tests/public-rate-limit-subject.test.mjs`（分桶、伪造退回、粗桶封顶、按 IP 不叠桶）、
+`tests/miniprogram-cloudrun-proxy.test.mjs` 第 7~9 条（签发与剥离）。
+
+配置备忘（日后重做或换环境时）：口令不是任何平台发的凭据，自己生成一串随机字符即可
+（`node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`），
+两侧配同值、变量名两侧故意不同：
+
+1. `npx wrangler secret put MINIPROGRAM_PROXY_SECRET`（正式站，注意 account_id 陷阱，见 memory），
+   并 `npm run deploy:cloudflare` —— `rateLimitSubject` 的改动要随 Worker 上线；
+2. 云托管 `shumap-api` → 服务配置 → 环境变量加 `PROXY_SHARED_SECRET` = 同值
+   （CloudBase CLI 的 `cloudrun deploy` 没有设置环境变量的参数，只能在控制台做）；
+3. **重新部署容器**（README「重新部署」一节的命令）。注入 `x-shumap-openid` 的代码在
+   `server.mjs` 里，只配环境变量的话容器仍跑旧镜像、永远不会带上那两个头，配了等于没配。
+   日后只改环境变量不动代码时，保存即滚动重启，无需这步。
+
+控制台「API Key 设置」「时区设置」两个开关都**不用开**：代理零依赖、不用云开发 SDK
+（不需要 API Key），也不含任何日期/时区逻辑（不需要时区）。
+
+CloudBase CLI 的登录凭据会过期（`tmp/cloudbase-cli` 里 2026-08-15 那次已失效），
+重新登录：`cd tmp/cloudbase-cli && npx cloudbase login --flow device`，浏览器授权后
+`npx cloudbase env list` 能列出环境即成功。
 
 **7. 其他**
 - 商户视图不显示所在楼层（`floorId` 在 manifest 里有，UI 未用）

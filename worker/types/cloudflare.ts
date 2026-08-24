@@ -12,6 +12,17 @@ export interface Env {
    * 其余功能不受影响。前端只用腾讯的跳转 URI，不需要 key。
    */
   TENCENT_MAP_KEY?: string;
+  /**
+   * 微信云托管代理与 Worker 之间的共享口令
+   * （`wrangler secret put MINIPROGRAM_PROXY_SECRET`，同值配到容器的
+   * PROXY_SHARED_SECRET 环境变量）。
+   *
+   * 只用于一件事：判断「这个请求真的是从我们的代理容器转发来的」，进而决定
+   * 能不能采信它带的 `x-wx-openid` 做限流主体（见 lib/public-rate-limit.ts）。
+   * 未配置时 Worker 一律不采信该头、退回按 IP 计数——即退回到修复前的行为，
+   * 不会因为漏配密钥而开出一个可伪造的限流旁路。
+   */
+  MINIPROGRAM_PROXY_SECRET?: string;
 }
 
 export type D1Value = string | number | null | ArrayBuffer;
