@@ -84,18 +84,24 @@ Worker 的 `rateLimitSubject`（`worker/lib/public-rate-limit.ts`）只在该口
 - **口令只证明「请求经过了本代理」，不证明「openid 是网关注入的真身份」**，
   代理剥的是客户端自带的 `x-shumap-*`，**管不了 `x-wx-openid`**，自填的一样会被签发出去。
 
-  控制台的「公网默认域名」已置为关闭，但 **2026-08-25 实测该域名仍可从公网直连**：
-  绕开本机代理、直接向腾讯 ingress 真实地址（`124.223.146.85` / `124.223.145.112`）
-  发 `GET /healthz` 得到 200，`remote_ip` 即那两个地址。查询 API 侧 `AccessTypes` 也
-  确实已变为空、`DefaultDomainName` 为空——即控制台状态与实际可达性不一致
-  （关闭未生效、或存在缓存/灰度延迟）。所以**不能**把「已关公网」当作安全前提。
+  控制台的「公网默认域名」已置为关闭、查询 API 读到的 `AccessTypes` 与
+  `DefaultDomainName` 也确实为空，但 **2026-08-25 实测该域名仍可从公网访问**：
+  从一台与本机无关的第三方主机（不经本机网络栈）请求
+  `https://shumap-api-4227820-1465143788.ap-shanghai.run.tcloudbase.com/healthz`
+  仍得到 200 与 `{"ok":true,...}`。可能是关闭有传播延迟，也可能该开关只收回「默认域名」
+  这个展示入口、共享 ingress（`tcbr-ingress-a-cxnvet.ap-shanghai.run.tencentcloudbase.com`）
+  仍按 Host 路由。所以**不能**把「控制台显示已关闭」当作安全前提。
 
   因此 Worker 侧的**按出口 IP 粗桶**不是可选的纵深防御，而是这条链当前唯一的兜底：
   `AGGREGATE_MULTIPLIER = 25`，即反馈 500 次/10min、照片上传 750 次/10min，
-  把「无限轮换 openid」压成有限倍数。若要真正关掉这条路，需要在控制台复核公网开关
-  是否真的落地（或改用 VPC / 鉴权网关），并以上面那条 `--noproxy` + 真实 IP 的
-  curl 复测确认 —— 经本机代理测出来的 200/失败都不足为凭（Clash TUN 的
-  fake-IP 段 `198.18.0.0/15` 会劫持 DNS，测的其实是代理出口节点的可达性）。
+  把「无限轮换 openid」压成有限倍数。若要真正关掉这条路，得在控制台复核公网开关
+  是否真的落地（或改用 VPC / 鉴权网关）。
+
+  **复测方法要选对**：本机 curl 一律不可信。这台机器跑着 Clash TUN，默认路由与
+  `en0` 绑定的流量都会被 utun 捕获（`route get <ip>` 显示 interface 为 utun8），
+  DNS 还会被劫持到 fake-IP 段 `198.18.0.0/15`；`--noproxy '*'`、`--resolve` 真实 IP、
+  `--interface en0` 三种绕法我都试过，全都仍走代理链——测出来的是代理出口节点的
+  可达性，不是公网的。要用第三方主机、手机流量或云端出口来测。
 
 口令本身没有「在哪里取」——它是你自己生成的一串随机字符，两侧配成同一个值即可：
 

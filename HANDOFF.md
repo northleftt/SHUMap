@@ -68,22 +68,33 @@ npm run deploy:cloudflare
 `x-wx-openid`**），会照样用真口令签发出去。所以这条链的可信度取决于一个**代码之外**的前提：
 容器只能被微信网关调用。
 
-那个前提**目前并不确定成立**。控制台「公网默认域名」显示关闭、API 读到的 `AccessTypes` 为空
-`DefaultDomainName` 为空，但 2026-08-25 02:5x 实测：绕过本机代理、直接连腾讯 ingress 的真实
-公网地址（`124.223.146.85` / `124.223.145.112`，`tcbr-ingress-a-cxnvet.ap-shanghai.run.tencentcloudbase.com`）
-仍拿到 `/healthz` 200。可能是关闭有传播延迟，也可能该开关只收回「默认域名」这个入口、
-共享 ingress 仍按 Host 路由。**结论：别把「控制台显示已关闭」当成安全边界**，
-需要时用上面的直连方式复测。
+那个前提**实测不成立**。控制台「公网默认域名」显示关闭、API 读到的 `AccessTypes` 为空、
+`DefaultDomainName` 为空，但 2026-08-25 03:0x 从**一台与本机无关的第三方主机**
+（Anthropic 的 WebFetch 出口，不经本机网络栈）请求容器公网域名
+`https://shumap-api-4227820-1465143788.ap-shanghai.run.tcloudbase.com/healthz`，
+仍拿到 200 与 `{"ok":true,"upstream":"https://map.shutf.com"}`。
+可能是关闭有传播延迟，也可能该开关只收回「默认域名」这个展示入口、
+共享 ingress（`tcbr-ingress-a-cxnvet.ap-shanghai.run.tencentcloudbase.com`）仍按 Host 路由。
+**结论：别把「控制台显示已关闭」当成安全边界。**
+
+复测方法要选对：本机 curl 一律不可信（见下方排查记录），要么用第三方主机 / 手机流量，
+要么用云端出口。这是唯一一次给出确定结论的测法。
 
 因此 `enforcePublicRateLimit` 的纵深防御是这一层真正的依靠，不是可选项：细桶按主体
 （可信 openid 则按人，否则按 IP），走 openid 时**额外**过一个按出口 IP 的粗桶，
 额度 = 细桶 × `AGGREGATE_MULTIPLIER`(25)（反馈 500/10min、照片上传 750/10min，
 远超真实用量但封住了「无限」）。按 IP 计数时不叠粗桶，否则同一请求计两次、额度腰斩。
 
-（排查记录，避免重犯：部署当晚第一次判「公网可达」用的是本机 `curl` 容器域名拿 200，
-那次**不成立**——本机 `ALL_PROXY` 指向 Clash TUN，DNS 被劫持到 fake-IP `198.18.0.57`，
-200 只说明代理出口节点能到。判断云端可达性要 `--noproxy '*'` + 纯净 DNS 解析出的真实 IP
-+ `--resolve` 指定 Host，否则测的是自己的代理链。）
+（排查记录，避免重犯——判断「某个云端地址是否公网可达」时，**这台机器上的 curl 全都不算证据**：
+1. 直接 `curl` 域名拿 200 → 不算。`ALL_PROXY` 指向 Clash，DNS 被劫持到 fake-IP `198.18.0.57`，
+   200 只说明代理出口节点能到；
+2. 加 `--noproxy '*'` + 纯净 DNS 的真实 IP + `--resolve` → 仍不算。`route get 124.223.146.85`
+   显示出口接口是 `utun8`，即 TUN 设备按目的地址整段接管，绕过 `*_PROXY` 环境变量没有用；
+3. 再加 `--interface en0` 强制走物理网卡 → 还是不算。它对容器域名回 200，但同法打 baidu
+   直接超时——负向对照都过不了的测法，正向结果自然无意义。
+唯一给出确定结论的是**换一台与本机无关的主机**（这次用 Anthropic 的 WebFetch 出口；
+手机蜂窝流量、云端 shell 同理）。教训：测公网可达性前先跑负向对照，
+对照不通就说明测法本身坏了，别急着解读正向结果。）
 
 测试：`tests/public-rate-limit-subject.test.mjs`（分桶、伪造退回、粗桶封顶、按 IP 不叠桶）、
 `tests/miniprogram-cloudrun-proxy.test.mjs` 第 7~9 条（签发与剥离）。
