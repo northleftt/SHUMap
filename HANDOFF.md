@@ -55,8 +55,14 @@ npm run deploy:cloudflare
 **5. 管理端运营事件审核 UI**
 后端 decide / note 强制已就绪，但没有页面调用它；运营事件目前只能建不能审。
 
-**6. 云托管代理共享限流桶：代码已修，等配密钥才生效**
-原问题：小程序流量经 `miniprogram/cloudrun/shumap-api` 容器代理到 Worker，Cloudflare 看到的 `cf-connecting-ip` 恒为容器出口 IP——`enforcePublicRateLimit` 的所有公共桶（照片上传 30/10min、反馈 20/10min、状态查询 120/10min）在全量小程序用户之间**合计**，少数人用完之后所有人拿 429（Web 端各自独立 IP 不受影响，所以现象是「小程序不能提交反馈」）。
+**6. 云托管代理共享限流桶（已修，与「反馈提交不了」无关）**
+
+> **归因更正**：这一节起初是当作「小程序反馈提交不了」的根因来写的，**那个判断是错的**。
+> 真正的原因见下面的第 6.5 节：两端各自写了一个 `content.trim().length >= 5`，
+> 报障的同学只输入了四个字，按钮静默变灰。共享限流桶是排查途中发现的**另一个**真实缺陷
+> （客观存在、会导致 429），但不是那次故障的原因。教训记在 6.5 节末。
+
+原问题：小程序流量经 `miniprogram/cloudrun/shumap-api` 容器代理到 Worker，Cloudflare 看到的 `cf-connecting-ip` 恒为容器出口 IP——`enforcePublicRateLimit` 的所有公共桶（照片上传 30/10min、反馈 20/10min、状态查询 120/10min）在全量小程序用户之间**合计**，少数人用完之后所有人拿 429（Web 端各自独立 IP 不受影响）。
 
 已实现（2026-08-25）：代理把平台注入的 `x-wx-openid` **重新签发**成 `x-shumap-openid`，并附带共享口令 `x-shumap-proxy-secret`；Worker 的 `rateLimitSubject` 仅在口令匹配 `env.MINIPROGRAM_PROXY_SECRET` 时采信该 openid 作限流主体（一人一桶），否则退回按 IP。口令不配 / 不匹配即退回修复前行为，不会因漏配开出旁路。口令比较用逐字节等时比较。
 
@@ -117,6 +123,32 @@ npm run deploy:cloudflare
 CloudBase CLI 的登录凭据会过期（`tmp/cloudbase-cli` 里 2026-08-15 那次已失效），
 重新登录：`cd tmp/cloudbase-cli && npx cloudbase login --flow device`，浏览器授权后
 `npx cloudbase env list` 能列出环境即成功。
+
+**6.5 客户端自创的最小字数门槛：「反馈提交不了」的真正原因（已修）**
+
+两端各自写了 `content.trim().length >= 5`，服务端从未要求过——
+`worker/lib/submission-contracts.ts` 的 `text(description, …, 2_000)` 只拒绝空串、上限 2000 字。
+报障的同学只输入四个字（中文四个字足以说清一件事，如「门锁坏了」），提交按钮静默变灰、
+界面不给任何解释，于是报上来的现象是「反馈提交不了」。
+
+已修（2026-08-25，commit `916facf`）：门槛统一收到共享纯函数
+`feedbackSubmitBlockReason`（`lib/feedback-targets.ts` 与镜像 `src/lib/feedback/targets.ts`），
+**返回「不能提交的原因」而不是布尔值**——禁用按钮必须能说出为什么，否则下一个
+「差一点点」的用户还是只能看到一个灰按钮。两端都把该原因渲染在按钮下方。
+最小字数已彻底移除，只保留服务端的真实要求（非空、≤2000 字）。
+
+回归测试在 `tests/feedback-target-picker.test.mjs` 第 6~7 组：四个字与一个字必须可提交、
+空/纯空白必须被拒且有理由、每个禁用理由非空，另加静态断言——两端页面源码里
+**不得再出现** `trim().length >= N` 或「至少 N 个字」文案。
+
+三条教训：
+1. **客户端不要自创比服务端更严的校验**。要加就先问「服务端为什么不要求」，
+   并且必须同步告诉用户。
+2. **禁用状态必须自解释**。`disabled={!canSubmit}` 配一个布尔值是这次故障的放大器：
+   真正的门槛信息在代码里，用户看到的只是一个灰按钮。
+3. **别在客户端 UI 缺陷上先怀疑基础设施**。我先查服务端、限流、代理链路，
+   代价是绕了很大一圈；那圈里发现的共享限流桶（第 6 节）确实是真缺陷，但不是本次原因。
+   先按「用户的输入 + 界面给的反馈」复现，比先读服务端代码快得多。
 
 **7. 其他**
 - 商户视图不显示所在楼层（`floorId` 在 manifest 里有，UI 未用）
