@@ -82,6 +82,110 @@
 .chevron {
   font-size: 18px;
   color: #94a3b8;
+  transition: transform 0.15s ease;
+}
+
+.chevron-open {
+  transform: rotate(90deg);
+}
+
+/* 目标选择面板：搜索行 + 校区档 + 候选列表，替代原来几百项的 picker 滚轮。 */
+.picker-panel {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #f1f5f9;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.search-clear {
+  width: 22px;
+  height: 22px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  color: #ffffff;
+  text-align: center;
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.campus-chips {
+  margin-top: 10px;
+}
+
+.chip-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.result-list {
+  max-height: 260px;
+  margin-top: 6px;
+}
+
+.result-row {
+  padding: 10px 10px;
+  border-radius: 10px;
+}
+
+.result-active {
+  background: #e8f1f8;
+}
+
+.result-line {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+}
+
+.result-name {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.result-active .result-name {
+  color: #1e80c1;
+  font-weight: 600;
+}
+
+.result-campus {
+  margin-left: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.result-hint {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #94a3b8;
+}
+
+.result-empty {
+  padding: 18px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: #94a3b8;
 }
 
 .textarea {

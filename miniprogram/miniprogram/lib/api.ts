@@ -5,6 +5,8 @@ import { config } from "../config";
 
 export interface ApiError extends Error {
   statusCode?: number;
+  /** 服务端 `{error:{code}}` 的机器可读错误码，调用方按码分支（如 rate_limited）。 */
+  code?: string;
 }
 
 function buildQuery(query?: Record<string, string | null | undefined>): string {
@@ -15,10 +17,36 @@ function buildQuery(query?: Record<string, string | null | undefined>): string {
   return parts.length > 0 ? `?${parts.join("&")}` : "";
 }
 
-function makeError(message: string, statusCode?: number): ApiError {
+function makeError(message: string, statusCode?: number, code?: string): ApiError {
   const error = new Error(message) as ApiError;
   error.statusCode = statusCode;
+  error.code = code;
   return error;
+}
+
+/**
+ * 非 2xx 响应 → 错误对象，优先用服务端 `{error:{code,message}}` 里的 message。
+ *
+ * 只报「请求失败（400）」对提交类操作是不够的：worker 会明确说出是哪条校验没过
+ * （stale_base_revision / rate_limited / media_not_attachable…），把这句原文带出来，
+ * 用户和排查的人才知道下一步该做什么。data 可能已被解析成对象，也可能还是字符串。
+ */
+function responseError(res: any): ApiError {
+  const status = res?.statusCode;
+  let data = res?.data;
+  if (typeof data === "string") {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      data = null;
+    }
+  }
+  const detail = data && typeof data === "object" ? (data as any).error : null;
+  const message = detail && typeof detail.message === "string" && detail.message !== ""
+    ? detail.message
+    : `请求失败（${status}）`;
+  const code = detail && typeof detail.code === "string" ? detail.code : undefined;
+  return makeError(message, status, code);
 }
 
 function headerValue(headers: Record<string, unknown> | undefined, name: string): string {
@@ -40,7 +68,7 @@ function cloudGet<T>(path: string, query?: Record<string, string | null | undefi
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(res.data as T);
         } else {
-          reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+          reject(responseError(res));
         }
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
@@ -58,7 +86,7 @@ function requestGet<T>(path: string, query?: Record<string, string | null | unde
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(res.data as T);
         } else {
-          reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+          reject(responseError(res));
         }
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
@@ -77,7 +105,7 @@ function cloudPost<T>(path: string, body: unknown): Promise<T> {
       data: body,
       success: (res: any) => {
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data as T);
-        else reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+        else reject(responseError(res));
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
     });
@@ -93,7 +121,7 @@ function requestPost<T>(path: string, body: unknown): Promise<T> {
       data: body,
       success: (res: any) => {
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data as T);
-        else reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+        else reject(responseError(res));
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
     });
@@ -114,7 +142,7 @@ function cloudPostBinary<T>(path: string, body: ArrayBuffer, contentType: string
       data: body,
       success: (res: any) => {
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data as T);
-        else reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+        else reject(responseError(res));
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
     });
@@ -131,7 +159,7 @@ function requestPostBinary<T>(path: string, body: ArrayBuffer, contentType: stri
       data: body,
       success: (res: any) => {
         if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.data as T);
-        else reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+        else reject(responseError(res));
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
     });
@@ -165,7 +193,7 @@ function cloudGetText(path: string, query?: Record<string, string | null | undef
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(typeof res.data === "string" ? res.data : String(res.data));
         } else {
-          reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+          reject(responseError(res));
         }
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
@@ -184,7 +212,7 @@ function requestGetText(path: string, query?: Record<string, string | null | und
         if (res.statusCode >= 200 && res.statusCode < 300) {
           resolve(typeof res.data === "string" ? res.data : String(res.data));
         } else {
-          reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+          reject(responseError(res));
         }
       },
       fail: (err: any) => reject(makeError(err.errMsg || "网络请求失败")),
@@ -210,7 +238,7 @@ export function apiGetBinary(path: string): Promise<ApiBinaryResponse> {
   return new Promise<ApiBinaryResponse>((resolve, reject) => {
     const success = (res: any) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
-        reject(makeError(`请求失败（${res.statusCode}）`, res.statusCode));
+        reject(responseError(res));
         return;
       }
       if (!(res.data instanceof ArrayBuffer)) {

@@ -8,7 +8,14 @@ import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { createSubmission } from "../../lib/api/public";
 import type { FeedbackType, SubmissionTargetType } from "../../../shared/submission-contract";
-import type { TransitStop } from "../../lib/api/types";
+import {
+  buildPlaceTargets,
+  buildStopTargets,
+  feedbackCampusOptions,
+  feedbackTargetLabel,
+  filterFeedbackTargets,
+  type FeedbackTargetResult,
+} from "../../lib/feedback/targets";
 import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import type { LoadedRelease } from "../../lib/release/mapData";
@@ -53,9 +60,12 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   const [nickname, setNickname] = useState("");
 
   const [type, setType] = useState<FeedbackType>("correction");
-  const [targetId, setTargetId] = useState<string | null>(null);
+  // 选中项整条留下来：baseRevisionId 直接取自它，不必再回头按 id 查一遍
+  // （独立地点的 poiKey 带 place: 前缀，回查楼宇列表会漏）。
+  const [selected, setSelected] = useState<FeedbackTargetResult | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerQuery, setPickerQuery] = useState("");
+  const [campusKey, setCampusKey] = useState("");
+  const [query, setQuery] = useState("");
   const [content, setContent] = useState("");
   const [contact, setContact] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -63,25 +73,45 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   const [done, setDone] = useState(false);
   const uploads = usePhotoUploads(MAX_PHOTOS);
 
-  const buildings = release.buildings;
-  const transitStops = release.manifest.transit.stops;
-  const targetName = targetId
-    ? type === "shuttle"
-      ? (transitStops.find((stop) => stop.id === targetId)?.name ?? null)
-      : (buildings.find((building) => building.poiKey === targetId)?.name ?? null)
-    : null;
-
-  const pickerResults = useMemo(() => {
-    const query = pickerQuery.trim();
-    if (type === "shuttle") {
-      return (query ? transitStops.filter((stop) => stop.name.includes(query)) : transitStops).slice(0, 20);
-    }
-    return (query ? buildings.filter((building) => building.name.includes(query)) : buildings).slice(0, 20);
-  }, [buildings, pickerQuery, transitStops, type]);
+  // 别名进搜索：搜「乐乎新楼」应当命中它的正式名。
+  const aliasesByPlaceId = useMemo(
+    () => new Map(release.manifest.places.map((place) => [place.id, place.aliases])),
+    [release.manifest.places],
+  );
+  const placeTargets = useMemo(
+    () => buildPlaceTargets(release.pois, aliasesByPlaceId),
+    [release.pois, aliasesByPlaceId],
+  );
+  const stopTargets = useMemo(
+    () => buildStopTargets(release.manifest.transit.stops, release.campuses),
+    [release.manifest.transit.stops, release.campuses],
+  );
 
   const typeConfig = FEEDBACK_TYPES.find((item) => item.key === type)!;
   const targetRequired = type !== "new_place";
-  const canSubmit = content.trim().length >= 5 && (!targetRequired || Boolean(targetId)) && !submitting;
+  const isStop = type === "shuttle";
+  const options = isStop ? stopTargets : placeTargets;
+  const campusOptions = useMemo(
+    () => feedbackCampusOptions(options, release.campuses),
+    [options, release.campuses],
+  );
+  const page = useMemo(
+    () => filterFeedbackTargets(options, { campusKey, query }),
+    [options, campusKey, query],
+  );
+
+  const uploading = uploads.photos.some((photo) => photo.status === "uploading");
+  const canSubmit = content.trim().length >= 5
+    && (!targetRequired || selected !== null)
+    && !uploading
+    && !submitting;
+
+  const resetTarget = () => {
+    setSelected(null);
+    setPickerOpen(false);
+    setCampusKey("");
+    setQuery("");
+  };
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -91,13 +121,12 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
     try {
       let baseRevisionId: string | null = null;
       if (typeConfig.targetType === "place") {
-        const building = buildings.find((item) => item.poiKey === targetId);
-        if (!building) throw new Error("所选地点已不在当前发布版本中，请重新选择");
-        baseRevisionId = building.revisionId;
+        if (!selected?.revisionId) throw new Error("所选地点已不在当前发布版本中，请重新选择");
+        baseRevisionId = selected.revisionId;
       }
       const result = await createSubmission({
         targetType: typeConfig.targetType,
-        targetId: targetRequired ? targetId : null,
+        targetId: targetRequired ? selected!.targetId : null,
         baseRevisionId,
         payload: {
           submissionKind: "feedback",
@@ -113,8 +142,8 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
       addSubmission({
         id: result.id,
         targetType: typeConfig.targetType,
-        targetId: targetId ?? undefined,
-        targetName: targetName ?? undefined,
+        targetId: selected?.targetId,
+        targetName: selected?.name,
         title: title || "反馈",
       });
       setDone(true);
@@ -161,9 +190,7 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
               variant="outline"
               onClick={() => {
                 setType(item.key);
-                setTargetId(null);
-                setPickerOpen(false);
-                setPickerQuery("");
+                resetTarget();
               }}
             >
               {item.label}
@@ -171,51 +198,75 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
           ))}
         </ChipRow>
 
-        {/* 关联地点 */}
+        {/* 关联目标：校区筛选 + 搜索，不再是一个几百项的下拉 */}
         {targetRequired ? (
           <>
-            <h2 className="mt-5 text-emphasis">{type === "shuttle" ? "关联站点" : "关联地点"}</h2>
+            <h2 className="mt-5 text-emphasis">{isStop ? "关联站点" : "关联地点"}</h2>
             <button
               type="button"
               className="mt-2.5 flex w-full items-center justify-between rounded-2xl bg-surface px-4 py-3.5 shadow-card"
               onClick={() => setPickerOpen((open) => !open)}
             >
-              <span className={targetName ? "text-body text-ink" : "text-body text-sub"}>
-                {targetName ?? (type === "shuttle" ? "选择站点" : "选择地点")}
+              <span className={selected ? "text-body text-ink" : "text-body text-sub"}>
+                {selected ? feedbackTargetLabel(selected) : isStop ? "选择站点" : "搜索并选择地点"}
               </span>
               <ChevronRight size={16} className={`text-sub transition-transform ${pickerOpen ? "rotate-90" : ""}`} />
             </button>
             {pickerOpen ? (
               <div className="mt-2 rounded-2xl bg-surface p-3 shadow-card">
-                <SearchInput value={pickerQuery} onChange={setPickerQuery} placeholder={type === "shuttle" ? "搜索站点…" : "搜索地点…"} />
-                <div className="mt-2 max-h-56 overflow-y-auto">
-                  {pickerResults.map((item) => {
-                    const isStop = type === "shuttle";
-                    const id = isStop ? (item as TransitStop).id : (item as (typeof buildings)[number]).poiKey;
-                    const name = item.name;
-                    const campusLabel = isStop ? null : (item as (typeof buildings)[number]).campusLabel;
-                    return (
+                <SearchInput
+                  value={query}
+                  onChange={setQuery}
+                  placeholder={isStop ? "搜索站点名…" : "搜楼名、别名，或楼里的设施 / 商户…"}
+                  autoFocus
+                />
+                {campusOptions.length > 2 ? (
+                  <ChipRow className="mt-2.5">
+                    {campusOptions.map((campus) => (
+                      <Chip
+                        key={campus.key || "all"}
+                        active={campusKey === campus.key}
+                        onClick={() => setCampusKey(campus.key)}
+                      >
+                        {campus.label}
+                      </Chip>
+                    ))}
+                  </ChipRow>
+                ) : null}
+                <div className="mt-2 max-h-72 overflow-y-auto">
+                  {page.items.map((item) => (
                     <button
-                      key={id}
+                      key={item.targetId}
                       type="button"
-                      className={`block w-full rounded-lg px-3 py-2.5 text-left text-body active:bg-page ${
-                        id === targetId ? "font-medium text-primary" : "text-ink"
+                      className={`block w-full rounded-lg px-3 py-2.5 text-left active:bg-page ${
+                        item.targetId === selected?.targetId ? "text-primary" : "text-ink"
                       }`}
                       onClick={() => {
-                        setTargetId(id);
+                        setSelected(item);
                         setPickerOpen(false);
-                        setPickerQuery("");
+                        setQuery("");
                       }}
                     >
-                      {name}
-                      {campusLabel ? <span className="ml-1.5 text-aux text-sub">{campusLabel}</span> : null}
+                      <span className="text-body">{item.name}</span>
+                      {item.campusLabel ? (
+                        <span className="ml-1.5 text-aux text-sub">{item.campusLabel}</span>
+                      ) : null}
+                      {item.matchHint ? (
+                        <span className="mt-0.5 block text-aux text-sub">{item.matchHint}</span>
+                      ) : null}
                     </button>
-                    );
-                  })}
-                  {pickerResults.length === 0 ? (
-                    <div className="px-3 py-4 text-center text-aux text-sub">没有匹配的{type === "shuttle" ? "站点" : "地点"}</div>
+                  ))}
+                  {page.items.length === 0 ? (
+                    <div className="px-3 py-4 text-center text-aux text-sub">
+                      没有匹配的{isStop ? "站点" : "地点"}，换个关键词试试
+                    </div>
                   ) : null}
                 </div>
+                {page.truncated ? (
+                  <p className="mt-1 px-3 text-aux text-sub">
+                    共 {page.total} 个匹配，仅显示前 {page.items.length} 个，继续输入可缩小范围。
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </>
@@ -241,6 +292,7 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
             photos={uploads.photos}
             slotsLeft={uploads.slotsLeft}
           />
+          {uploading ? <p className="mt-2 text-aux text-sub">照片上传完成后即可提交。</p> : null}
           {uploads.failedCount > 0 ? (
             <p className="mt-2 text-aux text-sub">
               有 {uploads.failedCount} 张照片上传失败，可点击重试；不重试也能直接提交文字反馈。

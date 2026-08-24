@@ -29,12 +29,58 @@
 
     <block wx:if="{{targetRequired}}">
       <view class="field-title field-gap">{{targetLabel}}</view>
-      <picker mode="selector" range="{{targetNames}}" bindchange="onTargetChange">
-        <view class="picker-row">
-          <view class="picker-value {{targetName ? '' : 'placeholder'}}">{{targetName || targetPlaceholder}}</view>
-          <view class="chevron">›</view>
+      <view class="picker-row" bindtap="togglePicker">
+        <view class="picker-value {{targetSummary ? '' : 'placeholder'}}">{{targetSummary || targetPlaceholder}}</view>
+        <view class="chevron {{pickerOpen ? 'chevron-open' : ''}}">›</view>
+      </view>
+
+      <view wx:if="{{pickerOpen}}" class="picker-panel">
+        <view class="search-row">
+          <input
+            class="search-input"
+            value="{{query}}"
+            confirm-type="search"
+            placeholder="{{type === 'shuttle' ? '搜索站点名…' : '搜楼名、别名，或楼里的设施 / 商户…'}}"
+            bindinput="onQueryInput"
+          />
+          <view wx:if="{{query}}" class="search-clear" catchtap="clearQuery">×</view>
         </view>
-      </picker>
+
+        <scroll-view wx:if="{{campusOptions.length > 2}}" scroll-x class="chips campus-chips">
+          <view class="chips-inner">
+            <view
+              wx:for="{{campusOptions}}"
+              wx:key="key"
+              class="chip chip-sm {{item.active ? 'chip-active' : ''}}"
+              data-key="{{item.key}}"
+              catchtap="selectCampus"
+            >{{item.label}}</view>
+          </view>
+        </scroll-view>
+
+        <scroll-view scroll-y class="result-list">
+          <view
+            wx:for="{{results}}"
+            wx:key="targetId"
+            class="result-row {{item.targetId === targetId ? 'result-active' : ''}}"
+            data-id="{{item.targetId}}"
+            catchtap="chooseTarget"
+          >
+            <view class="result-line">
+              <text class="result-name">{{item.name}}</text>
+              <text wx:if="{{item.campusLabel}}" class="result-campus">{{item.campusLabel}}</text>
+            </view>
+            <view wx:if="{{item.matchHint}}" class="result-hint">{{item.matchHint}}</view>
+          </view>
+          <view wx:if="{{results.length === 0}}" class="result-empty">
+            没有匹配的{{type === 'shuttle' ? '站点' : '地点'}}，换个关键词试试
+          </view>
+        </scroll-view>
+
+        <view wx:if="{{resultTruncated}}" class="hint">
+          共 {{resultTotal}} 个匹配，仅显示前 {{results.length}} 个，继续输入可缩小范围。
+        </view>
+      </view>
     </block>
 
     <view class="field-title field-gap">反馈内容</view>
