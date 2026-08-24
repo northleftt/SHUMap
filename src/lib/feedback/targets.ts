@@ -229,3 +229,33 @@ export function feedbackTargetLabel(option: FeedbackTargetResult | null): string
   if (option === null) return "";
   return option.campusLabel === "" ? option.name : `${option.name} · ${option.campusLabel}`;
 }
+
+export interface FeedbackGateState {
+  /** 反馈正文原文（未 trim）。 */
+  content: string;
+  /** 当前反馈类型是否要求关联目标（新增地点不要求）。 */
+  targetRequired: boolean;
+  /** 是否已选定目标。 */
+  hasTarget: boolean;
+  /** 仍在上传中的照片数。 */
+  uploadingPhotoCount: number;
+}
+
+/**
+ * 提交门槛：返回「不能提交的原因」，可以提交时返回空串。
+ *
+ * 门槛只复刻服务端的真实要求——`worker/lib/submission-contracts.ts` 的
+ * `text(description, …, 2_000)` 只拒绝空串、上限 2000 字。**不要在这里加最小字数。**
+ * 曾经两端各写了一个 `content.trim().length >= 5`，服务端从未要求过：
+ * 一位同学只打了四个字（中文四个字足以说清一件事，如「门锁坏了」），按钮就静默变灰，
+ * 界面不给任何解释，于是报上来的现象是「反馈提交不了」，被当成功能故障查了很久。
+ *
+ * 所以这个函数返回的是**原因**而不是布尔值：按钮禁用时必须能说出为什么，
+ * 否则下一个「差一点点」的用户还是只能看到一个灰按钮。
+ */
+export function feedbackSubmitBlockReason(state: FeedbackGateState): string {
+  if (state.content.trim().length === 0) return "请先填写反馈内容";
+  if (state.targetRequired && !state.hasTarget) return "请先选择关联的地点或站点";
+  if (state.uploadingPhotoCount > 0) return "照片上传完成后即可提交";
+  return "";
+}

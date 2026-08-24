@@ -8,7 +8,10 @@
 // 1. 两端镜像文件从 ---- shared-from-here ---- 起逐字相同（防漂移）；
 // 2. buildPlaceTargets 只收 place/building、用 entityId 而非 poiKey、剔掉无 revisionId 的项；
 // 3. 搜索命中优先级（名字 > 别名 > 楼内设施/商户）、校区过滤、截断与 total；
-// 4. 提交契约：place 目标带 revisionId，站点目标 revisionId 恒为 null。
+// 4. 提交契约：place 目标带 revisionId，站点目标 revisionId 恒为 null；
+// 5. 提交门槛 feedbackSubmitBlockReason：只复刻服务端的「非空 + ≤2000 字」，
+//    **不得**有最小字数（曾有一个客户端自创的 >=5，四个字的反馈被静默拒收），
+//    且禁用时必须给得出理由。
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -282,4 +285,93 @@ function poi(overrides) {
   }
 }
 
-console.log("[ok] 反馈目标选择器：两端镜像一致、目标取舍/搜索优先级/校区过滤/截断/提交契约全部通过");
+// ---------------------------------------------------------------------------
+// 6. 提交门槛：门槛只复刻服务端要求，且禁用一定说得出理由
+//
+// 这一组是那次「小程序反馈提交不了」的真正回归：两端各自写了
+// content.trim().length >= 5，而服务端只要求非空（worker/lib/submission-contracts.ts
+// 的 text(description, …, 2_000)）。一位同学只输入四个字，按钮静默变灰、不给任何解释。
+// ---------------------------------------------------------------------------
+{
+  const ready = {
+    content: "门锁坏了",
+    targetRequired: true,
+    hasTarget: true,
+    uploadingPhotoCount: 0,
+  };
+
+  // 核心回归：四个字必须能提交，一个字也必须能提交
+  assert.equal(
+    targets.feedbackSubmitBlockReason(ready),
+    "",
+    "四个字的中文反馈必须能提交——服务端只要求非空，客户端不得自创最小字数",
+  );
+  assert.equal(targets.feedbackSubmitBlockReason({ ...ready, content: "坏" }), "");
+
+  // 空 / 纯空白：拒绝，且说明原因（服务端 text() 同样拒绝空串）
+  assert.equal(targets.feedbackSubmitBlockReason({ ...ready, content: "" }), "请先填写反馈内容");
+  assert.equal(targets.feedbackSubmitBlockReason({ ...ready, content: "  \n " }), "请先填写反馈内容");
+
+  // 缺目标 / 照片仍在上传：各自给出可执行的理由
+  assert.equal(
+    targets.feedbackSubmitBlockReason({ ...ready, hasTarget: false }),
+    "请先选择关联的地点或站点",
+  );
+  assert.equal(
+    targets.feedbackSubmitBlockReason({ ...ready, hasTarget: false, targetRequired: false }),
+    "",
+    "新增地点不要求关联目标",
+  );
+  assert.equal(
+    targets.feedbackSubmitBlockReason({ ...ready, uploadingPhotoCount: 2 }),
+    "照片上传完成后即可提交",
+  );
+
+  // 任何非空理由都必须是给人看的中文，不能是空白占位
+  for (const state of [
+    { ...ready, content: "" },
+    { ...ready, hasTarget: false },
+    { ...ready, uploadingPhotoCount: 1 },
+  ]) {
+    const reason = targets.feedbackSubmitBlockReason(state);
+    assert.ok(reason.trim().length > 0, "禁用提交时必须给出非空理由");
+  }
+
+  // 上限对齐服务端的 2000 字：正好 2000 可提交（超出由 maxlength 挡在输入层）
+  assert.equal(targets.feedbackSubmitBlockReason({ ...ready, content: "字".repeat(2000) }), "");
+}
+
+// ---------------------------------------------------------------------------
+// 7. 两端页面都不得再出现「最小字数」门槛或「至少 N 个字」文案
+// ---------------------------------------------------------------------------
+{
+  const pages = {
+    "src/pages/feedback/FeedbackPage.tsx": readFileSync(
+      join(repoRoot, "src/pages/feedback/FeedbackPage.tsx"),
+      "utf8",
+    ),
+    "miniprogram/miniprogram/pages/feedback/feedback.ts": readFileSync(
+      join(repoRoot, "miniprogram/miniprogram/pages/feedback/feedback.ts"),
+      "utf8",
+    ),
+    "miniprogram/miniprogram/pages/feedback/feedback.wxml": readFileSync(
+      join(repoRoot, "miniprogram/miniprogram/pages/feedback/feedback.wxml"),
+      "utf8",
+    ),
+  };
+  for (const [name, source] of Object.entries(pages)) {
+    assert.doesNotMatch(
+      source,
+      /trim\(\)\.length\s*>=\s*[1-9]/,
+      `${name} 不得再写最小字数门槛，门槛统一走 feedbackSubmitBlockReason`,
+    );
+    assert.doesNotMatch(source, /至少\s*\d+\s*个字/, `${name} 不得再出现「至少 N 个字」文案`);
+  }
+  // 两端都必须真的接线到共享门槛，并把理由渲染出来
+  assert.match(pages["src/pages/feedback/FeedbackPage.tsx"], /feedbackSubmitBlockReason\(/);
+  assert.match(pages["src/pages/feedback/FeedbackPage.tsx"], /blockReason/);
+  assert.match(pages["miniprogram/miniprogram/pages/feedback/feedback.ts"], /feedbackSubmitBlockReason\(/);
+  assert.match(pages["miniprogram/miniprogram/pages/feedback/feedback.wxml"], /blockReason/);
+}
+
+console.log("[ok] 反馈目标选择器：镜像一致、搜索/校区/截断/提交契约，门槛无最小字数且禁用必有理由");

@@ -12,6 +12,7 @@ import {
   buildPlaceTargets,
   buildStopTargets,
   feedbackCampusOptions,
+  feedbackSubmitBlockReason,
   feedbackTargetLabel,
   filterFeedbackTargets,
   type FeedbackTargetResult,
@@ -101,10 +102,14 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   );
 
   const uploading = uploads.photos.some((photo) => photo.status === "uploading");
-  const canSubmit = content.trim().length >= 5
-    && (!targetRequired || selected !== null)
-    && !uploading
-    && !submitting;
+  // 禁用理由要能说出口：光有布尔值就只能给一个灰按钮，用户猜不到差什么（见 targets.ts 注释）。
+  const blockReason = feedbackSubmitBlockReason({
+    content,
+    targetRequired,
+    hasTarget: selected !== null,
+    uploadingPhotoCount: uploads.photos.filter((photo) => photo.status === "uploading").length,
+  });
+  const canSubmit = blockReason === "" && !submitting;
 
   const resetTarget = () => {
     setSelected(null);
@@ -273,7 +278,7 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
         ) : null}
 
         {/* 反馈内容 */}
-        <h2 className="mt-5 text-emphasis">反馈内容（至少 5 个字）</h2>
+        <h2 className="mt-5 text-emphasis">反馈内容</h2>
         <textarea
           className="mt-2.5 h-36 w-full resize-none rounded-2xl bg-surface p-4 text-body text-ink shadow-card outline-none placeholder:text-sub"
           placeholder={"请描述问题，如：位置有误、信息过时、\n设施已搬离…"}
@@ -335,7 +340,10 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
         >
           {submitting ? "提交中…" : "提交反馈"}
         </button>
-        <p className="mt-3 text-center text-aux text-sub">提交后可在「我的 - 我的反馈」查看本机提交记录</p>
+        {/* 按钮变灰时必须说出原因，否则用户只能对着灰按钮猜（见 targets.ts 的注释）。 */}
+        <p className="mt-3 text-center text-aux text-sub">
+          {blockReason || "提交后可在「我的 - 我的反馈」查看本机提交记录"}
+        </p>
       </div>
     </div>
   );

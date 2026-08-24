@@ -3,6 +3,7 @@ import {
   buildPlaceTargets,
   buildStopTargets,
   feedbackCampusOptions,
+  feedbackSubmitBlockReason,
   feedbackTargetLabel,
   filterFeedbackTargets,
   type FeedbackCampusOption,
@@ -81,6 +82,8 @@ Page({
     submitting: false,
     submitError: "",
     canSubmit: false,
+    /** 不能提交时的原因（灰按钮必须说明自己为什么灰）。可提交时为空串。 */
+    blockReason: "",
     done: false,
   },
 
@@ -233,11 +236,21 @@ Page({
     this.setData({ contact: String(e.detail.value ?? "") });
   },
 
+  /**
+   * 门槛与「为什么不能提交」一起算。禁用按钮必须能说出理由——
+   * 光给一个灰按钮，差一点点的用户只会以为界面坏了（见 lib/feedback-targets.ts 注释）。
+   */
   updateCanSubmit() {
-    const contentReady = this.data.content.trim().length >= 5;
-    const targetReady = !this.data.targetRequired || Boolean(this.data.targetId);
-    const photosReady = this.data.uploadingPhotoCount === 0;
-    this.setData({ canSubmit: contentReady && targetReady && photosReady && !this.data.submitting });
+    const blockReason = feedbackSubmitBlockReason({
+      content: this.data.content,
+      targetRequired: this.data.targetRequired,
+      hasTarget: Boolean(this.data.targetId),
+      uploadingPhotoCount: this.data.uploadingPhotoCount,
+    });
+    this.setData({
+      blockReason,
+      canSubmit: blockReason === "" && !this.data.submitting,
+    });
   },
 
   syncPhotoState(photos: FeedbackPhoto[]) {

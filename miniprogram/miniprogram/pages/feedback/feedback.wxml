@@ -83,7 +83,7 @@
       </view>
     </block>
 
-    <view class="field-title field-gap">反馈内容（至少 5 个字）</view>
+    <view class="field-title field-gap">反馈内容</view>
     <textarea
       class="textarea"
       value="{{content}}"
@@ -130,6 +130,8 @@
     <button class="primary-btn" disabled="{{!canSubmit}}" bindtap="submitFeedback">
       {{submitting ? '提交中…' : '提交反馈'}}
     </button>
+    <!-- 按钮变灰时必须说明差什么：曾经只有一个灰按钮，差一个字的用户以为功能坏了。 -->
+    <view wx:if="{{blockReason}}" class="footer-hint">{{blockReason}}</view>
     <view class="footer-hint">提交后可在「我的」页查看本机提交记录</view>
   </view>
 </scroll-view>
