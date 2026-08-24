@@ -27,7 +27,6 @@ import {
 } from "../../../shared/shuttle-guide-contract";
 import {
   Chip,
-  EditorialPill,
   EmptyState,
   ErrorBanner,
   Field,
@@ -55,6 +54,24 @@ const BLOCK_LABEL: Record<ShuttleGuideBlock["type"], string> = {
   list: "要点列表",
   image: "图片",
 };
+
+/**
+ * 版本状态的措辞。不用共享的 EditorialPill：它把 approved 显示成「已发布」，
+ * 而这里 approved 只表示「复核通过、可发布」——线上是哪一版由 currentRevisionId
+ * 单独决定。照它的措辞会出现「已发布」的版本旁边挂着「未发布」的文档状态。
+ */
+const REVISION_LABEL: Record<string, { label: string; tone: "ok" | "warning" | "neutral" | "error" }> = {
+  draft: { label: "草稿", tone: "neutral" },
+  in_review: { label: "待审核", tone: "warning" },
+  approved: { label: "已批准", tone: "ok" },
+  rejected: { label: "已驳回", tone: "error" },
+  superseded: { label: "已取代", tone: "neutral" },
+};
+
+function RevisionPill({ status }: { status: string | null | undefined }) {
+  const meta = REVISION_LABEL[status ?? "draft"] ?? { label: status ?? "草稿", tone: "neutral" as const };
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
+}
 
 function newBlock(type: ShuttleGuideBlock["type"]): ShuttleGuideBlock {
   switch (type) {
@@ -306,7 +323,7 @@ function ReadyEditor({
         action={
           <div className="flex items-center gap-2">
             {published ? <Pill tone="ok">已发布</Pill> : <Pill tone="neutral">未发布</Pill>}
-            {working ? <EditorialPill status={working.editorialStatus} /> : null}
+            {working ? <RevisionPill status={working.editorialStatus} /> : null}
           </div>
         }
         title="校车乘坐指南"
@@ -398,7 +415,7 @@ function ReadyEditor({
                 >
                   <div className="flex items-center gap-3">
                     <span className="text-body font-semibold text-ink">第 {revision.revisionNo} 版</span>
-                    <EditorialPill status={revision.editorialStatus} />
+                    <RevisionPill status={revision.editorialStatus} />
                     {isLive ? <Pill tone="ok">线上</Pill> : null}
                     <span className="text-aux text-sub">{fmtDateTime(revision.createdAt)}</span>
                     {revision.authorName ? <span className="text-aux text-sub">{revision.authorName}</span> : null}

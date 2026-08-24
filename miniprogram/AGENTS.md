@@ -390,6 +390,21 @@
   「不支持打开非业务域名」原生错误页上，`binderror` 未必触发，连本页的复制链接降级都摸不到。
   线路级 `bookingUrl` 在 API / 后台 / Web 端保留不动，只是小程序不再消费。
 
+- **2026-08-24 校车乘坐指南（「如何坐车？」）**：校车页标题右侧的灰色小字入口 →
+  `pages/shuttle-guide/shuttle-guide`（默认渲染器 + 原生导航栏，不用 Skyline——本页只是竖排文章）。
+  内容**复用 guide_documents**，slug=`shuttle-ride`，公共读端 `GET /api/public/guide/shuttle-ride`，
+  与返校指南（`freshman-transit`）共用同一套端点与草稿→送审→发布→回滚流水线，
+  所以**零迁移、零新端点**。代价是要满足 guide 模块的 `assertContentShape`：
+  `content.cards` / `content.hubs` 必须是数组，乘车指南两个都留空数组。
+  内容形状刻意做薄：`meta.title/subtitle` + `blocks[]`（heading / paragraph / list / image 四种块），
+  规范化规则在 `lib/shuttle-guide.ts`，与 `shared/shuttle-guide-contract.ts` 手抄同步
+  （`tests/shuttle-ride-guide.test.mjs` 对同一批输入比对两份输出，钉住不漂移）。
+  入口默认**不显示**：`hasPublishedShuttleGuide()` 探测到有已发布内容且有正文才亮——
+  未发布 / 断网 / 空文档都归成 false，点进去看空页比没入口更糟。
+  图片走 `kind=figure_png`（PNG/JPEG，服务端按魔术字节嗅探），**不做 `<key>-png` 派生**：
+  那是返校指南 SVG 图示的补丁，这份从一开始就是位图入库。
+  管理端编辑器：`src/admin/components/ShuttleGuidePanel.tsx`，挂在「校车时刻」页第五个 tab。
+
 - `pages/webview/webview`：通用外链容器（web-view + 复制链接降级），其他页面打开外链直接复用。
   当前白名单只有 `config.webBaseUrl`（本站），暂无调用方
 - `lib/api.ts`：API client 封装（`apiGet` JSON / `apiGetText` 原文，后者给 SVG 底图用）；`config.ts`：全局配置
