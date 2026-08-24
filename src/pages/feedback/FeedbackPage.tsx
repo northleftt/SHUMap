@@ -273,7 +273,7 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
         ) : null}
 
         {/* 反馈内容 */}
-        <h2 className="mt-5 text-emphasis">反馈内容</h2>
+        <h2 className="mt-5 text-emphasis">反馈内容（至少 5 个字）</h2>
         <textarea
           className="mt-2.5 h-36 w-full resize-none rounded-2xl bg-surface p-4 text-body text-ink shadow-card outline-none placeholder:text-sub"
           placeholder={"请描述问题，如：位置有误、信息过时、\n设施已搬离…"}

@@ -83,7 +83,7 @@
       </view>
     </block>
 
-    <view class="field-title field-gap">反馈内容</view>
+    <view class="field-title field-gap">反馈内容（至少 5 个字）</view>
     <textarea
       class="textarea"
       value="{{content}}"
