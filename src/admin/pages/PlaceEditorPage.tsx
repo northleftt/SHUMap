@@ -24,13 +24,16 @@ import {
   Pill,
   PrimaryButton,
   SelectField,
+  MarkerScaleField,
   TextArea,
   errorMessage,
   fmtDateTime,
   useAsyncData,
 } from "../components/primitives";
+
 import { LocationEditor, ALL_ROLES, isLocationDraftBlank, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
+import { markerScaleFromContent } from "../../lib/map/markerScale";
 import type { PlaceContent } from "../../../shared/revision-contract";
 
 // ---------------------------------------------------------------------------
@@ -187,6 +190,7 @@ export function PlaceEditorPage() {
   const [facts, setFacts] = useState<FactRow[]>([]);
   const [media, setMedia] = useState<MediaRow[]>([]);
   const [baseContent, setBaseContent] = useState<PlaceContent>({ detail: { facts: [], media: [] } });
+  const [markerSize, setMarkerSize] = useState(1);
   const [sourceId, setSourceId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -209,6 +213,7 @@ export function PlaceEditorPage() {
     setSummary(revision.summary);
     setDescription(revision.description);
     setBaseContent(revision.content);
+    setMarkerSize(markerScaleFromContent(revision.content));
     setFacts(revision.facts);
     setMedia(revision.media);
     setSourceId(revision.sourceId);
@@ -252,7 +257,14 @@ export function PlaceEditorPage() {
       .map((fact) => ({ ...(fact.id === undefined ? {} : { id: fact.id }), label: fact.label.trim(), value: fact.value.trim() }))
       .filter((fact) => fact.label && fact.value);
     const nextDetail: PlaceContent["detail"] = { ...previousDetail, facts: keptFacts, media };
-    return { ...baseContent, detail: nextDetail };
+    const next: PlaceContent = { ...baseContent, detail: nextDetail };
+    // 图钉大小：标准档不落字段，保持 content 干净；非标准写 content.marker.size。
+    if (markerSize === 1) {
+      delete next.marker;
+    } else {
+      next.marker = { size: markerSize };
+    }
+    return next;
   }
 
   async function save(thenSubmit: boolean) {
@@ -400,7 +412,12 @@ export function PlaceEditorPage() {
                 </>
               ) : null}
               <Field label="别名（、分隔）" onChange={setAliases} placeholder="如 图书馆、上图" value={aliases} />
+              <MarkerScaleField
+                onChange={setMarkerSize}
+                value={markerSize}
+                />
             </div>
+            <p className="mt-2 text-aux text-sub">仅对楼外图钉生效；楼宇以轮廓高亮呈现，无图钉。改动经审核发布后生效。</p>
           </div>
           <TextArea label="简介" onChange={setSummary} placeholder="一句话介绍" rows={2} value={summary} />
           <TextArea label="详细描述" onChange={setDescription} placeholder="注意事项、历史沿革等" rows={4} value={description} />

@@ -171,20 +171,41 @@ export function OperationDetailPage() {
                 提前结束
               </GhostButton>
             ) : null}
-            {canWrite ? (
+            {canWrite && !ended ? (
               <GhostButton onClick={() => navigate(`/admin/operations/${id}/edit`)}>
-                <MapPin size={14} /> 编辑几何
+                <MapPin size={14} /> 编辑
+              </GhostButton>
+            ) : null}
+            {canWrite ? (
+              <GhostButton
+                danger
+                onClick={() => {
+                  if (!window.confirm(`确定删除运营事件「${event.title}」？该操作不可恢复。`)) return;
+                  void admin.deleteOperation(id)
+                    .then(() => navigate("/admin/operations"))
+                    .catch((err) => setError(errorMessage(err, "删除失败")));
+                }}
+              >
+                删除
               </GhostButton>
             ) : null}
             <GhostButton onClick={() => navigate("/admin/operations")}>返回列表</GhostButton>
           </div>
         </div>
+        {event.editorialStatus === "rejected" ? (
+          <div className="border-t border-line px-5 py-3">
+            <InfoNote tone="warning">
+              该事件已被驳回{event.reviewNote ? `：${event.reviewNote}` : "。"}点「编辑」修改保存后会重新进入审核队列。
+            </InfoNote>
+          </div>
+        ) : null}
+        <ErrorBanner message={error} />
       </Panel>
 
       {/* 地图几何概要（live anchors，审核通过即上图，无需发版） */}
       <Panel
         title="地图几何"
-        action={canWrite ? <Link className="text-aux font-medium text-primary" to={`/admin/operations/${id}/edit`}>编辑几何 ›</Link> : undefined}
+        action={canWrite && !ended ? <Link className="text-aux font-medium text-primary" to={`/admin/operations/${id}/edit`}>编辑 ›</Link> : undefined}
         padded={false}
       >
         <div className="space-y-2 p-5">

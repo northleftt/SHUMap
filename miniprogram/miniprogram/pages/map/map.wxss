@@ -299,17 +299,23 @@
   padding: 8px 4px 8px 12px;
 }
 
+/* 后台配的横幅图标（位图素材）。以前这里是个字符图标「▤」，靠 font-size 定高；
+   现在是 <image>，必须显式给高，否则小程序按默认 240×320 撑破横幅。 */
 .guide-banner-icon {
   width: 26px;
-  font-size: 22px;
-  line-height: 26px;
-  color: #ffffff;
+  height: 26px;
+  flex-shrink: 0;
 }
 
 .guide-banner-copy {
   min-width: 0;
   flex: 1;
   margin-left: 8px;
+}
+
+/* 没配图标时文字贴左，不留那 8px 图标位的空档 */
+.guide-banner-copy-flush {
+  margin-left: 0;
 }
 
 .guide-banner-title,
@@ -1212,18 +1218,7 @@
   background-color: #1e80c1;
 }
 
-.photo-placeholder {
-  margin-top: 16px;
-  height: 176px;
-  border-radius: 14px;
-  background-color: rgba(232, 235, 239, 0.6);
-  font-size: 13px;
-  color: #94a3b8;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-}
+/* 没有实拍图时整块不出（不再留灰色占位框）：占位除了推走正文什么也没说。 */
 
 .detail-summary {
   margin-top: 16px;

@@ -213,6 +213,8 @@ export interface OperationalEventRow {
   id: string;
   eventType: string;
   severity: string;
+  /** 地图标注颜色（#rrggbb）；null = 按 severity 默认色。 */
+  color?: string | null;
   editorialStatus: EditorialStatus;
   operationalStatus: string;
   title: string;
@@ -220,6 +222,7 @@ export interface OperationalEventRow {
   startsAt: string;
   expectedEndsAt: string | null;
   autoExpireAt: string | null;
+  reviewNote?: string | null;
   createdAt: string;
   [column: string]: unknown;
 }
@@ -248,6 +251,7 @@ export interface TransitStopRow {
   code: string | null;
   name: string;
   status: TransitStopStatus;
+  markerSize: number;
 }
 
 /**
@@ -306,12 +310,18 @@ export interface TransitPatternStopRow {
   dropoffType: TransitDropoffType;
 }
 
+/** 日历的日型（0025 迁移的 day_type 列），决定客户端「今天是工作日/假日……」标签。 */
+export type ServiceCalendarDayType =
+  | "weekday" | "weekend" | "holiday" | "winter_break" | "summer_break" | "other";
+
 export interface ServiceCalendarRow {
   id: string;
   name: string;
   timezone: string;
   validFrom: string;
   validTo: string;
+  /** 'other' = 不属于任何日型（考试周、临时加开）：班次照常运营，只是不参与日型标签。 */
+  dayType: ServiceCalendarDayType;
   monday: number;
   tuesday: number;
   wednesday: number;

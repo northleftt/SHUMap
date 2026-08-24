@@ -1,4 +1,5 @@
 import { Building2, CircleAlert, MapPin, RotateCcw, SearchX, Store } from "lucide-react";
+import { SHEET_SCROLL_ATTR } from "../../components/sheet/useSheetDrag";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
@@ -43,6 +44,7 @@ export function SearchHomeSheet({
   onClearFilters,
   onOpenAllFilters,
   onResultClick,
+  scrollAreaRef,
 }: {
   query: string;
   activeFilters: FilterKey[];
@@ -60,6 +62,8 @@ export function SearchHomeSheet({
   onClearFilters: () => void;
   onOpenAllFilters: () => void;
   onResultClick: (poiKey: string) => void;
+  /** 当前渲染的纵向滚动框（抽屉降档时由 MapPage 滚回顶部）。 */
+  scrollAreaRef?: (node: HTMLDivElement | null) => void;
 }) {
   const { recents } = useRecents();
   const recentPois = recents
@@ -104,7 +108,11 @@ export function SearchHomeSheet({
       ) : null}
 
       {searchActive ? (
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl bg-surface">
+        <div
+          ref={scrollAreaRef}
+          {...{ [SHEET_SCROLL_ATTR]: true }}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl bg-surface"
+        >
           {query.trim() && searchStatus === "loading" ? (
             <LoadingState label="正在搜索…" />
           ) : query.trim() && searchStatus === "error" ? (
@@ -143,7 +151,11 @@ export function SearchHomeSheet({
           )}
         </div>
       ) : recentPois.length > 0 ? (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={scrollAreaRef}
+          {...{ [SHEET_SCROLL_ATTR]: true }}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        >
           <SectionHeader title="最近查看" />
           <div className="mt-2 divide-y divide-line overflow-hidden rounded-2xl bg-surface">
             {recentPois.map((building) => (

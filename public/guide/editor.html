@@ -304,6 +304,7 @@
     <input type="file" id="ge-hubfig" accept=".svg,image/svg+xml" hidden />
     <input type="file" id="ge-noteimg" accept=".png,image/png" hidden />
     <input type="file" id="ge-stepfig" accept=".png,.jpg,.jpeg,image/png,image/jpeg" hidden />
+    <input type="file" id="ge-bannericon" accept=".png,image/png" hidden />
   </div>
   <div class="ge-lock" id="ge-lock" hidden></div>
 
@@ -395,6 +396,10 @@
   function ensureShape() {
     data.schema = 2;
     if (!data.meta || typeof data.meta !== "object") data.meta = {};
+    /* 地图上那条入口横幅的文案与图标。必须先建好这个对象：field() 的 setPath
+       只赋末级键，父对象不存在会直接抛。空对象不影响任何既有渲染 —— 客户端
+       没配就走 fallback（版次派生标题 + 「点击查看」）。 */
+    if (!data.meta.banner || typeof data.meta.banner !== "object") data.meta.banner = {};
     if (!data.lineColors || typeof data.lineColors !== "object") data.lineColors = {};
     if (!Array.isArray(data.hubs)) data.hubs = [];
     if (!Array.isArray(data.campuses)) data.campuses = [];
@@ -977,6 +982,53 @@
         h("div", { class: "ge-row" },
           field("修订日期", "meta.revisedAt"),
           field("修订说明", "meta.revisionNote")
+        )
+      );
+    });
+  }
+
+  /* ══════════════ 1b. 地图入口横幅 ══════════════
+   * 网页端与小程序端地图页顶部那条横幅的文案与图标。
+   *
+   * 为什么单独一节而不是复用「文档信息」的主/副标题：横幅是**入口**，文档标题是
+   * **文档**，两者的读者与用意不同。以前横幅借文档标题 + 版次拼，于是地图上挂出
+   * 一条写着「上海大学 / 2026 版 · 查看到校路线」的横幅——主标题是原稿封面上的
+   * 单位名，没有信息量；副标题又把版次混进了动作提示。现在三项各自可填。
+   *
+   * 都留空也没问题：客户端按版次派生标题（「2026 版入校指南」）+「点击查看」兜底。 */
+  function bannerEditor() {
+    var banner = (data.meta && data.meta.banner) || {};
+    var iconKey = banner.icon || "";
+    var preview = h("div", { class: "ge-hint", style: "margin:6px 0 0" });
+    if (iconKey) {
+      preview.appendChild(h("img", {
+        src: "/api/public/guide-assets/" + encodeURIComponent(iconKey),
+        style: "height:22px;width:auto;vertical-align:middle;margin-right:6px",
+        alt: "",
+      }));
+      preview.appendChild(h("span", { text: iconKey }));
+    } else {
+      preview.appendChild(h("span", { text: "未设置图标，端上用内置图标兜底" }));
+    }
+
+    return section("banner", "地图入口横幅", null, false, function () {
+      return h("div", null,
+        h("div", { class: "ge-hint",
+          text: "地图页顶部那条入口横幅。留空则自动用版次派生标题（如「2026 版入校指南」）与「点击查看」。" }),
+        field("横幅标题", "meta.banner.title", { nullable: true }),
+        field("横幅副标题", "meta.banner.subtitle", { nullable: true }),
+        preview,
+        h("div", { class: "ge-adds", style: "margin:8px 0 0" },
+          /* 位图而非 SVG：小程序 <image> 渲染不了矢量，横幅两端共用一个键，
+             所以这里只收 PNG（走 icon_png 通道，与图标库同一种 kind）。 */
+          h("button", { class: "ge-mini", type: "button", text: iconKey ? "更换图标（PNG）" : "上传图标（PNG）",
+            onclick: function () { document.getElementById("ge-bannericon").click(); } }),
+          iconKey ? h("button", { class: "ge-mini", type: "button", text: "移除图标",
+            onclick: function () {
+              clearPath("meta.banner.icon");
+              persist();
+              refresh();
+            } }) : null
         )
       );
     });
@@ -2543,6 +2595,7 @@
       text: "点右侧任意卡片可定位到它的字段；改动自动保存" +
             (server.online ? "到服务器草稿。" : "到本地（离线模式）。") }));
     panel.appendChild(metaEditor());
+    panel.appendChild(bannerEditor());
     panel.appendChild(hubManager());
     panel.appendChild(campusManager());
     panel.appendChild(colorLibEditor());
@@ -2775,6 +2828,36 @@
         R.toast("插图已插入备注");
       });
     }).catch(function (err) { R.toast("上传插图失败：" + err.message); });
+  });
+
+  /* 地图入口横幅的图标上传（icon_png）。
+     键固定为 banner-icon：横幅只有一个图标，同键重传就是替换，引用它的内容
+     一个字都不用改（与图标库 uploadIconAsset 同一套语义）。
+     只收 PNG —— 小程序 <image> 渲染不了 SVG，而两端共用这一个键。 */
+  document.getElementById("ge-bannericon").addEventListener("change", function (e) {
+    var fi = e.target;
+    var f = fi.files && fi.files[0];
+    fi.value = "";
+    if (!f) return;
+    if (!server.online) return R.toast("离线模式下不能上传图标");
+    if (server.readOnly) return R.toast("送审中，内容已冻结");
+    var key = "banner-icon";
+    fetch("/api/admin/guide/assets/" + encodeURIComponent(key) + "?kind=icon_png", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "content-type": "image/png" },
+      body: f,
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (body) {
+        if (!res.ok) throw new Error(body.message || ("HTTP " + res.status));
+        ensureShape();
+        setPath("meta.banner.icon", key);
+        persist();
+        loadAssets();
+        refresh();
+        R.toast("横幅图标已更新");
+      });
+    }).catch(function (err) { R.toast("上传图标失败：" + err.message); });
   });
 
   /* 步骤配图 / 小节照片上传：dataset.path 回填字段，dataset.figuresPath 则向数组追加。

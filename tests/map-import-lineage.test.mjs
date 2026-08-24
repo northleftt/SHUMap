@@ -427,9 +427,7 @@ test("map import retries transient infrastructure errors instead of failing fast
   database.close();
 });
 
-test("map import lists manual svg_viewbox anchors left on superseded versions for review", async () => {
-  const database = freshDatabase();
-  seedImport(database, importedSvg);
+const seedDisplayAnchor = (database) => {
   const now = "2026-08-01T00:00:00.000Z";
   database.prepare(
     `insert into location_anchors(
@@ -442,13 +440,51 @@ test("map import lists manual svg_viewbox anchors left on superseded versions fo
     `insert into entity_locations(id,entity_type,entity_id,anchor_id,role,is_primary,valid_from,created_at)
      values('eloc_display','place','place_import','anchor_display','primary_display',1,?,?)`,
   ).run(now, now);
+};
+
+// 与 importedSvg 内容相同但 viewBox 不同（画布缩放过）——坐标系不一致的场合。
+const resizedSvg = new TextEncoder().encode(new TextDecoder().decode(importedSvg).replace('viewBox="0 0 100 100"', 'viewBox="0 0 200 200"'));
+
+test("map import auto-migrates manual anchors when the canvas coordinate space is unchanged", async () => {
+  // 画布坐标系（coordinate_space_json）与上一版逐字节一致 = 同一 viewBox，旧坐标逐点
+  // 有效：仍指向旧版本的手工锚点改挂新版本，不进人工复核清单。
+  const database = freshDatabase();
+  seedImport(database, importedSvg);
+  seedDisplayAnchor(database);
 
   const item = await runImport(database, new R2Bucket(new StoredObject(importedSvg)));
   assert.equal(item.acknowledged, true);
   const job = database.prepare("select status,result_json as resultJson from jobs where id='job_import'").get();
   assert.equal(job.status, "succeeded");
   const result = JSON.parse(job.resultJson);
-  // 手工标注进入复核清单；footprint 锚点由导入自动迁移，不在清单里
+  assert.deepEqual(result.anchorReview, [], "画布一致时不应再要求人工重标");
+  assert.deepEqual(result.anchorAutoMigrated, [{
+    anchorId: "anchor_display",
+    role: "primary_display",
+    entityType: "place",
+    entityId: "place_import",
+    entityName: null,
+  }]);
+  assert.equal(
+    database.prepare("select map_version_id as mapVersionId from location_anchors where id='anchor_display'").get().mapVersionId,
+    result.mapVersionId,
+    "锚点应改挂到新导入的地图版本",
+  );
+  database.close();
+});
+
+test("map import lists manual svg_viewbox anchors left on superseded versions for review", async () => {
+  const database = freshDatabase();
+  // 媒体对象按 resizedSvg 落（校验和匹配），上一版的 coordinate_space_json 仍是 100×100。
+  seedImport(database, resizedSvg);
+  seedDisplayAnchor(database);
+
+  const item = await runImport(database, new R2Bucket(new StoredObject(resizedSvg)));
+  assert.equal(item.acknowledged, true);
+  const job = database.prepare("select status,result_json as resultJson from jobs where id='job_import'").get();
+  assert.equal(job.status, "succeeded");
+  const result = JSON.parse(job.resultJson);
+  // 画布有平移/缩放：手工标注进入复核清单；footprint 锚点由导入自动迁移，不在清单里
   assert.deepEqual(result.anchorReview, [{
     anchorId: "anchor_display",
     role: "primary_display",
@@ -456,5 +492,11 @@ test("map import lists manual svg_viewbox anchors left on superseded versions fo
     entityId: "place_import",
     entityName: null,
   }]);
+  assert.deepEqual(result.anchorAutoMigrated, [], "画布不一致时不能自动迁移");
+  assert.equal(
+    database.prepare("select map_version_id as mapVersionId from location_anchors where id='anchor_display'").get().mapVersionId,
+    "version_previous",
+    "锚点应留在旧版本上等人工重标",
+  );
   database.close();
 });

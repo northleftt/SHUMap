@@ -208,6 +208,7 @@ export async function getPublicGuide(request: Request, env: Env, slug: string): 
     return new Response(null, { status: 304, headers: { etag, "cache-control": "public, max-age=300" } });
   }
 
+  const content = parseJsonObject(row.contentJson, "guide content");
   return json(
     {
       slug: row.slug,
@@ -216,10 +217,36 @@ export async function getPublicGuide(request: Request, env: Env, slug: string): 
       revisionId: row.revisionId,
       revisionNo: row.revisionNo,
       publishedAt: row.publishedAt,
-      content: parseJsonObject(row.contentJson, "guide content"),
+      // 地图横幅的文案与图标（content.meta.banner）提到顶层：两端的入口条只需要
+      // 这三个字段，不必为了一行标题去解析整份 40KB 内容。内容里仍是同一份数据，
+      // 这里只是把它抬出来（客户端解析器对两种位置都兼容）。
+      banner: guideBanner(content),
+      content,
     },
     { headers: { etag, "cache-control": "public, max-age=300" } },
   );
+}
+
+/**
+ * 从内容里取地图横幅配置（content.meta.banner）。
+ *
+ * 全部字段可空：没配时客户端按版次派生标题、用「点击查看」作副标题
+ * （见 src/lib/guideEntry.ts 的 fallbackBannerTitle）。这里不做兜底，
+ * 只做「有什么给什么」——兜底文案属于展示层，两端要能各自调整。
+ */
+function guideBanner(content: Record<string, unknown>): {
+  title: string | null;
+  subtitle: string | null;
+  icon: string | null;
+} {
+  const meta = content.meta;
+  const banner = meta && typeof meta === "object" ? (meta as Record<string, unknown>).banner : null;
+  const read = (key: string): string | null => {
+    if (!banner || typeof banner !== "object") return null;
+    const value = (banner as Record<string, unknown>)[key];
+    return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  };
+  return { title: read("title"), subtitle: read("subtitle"), icon: read("icon") };
 }
 
 /**

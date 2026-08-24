@@ -26,6 +26,20 @@ const PICKUP_WRITE_TYPES = ["regular", "none"] as const;
 const DROPOFF_TYPES = ["regular", "none"] as const;
 const BOOKING_POLICIES = ["required", "optional", "not_required"] as const;
 const STOP_STATUSES = ["active", "temporarily_closed", "retired"] as const;
+// 图钉大小系数（0027 起连续）：0.5~2.0，列里存十进制字符串；0026 的三档
+// 存量字符串仍按原系数读出。与客户端 markerTiers 同口径。
+const MARKER_SCALE_MIN = 0.5;
+const MARKER_SCALE_MAX = 2;
+const LEGACY_STOP_MARKER_SCALES: Record<string, number> = { small: 0.72, standard: 1, large: 1.35 };
+
+function parseStopMarkerScale(value: unknown): number {
+  const legacy = typeof value === "string" ? LEGACY_STOP_MARKER_SCALES[value] : undefined;
+  const scale = legacy ?? (typeof value === "number" || typeof value === "string" ? Number(value) : NaN);
+  if (!Number.isFinite(scale) || scale < MARKER_SCALE_MIN || scale > MARKER_SCALE_MAX) {
+    throw new HttpError(400, "validation_error", `markerSize must be a number between ${MARKER_SCALE_MIN} and ${MARKER_SCALE_MAX}`);
+  }
+  return Math.round(scale * 100) / 100;
+}
 const ROUTE_STATUSES = ["active", "suspended", "retired"] as const;
 /**
  * A stop keeps at most two anchors of its own: the waiting point (`boarding_point`,
@@ -43,6 +57,12 @@ const MAX_PATTERN_STOPS = 40;
 const MAX_CALENDAR_EXCEPTIONS = 366;
 const MAX_STOP_LOCATIONS = 2;
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+/**
+ * 日历的日型（0025 迁移的 CHECK 枚举）。客户端的「今天是工作日/假日……」标签读它，
+ * 见 resolveDayType。'other' 是逃生舱：不属于五种日型的日历（考试周、临时加开）选它，
+ * 标签不认它，但班次照常运营。
+ */
+const DAY_TYPES = ["weekday", "weekend", "holiday", "winter_break", "summer_break", "other"] as const;
 
 /**
  * `transit_stops.code` and `transit_routes.code` are UNIQUE. Checked up front so
@@ -112,11 +132,11 @@ export async function listTransit(env: Env): Promise<Response> {
     // Retired stops stay in the payload: a pattern may still reference one, and
     // the editor needs to show (and be able to restore) it rather than fail to
     // resolve the name.
-    all(env.DB, "select id,place_id as placeId,campus_id as campusId,code,name,status from transit_stops order by status='retired',name"),
+    all(env.DB, "select id,place_id as placeId,campus_id as campusId,code,name,status,cast(marker_size as real) as markerSize from transit_stops order by status='retired',name"),
     all(env.DB, "select id,code,name,operator_id as operatorId,status,booking_policy as bookingPolicy,booking_url as bookingUrl from transit_routes order by status='retired',name"),
     all(env.DB, "select id,route_id as routeId,direction_id as directionId,name,route_anchor_id as routeAnchorId from transit_patterns order by route_id,direction_id"),
     all(env.DB, "select pattern_id as patternId,stop_id as stopId,stop_sequence as stopSequence,pickup_type as pickupType,dropoff_type as dropoffType from transit_pattern_stops order by pattern_id,stop_sequence"),
-    all(env.DB, "select id,name,timezone,valid_from as validFrom,valid_to as validTo,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id as sourceId from service_calendars order by valid_from desc,id"),
+    all(env.DB, "select id,name,timezone,valid_from as validFrom,valid_to as validTo,day_type as dayType,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id as sourceId from service_calendars order by valid_from desc,id"),
     all(env.DB, "select calendar_id as calendarId,service_date as serviceDate,exception_type as exceptionType,label from service_calendar_exceptions order by service_date"),
     all(env.DB, "select id,pattern_id as patternId,service_calendar_id as serviceCalendarId,public_label as publicLabel,booking_policy as bookingPolicy,booking_url as bookingUrl,status from transit_trips where status='active' order by id"),
     all(env.DB, "select trip_id as tripId,stop_id as stopId,stop_sequence as stopSequence,arrival_time as arrivalTime,departure_time as departureTime from transit_stop_times order by trip_id,stop_sequence"),
@@ -156,11 +176,12 @@ export async function listTransit(env: Env): Promise<Response> {
 }
 
 export async function createStop(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = exactObject(await readJson<unknown>(request), "transitStop", ["name", "code", "placeId", "campusId", "locations"]);
+  const body = exactObject(await readJson<unknown>(request), "transitStop", ["name", "code", "placeId", "campusId", "locations", "markerSize"]);
   const name = requiredString(body.name, "name", 200);
   const placeId = optionalString(body.placeId, "placeId", 100);
   const campusId = optionalString(body.campusId, "campusId", 100);
   const code = optionalString(body.code, "code", 100);
+  const markerSize = body.markerSize === undefined ? 1 : parseStopMarkerScale(body.markerSize);
   const locations = stopLocations(body.locations);
   await Promise.all([
     assertExists(env.DB, "places", placeId, "Place"),
@@ -170,8 +191,8 @@ export async function createStop(request: Request, env: Env, principal: SessionP
   const id = makeId("stop");
   const now = isoNow();
   const statements: D1PreparedStatement[] = [
-    env.DB.prepare("insert into transit_stops(id,place_id,campus_id,code,name,status,created_at,updated_at) values(?,?,?,?,?,'active',?,?)")
-      .bind(id, placeId, campusId, code, name, now, now),
+    env.DB.prepare("insert into transit_stops(id,place_id,campus_id,code,name,status,marker_size,created_at,updated_at) values(?,?,?,?,?,'active',?,?,?)")
+      .bind(id, placeId, campusId, code, name, String(markerSize), now, now),
   ];
   for (const location of locations) {
     const plan = await planLocation(env, "transit_stop", id, location, principal, now);
@@ -194,21 +215,22 @@ export async function updateStop(
   stopId: string,
   requestId: string,
 ): Promise<Response> {
-  const before = await first<{ id: string; place_id: string | null; campus_id: string | null; code: string | null; name: string; status: string }>(
+  const before = await first<{ id: string; place_id: string | null; campus_id: string | null; code: string | null; name: string; status: string; marker_size: string }>(
     env.DB,
-    "select id,place_id,campus_id,code,name,status from transit_stops where id=?",
+    "select id,place_id,campus_id,code,name,status,marker_size from transit_stops where id=?",
     [stopId],
   );
   if (!before) throw new HttpError(404, "not_found", "Stop does not exist");
 
   const body = partialObject(await readJson<unknown>(request), "transitStopUpdate", [
-    "name", "code", "placeId", "campusId", "status", "locations",
+    "name", "code", "placeId", "campusId", "status", "locations", "markerSize",
   ]);
   const name = Object.hasOwn(body, "name") ? requiredString(body.name, "name", 200) : before.name;
   const code = Object.hasOwn(body, "code") ? optionalString(body.code, "code", 100) : before.code;
   const placeId = Object.hasOwn(body, "placeId") ? optionalString(body.placeId, "placeId", 100) : before.place_id;
   const campusId = Object.hasOwn(body, "campusId") ? optionalString(body.campusId, "campusId", 100) : before.campus_id;
   const status = Object.hasOwn(body, "status") ? oneOf(body.status, "status", STOP_STATUSES) : before.status;
+  const markerSize = Object.hasOwn(body, "markerSize") ? parseStopMarkerScale(body.markerSize) : parseStopMarkerScale(before.marker_size);
   await Promise.all([
     assertExists(env.DB, "places", placeId, "Place"),
     assertExists(env.DB, "campuses", campusId, "Campus"),
@@ -230,8 +252,8 @@ export async function updateStop(
 
   const now = isoNow();
   const statements: D1PreparedStatement[] = [
-    env.DB.prepare("update transit_stops set place_id=?,campus_id=?,code=?,name=?,status=?,updated_at=? where id=?")
-      .bind(placeId, campusId, code, name, status, now, stopId),
+    env.DB.prepare("update transit_stops set place_id=?,campus_id=?,code=?,name=?,status=?,marker_size=?,updated_at=? where id=?")
+      .bind(placeId, campusId, code, name, status, String(markerSize), now, stopId),
   ];
   let replacedLocations: RevisionLocationInput[] | null = null;
   if (Object.hasOwn(body, "locations")) {
@@ -548,6 +570,7 @@ export async function createCalendar(request: Request, env: Env, principal: Sess
     "name",
     "validFrom",
     "validTo",
+    "dayType",
     "weekdays",
     "exceptions",
     "sourceId",
@@ -558,6 +581,7 @@ export async function createCalendar(request: Request, env: Env, principal: Sess
   const weekdays = exactObject(body.weekdays, "weekdays", WEEKDAYS);
   const flags = WEEKDAYS.map((day) => booleanValue(weekdays[day], `weekdays.${day}`) ? 1 : 0);
   const name = requiredString(body.name, "name", 200);
+  const dayType = oneOf(body.dayType, "dayType", DAY_TYPES);
   const validFrom = dateValue(body.validFrom, "validFrom");
   const validTo = dateValue(body.validTo, "validTo");
   if (validFrom > validTo) {
@@ -566,9 +590,9 @@ export async function createCalendar(request: Request, env: Env, principal: Sess
   const planned = planCalendarExceptions(env, id, body.exceptions, validFrom, validTo);
   await env.DB.batch([
     env.DB.prepare(
-      `insert into service_calendars(id,name,timezone,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id)
-       values(?,?,'Asia/Shanghai',?,?,?,?,?,?,?,?,?,?)`,
-    ).bind(id, name, validFrom, validTo, ...flags, sourceId),
+      `insert into service_calendars(id,name,timezone,valid_from,valid_to,day_type,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id)
+       values(?,?,'Asia/Shanghai',?,?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(id, name, validFrom, validTo, dayType, ...flags, sourceId),
     ...planned.statements,
   ]);
   await audit(env, principal, "transit.calendar.create", "service_calendar", id, requestId, null, body);
@@ -590,15 +614,18 @@ export async function updateCalendar(
 ): Promise<Response> {
   const before = await first<Record<string, unknown>>(
     env.DB,
-    `select id,name,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id
+    `select id,name,valid_from,valid_to,day_type,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id
        from service_calendars where id=?`,
     [calendarId],
   );
   if (!before) throw new HttpError(404, "not_found", "Calendar does not exist");
 
   const body = partialObject(await readJson<unknown>(request), "serviceCalendarUpdate", [
-    "name", "validFrom", "validTo", "weekdays", "exceptions", "sourceId",
+    "name", "validFrom", "validTo", "dayType", "weekdays", "exceptions", "sourceId",
   ]);
+  const dayType = Object.hasOwn(body, "dayType")
+    ? oneOf(body.dayType, "dayType", DAY_TYPES)
+    : String(before.day_type);
   const name = Object.hasOwn(body, "name") ? requiredString(body.name, "name", 200) : String(before.name);
   const validFrom = Object.hasOwn(body, "validFrom") ? dateValue(body.validFrom, "validFrom") : String(before.valid_from);
   const validTo = Object.hasOwn(body, "validTo") ? dateValue(body.validTo, "validTo") : String(before.valid_to);
@@ -613,9 +640,9 @@ export async function updateCalendar(
 
   const statements: D1PreparedStatement[] = [
     env.DB.prepare(
-      `update service_calendars set name=?,valid_from=?,valid_to=?,
+      `update service_calendars set name=?,valid_from=?,valid_to=?,day_type=?,
         monday=?,tuesday=?,wednesday=?,thursday=?,friday=?,saturday=?,sunday=?,source_id=? where id=?`,
-    ).bind(name, validFrom, validTo, ...flags, sourceId, calendarId),
+    ).bind(name, validFrom, validTo, dayType, ...flags, sourceId, calendarId),
   ];
   let replacedExceptions: Array<{ date: string; type: string; label: string | null }> | null = null;
   if (Object.hasOwn(body, "exceptions")) {
@@ -635,7 +662,7 @@ export async function updateCalendar(
   }
   await env.DB.batch(statements);
   await audit(env, principal, "transit.calendar.update", "service_calendar", calendarId, requestId, before, {
-    name, validFrom, validTo, sourceId,
+    name, validFrom, validTo, dayType, sourceId,
     weekdays: Object.fromEntries(WEEKDAYS.map((day, index) => [day, flags[index] === 1])),
     ...(replacedExceptions === null ? {} : { exceptions: replacedExceptions }),
   });
@@ -1001,6 +1028,59 @@ function shanghaiWeekday(date: string): string {
     .toLowerCase();
 }
 
+/** 客户端日型标签的取值。与 0025 迁移的 CHECK 枚举一致（'other' 不出现在标签里）。 */
+export type PublicDayType = "weekday" | "weekend" | "holiday" | "winter_break" | "summer_break";
+
+/**
+ * 当日日型：由**管理端的服务日历**决定，不再由客户端算。
+ *
+ * 此前客户端读 `data/academic-calendar.json`（2026-03-11 提交 1ee1733 手写的草稿，
+ * 无生成脚本、worker 侧零引用、假日只列到 2026-06-19）算这个标签，而班次归属早就
+ * 按 service_calendars 过滤了——两套数据没有任何代码连通，于是会出现「页面说今天是
+ * 假日、但假日班次一个都不出」。日型上收到日历表（0025 的 day_type 列）之后，
+ * 运营改一处即可，两边一致。
+ *
+ * 命中规则与 publicCampusLines 的班次过滤**完全一致**（有效期 + 星期标记 or added
+ * 例外，再排除 removed 例外）——否则标签和班次会各说各话。
+ *
+ * 优先级：holiday > winter_break > summer_break > weekend > weekday。
+ * 现有数据里日历有效期是重叠的（「工作日」日历覆盖了整个寒暑假），同一天可能命中
+ * 多条，所以必须有确定的优先级，否则标签随查询顺序漂。假日排最前是因为它是最specific
+ * 的声明（逐日列举的例外日）；寒暑假优先于周末，因为寒假里的周六该显示「寒假」。
+ *
+ * 一条都没命中时（例如学年之间的空档）回落到按星期判周末/工作日——只是标签，
+ * 不影响任何班次。
+ */
+export function resolveDayType(
+  calendars: Array<{ dayType: string }>,
+  weekday: string,
+): PublicDayType {
+  const present = new Set(calendars.map((calendar) => calendar.dayType));
+  for (const candidate of ["holiday", "winter_break", "summer_break", "weekend", "weekday"] as const) {
+    if (present.has(candidate)) return candidate;
+  }
+  return weekday === "saturday" || weekday === "sunday" ? "weekend" : "weekday";
+}
+
+/** 某天生效的服务日历（日型解析用；过滤规则与班次查询一致）。 */
+async function loadActiveCalendars(env: Env, date: string, weekday: string): Promise<Array<{ dayType: string }>> {
+  return all<{ dayType: string }>(
+    env.DB,
+    `select day_type as dayType from service_calendars c
+      where c.valid_from<=? and c.valid_to>=?
+        and (c.${weekday}=1 or exists(
+          select 1 from service_calendar_exceptions a
+           where a.calendar_id=c.id and a.service_date=? and a.exception_type='added'
+        ))
+        and not exists(select 1 from service_calendar_exceptions e
+           where e.calendar_id=c.id and e.service_date=? and e.exception_type='removed')`,
+    [date, date, date, date],
+  );
+}
+
+// 日型随 campus-lines 一起下发，不单开端点：两端在切日期时本来就会重拉 campus-lines，
+// 多一个端点只是多一次往返和多一处要维护的契约。
+
 /**
  * GET /api/public/transit/campus-lines?from=<endpointId>&to=<endpointId>&date=YYYY-MM-DD
  *
@@ -1020,7 +1100,15 @@ export async function publicCampusLines(request: Request, env: Env): Promise<Res
   const weekday = shanghaiWeekday(date);
   if (!(WEEKDAYS as readonly string[]).includes(weekday)) throw new HttpError(400, "validation_error", "Invalid date");
   const headers = { "cache-control": "public, max-age=60" };
-  const payload = { date, timezone: "Asia/Shanghai", from: { id: from.id, name: from.name }, to: { id: to.id, name: to.name } };
+  // 日型和班次用同一套日历判定，一起下发，客户端不再自己算（见 resolveDayType）。
+  const dayType = resolveDayType(await loadActiveCalendars(env, date, weekday), weekday);
+  const payload = {
+    date,
+    timezone: "Asia/Shanghai",
+    dayType,
+    from: { id: from.id, name: from.name },
+    to: { id: to.id, name: to.name },
+  };
   if (from.stopIds.length === 0 || to.stopIds.length === 0) return json({ ...payload, lines: [] }, { headers });
 
   const fromMarks = from.stopIds.map(() => "?").join(",");

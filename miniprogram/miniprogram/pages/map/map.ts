@@ -33,7 +33,8 @@ import {
   overlayAnchor,
   overlayItemsForCampus,
   resolveEventTargetNames,
-  severityColor,
+  eventColor,
+  eventMarkerItems,
   severityLabel,
   type EventOverlayItem,
   type OperationalEvent,
@@ -45,8 +46,10 @@ import {
   buildBuildingShapes,
   buildVisibleMarkers,
   hitTest,
+  markerPinStyles,
   type BuildingShape,
   type MapMarker,
+  type MarkerPinStyles,
 } from "../../lib/map/markers";
 import {
   clamp,
@@ -73,14 +76,19 @@ import {
 } from "../../lib/map/user-location";
 import {
   SHEET_ANIMATE_MS_LONG,
-  SHEET_CLOSE_THRESHOLD_PX,
+  dampSheetTop,
   previousModeBeforePoi,
   queryMode,
+  resolveSheetDragOwner,
   sheetAnimateMs,
+  sheetDragVelocity,
+  sheetGestureOwner,
   sheetHeights,
   sheetToggleShifted,
   sheetToggleTarget,
-  snapSheetMode,
+  shouldClosePoiOnRelease,
+  snapSheetModeWithVelocity,
+  type SheetGestureOwner,
   type SheetHeights,
   type SheetMode,
 } from "../../lib/map/sheet";
@@ -91,7 +99,7 @@ import {
   GUIDE_DISMISS_KEY,
   GUIDE_SLUG,
   dismissStamp,
-  guideSubtitle,
+  guideAssetUrl,
   parseGuideSummary,
   shouldShowGuideBanner,
   type GuideSummary,
@@ -123,6 +131,12 @@ const SHEET_TOGGLE_GAP = 56;
 const SHEET_CLOSE_GAP = 48;
 /** 延后任务落在动画结束后的小缓冲（动画时长用 sheet.ts 分档长档常量，别写死）。 */
 const SHEET_DEFER_BUFFER_MS = 40;
+/**
+ * 「落点在抽屉内滚动框里」标记的有效时间窗（ms）：同一轮触摸里 scroll-view 的
+ * touchstart 与 .sheet-shell 的 touchstart 只隔一次事件派发，200ms 足够宽松；
+ * 超期即视为没命中，标记不会粘到下一轮触摸（见 sheetScrollAreaHitAt 注释）。
+ */
+const SHEET_SCROLL_HIT_WINDOW_MS = 200;
 
 interface SelectedInfo {
   poiKey: string;
@@ -131,7 +145,7 @@ interface SelectedInfo {
 }
 
 /** 渲染层图钉：MapMarker + 选中态标记（选中样式对齐 Web 端 MapPoiOverlay）。 */
-type RenderMarker = MapMarker & { selected: boolean; iconUrl: string };
+type RenderMarker = MapMarker & MarkerPinStyles & { selected: boolean; iconUrl: string };
 
 interface DetailFactRow {
   key: string;
@@ -230,6 +244,24 @@ interface EventDetailData {
   updates: Array<{ id: string; day: string; message: string }>;
 }
 
+/**
+ * 一轮抽屉触摸的状态（beginSheetTouch 建、onSheetTouchEnd 清）。
+ * owner = touchstart 时按落点定的初步归属；resolved = 首次位移到达容差后定死的
+ * 最终归属（非 null 之后整个手势不再易主）。
+ */
+interface SheetTouchState {
+  fromHandle: boolean;
+  owner: SheetGestureOwner;
+  resolved: "sheet" | "scroll" | null;
+  startX: number;
+  startY: number;
+  startTop: number;
+  lastTop: number;
+  /** 速度采样：只留最后两点（全程平均会把中途的犹豫算进去，甩动判不出来）。 */
+  prevSample: { y: number; t: number } | null;
+  lastSample: { y: number; t: number } | null;
+}
+
 function severityIconUrl(severity: string): string {
   const safe = severity === "warning" || severity === "critical" ? severity : "info";
   return `/images/sheet/severity-${safe}.png`;
@@ -284,6 +316,8 @@ Page({
     guideVisible: false,
     guideTitle: "",
     guideSubtitle: "",
+    /** 后台配的横幅图标（guide_assets 素材）；空串时用内置字符图标兜底。 */
+    guideIconUrl: "",
     worldWidth: 0,
     worldHeight: 0,
     rasterRatio: RASTER_RATIO,
@@ -305,6 +339,8 @@ Page({
     /** poi 档关闭圆钮的 top（configureSheet 算；非 poi 档为 null 不渲染）。 */
     sheetCloseTop: null as number | null,
     eventCardBottom: 80,
+    /** 降档时把列表滚回顶部用的 scroll-top（每次 +1 交替 0/1 强制生效，见 resetScrollAreaTop）。 */
+    scrollAreaResetTop: 0,
 
     // 搜索 + POI 详情
     searchOpen: false,
@@ -464,9 +500,25 @@ Page({
     this.touch = null;
     /** 上一次单指未拖动点按（tap 时间+位置），用于「轻触后按住滑动」单指缩放判定。 */
     this.lastTap = null as { time: number; x: number; y: number } | null;
-    this.sheetTouch = null;
+    this.sheetTouch = null as SheetTouchState | null;
     /** 拖动/捏合后的 bindtap 抑制标记（onSurfaceTouchEnd 置位，onSurfaceTap 消费）。 */
     this.tapSuppress = false;
+    /**
+     * 最近一次「落点在抽屉内纵向滚动框里」的时间戳（onScrollAreaTouchStart 置位，
+     * beginSheetTouch 读；0 = 从未）。
+     * 存时间戳而不是布尔：Skyline 下 scroll-view 的 touchstart 是否冒泡到祖先
+     * 未经真机确认（AGENTS.md 坑 #8 系）。若不冒泡，beginSheetTouch 就没有机会
+     * 清零，布尔标记会漏到下一轮触摸、把之后每次整卡拖动都误判成列表滚动
+     * （功能静默失效）。时间戳只在同一轮触摸的时间窗内有效，最坏情况是本轮
+     * 判定失准，不会粘住。
+     */
+    this.sheetScrollAreaHitAt = 0;
+    /** 抽屉内滚动框的实时 scrollTop（bindscroll 更新；results/poi 档「滚到顶继续下拉」判定用）。 */
+    this.sheetScrollTop = 0;
+    /** 抽屉内滚动框内容是否真的溢出（measureSheetScrollable 实测；不可滚的框不吃手势）。 */
+    this.sheetScrollable = false;
+    /** 抽屉拖拽抢到手势后置位，被列表行/chip 的 bindtap 消费掉（避免拖完误开 POI）。 */
+    this.sheetTapSuppress = false;
     this.sheetMetrics = null as SheetHeights | null;
     /** poi 档实测内容高度（.detail-measure），null = 未测量（回落 heights.poi 上限）。 */
     this.poiContentHeight = null as number | null;
@@ -712,6 +764,10 @@ Page({
       // 抽屉顶边太高放不下时钳到微信胶囊/右侧控件列之下（controlTop = 胶囊底 + 8）。
       sheetCloseTop: mode === "poi" ? Math.max(this.data.controlTop, top - SHEET_CLOSE_GAP) : null,
       eventCardBottom: Math.max(tabBarHeight + 16, this.containerSize.height - top + 12),
+    }, () => {
+      // 可见带高度变了 → 同一份列表的溢出情况也变（home 档滚得动、results 档未必），
+      // 手势归属要用实测值，所以每次档位落定后重测一次。
+      this.measureSheetScrollable();
     });
     if (mode === "poi") {
       this.clearFilterHighlight();
@@ -824,7 +880,10 @@ Page({
         this.setData({
           guideVisible: true,
           guideTitle: summary.title,
-          guideSubtitle: guideSubtitle(summary),
+          guideSubtitle: summary.subtitle,
+          // 后台传了图标就用素材端点的位图；没传则由 WXML 回落到内置字符图标。
+          // 小程序 <image> 画不了 SVG，所以后台上传的横幅图标必须是位图（icon_png）。
+          guideIconUrl: summary.iconAsset ? guideAssetUrl(summary.iconAsset) : "",
         });
       }
     } catch {
@@ -834,7 +893,7 @@ Page({
   },
 
   openGuide() {
-    /* 原生指南页（pages/guide/guide）；webview 容器保留，预约乘车等外链仍在用 */
+    /* 原生指南页（pages/guide/guide）；webview 容器保留给后续本站外链，当前无页内调用方 */
     wx.navigateTo({ url: "/pages/guide/guide" });
   },
 
@@ -890,11 +949,12 @@ Page({
         const iconName = markerIconName(marker);
         return {
           ...marker,
+          ...markerPinStyles(marker.scale),
           selected,
           iconUrl: `/images/${selected ? "poi-w" : "poi"}/${iconName}.png`,
         };
       }),
-    });
+    }, () => this.refreshPinAnimatedStyle());
     this.syncFilterHighlight();
   },
 
@@ -970,14 +1030,26 @@ Page({
       };
     });
     // 图钉反向缩放，屏幕上保持恒定尺寸（锚点由 wxss transform-origin 固定）
-    this.applyAnimatedStyle(".poi-pin", () => {
-      "worklet";
-      return { transform: `scale(${1 / this.winScale.value})` };
-    });
+    this.refreshPinAnimatedStyle();
     // 抽屉拖拽只更新 shared 值，避免 touchmove 高频 setData。
     this.applyAnimatedStyle(".sheet", () => {
       "worklet";
       return { transform: `translateY(${this.sheetY.value}px)` };
+    });
+  },
+
+  /**
+   * 图钉反向缩放重注册。WebView 渲染（模拟器降级模式）下 applyAnimatedStyle
+   * 只在注册时匹配一次既有节点，markers/eventMarkers/userLocation 的 setData
+   * 重建 .poi-pin 节点后新节点吃不到反向缩放（图钉退化为世界固定尺寸、随缩放
+   * 变大）；Skyline 下同选择器是覆盖语义，重注册无副作用。因此每处重建图钉
+   * 节点的 setData 回调里都调一次。
+   */
+  refreshPinAnimatedStyle() {
+    if (!this.animatedStyleApplied) return;
+    this.applyAnimatedStyle(".poi-pin", () => {
+      "worklet";
+      return { transform: `scale(${1 / this.winScale.value})` };
     });
   },
 
@@ -1388,54 +1460,185 @@ Page({
     this.setSheetMode(sheetToggleTarget(mode, searchActive));
   },
 
+  /**
+   * 抽屉内纵向滚动框的 touchstart（同一节点的 bind 先于 .sheet-shell 的同名事件
+   * 冒泡到达）：只打「本轮落点在滚动框内」的时间戳，由 beginSheetTouch 读取。
+   * 同一时刻抽屉内只渲染一个 .sheet-scroll（poi / 结果 / 最近查看三选一），
+   * 所以标记与 scrollTop 都存单值，不需要按区分 key。
+   *
+   * 记时间戳而不是布尔：万一 Skyline 下 scroll-view 的 touchstart 不冒泡到
+   * .sheet-shell（待真机确认），布尔标记就没人消费、会漏到下一轮触摸，把之后
+   * 落在搜索行的整卡拖动误判成列表滚动。时间戳自愈——过期即视为没命中。
+   */
+  onScrollAreaTouchStart() {
+    this.sheetScrollAreaHitAt = Date.now();
+  },
+
+  /** 滚动框位置（results/poi 档「滚到顶继续下拉」判定用）。 */
+  onScrollAreaScroll(e: any) {
+    const top = Number(e.detail?.scrollTop);
+    if (Number.isFinite(top)) this.sheetScrollTop = top;
+  },
+
+  /**
+   * 实测抽屉内滚动框是否真的能滚（内容溢出）。不能滚的框（最近查看只一两条）
+   * 不该吃掉手势——此时整卡可拖。异步无妨：只在内容/档位变化后跑，
+   * 早于用户下一次触摸。
+   */
+  measureSheetScrollable() {
+    this.createSelectorQuery()
+      .select(".sheet-scroll")
+      .boundingClientRect()
+      .select(".sheet-scroll")
+      .scrollOffset()
+      .exec((res: any[]) => {
+        const rect = res?.[0];
+        const offset = res?.[1];
+        if (!rect || !offset) {
+          this.sheetScrollable = false;
+          this.sheetScrollTop = 0;
+          return;
+        }
+        this.sheetScrollable = Number(offset.scrollHeight) - Number(rect.height) > 1;
+        this.sheetScrollTop = Number(offset.scrollTop) || 0;
+      });
+  },
+
+  /**
+   * 降档时把列表滚回顶部：可见带缩短而列表还停在中间，看起来像坏了。
+   * scroll-top 传相同值不会重新滚动，所以在 0 / 0.5 之间交替（视觉等同顶部）。
+   */
+  resetSheetScroll() {
+    this.sheetScrollTop = 0;
+    this.setData({ scrollAreaResetTop: this.data.scrollAreaResetTop === 0 ? 0.5 : 0 });
+  },
+
+  /** 抽屉拖拽抢到手势后，本轮的列表行/chip tap 作废（照抄地图面 tapSuppress 范式）。 */
+  consumeSheetTap(): boolean {
+    if (!this.sheetTapSuppress) return false;
+    this.sheetTapSuppress = false;
+    return true;
+  },
+
+  /** 把手上的 touchstart：无条件归抽屉（不看档位、不看落点）。 */
+  onSheetHandleTouchStart(e: any) {
+    this.beginSheetTouch(e, true);
+  },
+
+  /** 整卡（.sheet-shell）上的 touchstart：归属按落点判定，见 sheetGestureOwner。 */
   onSheetTouchStart(e: any) {
+    this.beginSheetTouch(e, false);
+  },
+
+  beginSheetTouch(e: any, fromHandle: boolean) {
     const touch = e.touches?.[0];
+    // 落点标记按「同一轮触摸」的时间窗判定，不靠消费清零：Skyline 下 scroll-view 的
+    // touch 事件是否冒泡到祖先未经真机确认，万一不冒泡，消费式标记就会漏到下一轮触摸
+    // （把整卡拖动误判成列表滚动，且此后永久错位）。时间窗最坏只影响本轮。
+    const hitAt = Number(this.sheetScrollAreaHitAt);
+    const inScrollArea = Number.isFinite(hitAt)
+      && Date.now() - hitAt <= SHEET_SCROLL_HIT_WINDOW_MS;
+    this.sheetScrollAreaHitAt = 0;
+    // 上一轮没被 tap 消费掉的抑制标记在这里清零：同一手势的 tap 在 touchend 之后
+    // 才派发，所以这里清不会误清本轮的。
+    this.sheetTapSuppress = false;
     if (!touch || !this.sheetMetrics) return;
     // 用 sheetY 的实时值作起点而不是 data.sheetTop：吸附动画进行中再次抓住
-    // 把手时，data.sheetTop 已是目标值，从它起拖会跳变；同时直写当前值覆盖掉
+    // 卡片时，data.sheetTop 已是目标值，从它起拖会跳变；同时直写当前值覆盖掉
     // 进行中的 timing，并作废同 tick 合并队列里的动画目标。
     this.sheetPendingTop = null;
     const liveTop = Number(this.sheetY?.value);
     const startTop = Number.isFinite(liveTop) ? liveTop : Number(this.data.sheetTop);
     if (this.sheetY) this.sheetY.value = startTop;
+    const owner = sheetGestureOwner({
+      mode: this.data.sheetMode as SheetMode,
+      fromHandle,
+      inScrollArea,
+      scrollable: this.sheetScrollable,
+    });
     this.sheetTouch = {
+      fromHandle,
+      owner,
+      // 归属在首次位移到达容差时定死（owner=scroll 已经没有悬念，直接定）；
+      // 之后整个手势不再易主。
+      resolved: owner === "scroll" ? "scroll" : null,
+      startX: Number(touch.clientX),
       startY: Number(touch.clientY),
       startTop,
       lastTop: startTop,
+      prevSample: null,
+      lastSample: { y: Number(touch.clientY), t: Date.now() },
     };
   },
 
   onSheetTouchMove(e: any) {
     const touch = e.touches?.[0];
-    if (!touch || !this.sheetTouch || !this.sheetMetrics) return;
+    const state = this.sheetTouch;
+    if (!touch || !state || !this.sheetMetrics) return;
+    const x = Number(touch.clientX);
+    const y = Number(touch.clientY);
+    // 速度只取最后两个采样点（全程平均会把中途的犹豫算进去，甩动判不出来）
+    state.prevSample = state.lastSample;
+    state.lastSample = { y, t: Date.now() };
+
+    if (!state.resolved) {
+      const resolved = resolveSheetDragOwner({
+        owner: state.owner,
+        fromHandle: state.fromHandle,
+        deltaX: x - state.startX,
+        deltaY: y - state.startY,
+        scrollTop: this.sheetScrollTop,
+      });
+      if (!resolved) return;
+      state.resolved = resolved;
+      if (resolved === "sheet") {
+        // 抢到手势：抑制随后的列表行/chip tap，收键盘（results 档带着键盘拖卡片
+        // 会错位——adjust-position=false 只是躲开了自动顶起），并把起点重置到
+        // 当前位置：判定用掉的那 8px 不该算进位移，否则松手落档会偏。
+        this.sheetTapSuppress = true;
+        if (typeof wx.hideKeyboard === "function") wx.hideKeyboard({});
+        state.startX = x;
+        state.startY = y;
+      }
+    }
+    if (state.resolved !== "sheet") return;
+
     const mode = this.data.sheetMode as SheetMode;
-    const delta = Number(touch.clientY) - this.sheetTouch.startY;
+    const delta = y - state.startY;
     const fullHeight = Number(this.data.sheetFullHeight);
     const minTop = Math.max(0, fullHeight - this.sheetMetrics.results);
     const maxTop = Math.max(minTop, fullHeight - this.sheetMetrics.collapsed);
+    // 越界给阻尼而不是硬停（手感上更像「到底了」，松手仍由吸附拉回）；
+    // poi 档只允许下拉（内容矮于上限时不该能往上拽出空白）。
     const projected = mode === "poi"
-      ? this.sheetTouch.startTop + Math.max(0, delta)
-      : clamp(this.sheetTouch.startTop + delta, minTop, maxTop);
-    this.sheetTouch.lastTop = projected;
+      ? state.startTop + Math.max(0, delta)
+      : dampSheetTop(state.startTop + delta, minTop, maxTop);
+    state.lastTop = projected;
     this.sheetY.value = projected;
   },
 
   onSheetTouchEnd(e: any = {}) {
-    if (!this.sheetTouch || !this.sheetMetrics) return;
+    const state = this.sheetTouch;
+    this.sheetTouch = null;
+    if (!state || !this.sheetMetrics) return;
+    // 让给列表滚动的手势：抽屉不动（也不吸附，避免把列表滚动误判成拖拽）
+    if (state.resolved !== "sheet") return;
     const mode = this.data.sheetMode as SheetMode;
     const endY = e.changedTouches?.[0]?.clientY;
     const delta = Number.isFinite(endY)
-      ? Number(endY) - this.sheetTouch.startY
-      : this.sheetTouch.lastTop - this.sheetTouch.startTop;
-    const projectedTop = this.sheetTouch.startTop + delta;
-    this.sheetTouch = null;
+      ? Number(endY) - state.startY
+      : state.lastTop - state.startTop;
+    const velocity = sheetDragVelocity(state.prevSample, state.lastSample);
     if (mode === "poi") {
-      if (delta > SHEET_CLOSE_THRESHOLD_PX) this.closePoi();
+      if (shouldClosePoiOnRelease(delta, velocity)) this.closePoi();
       else this.configureSheet("poi", true);
       return;
     }
-    const projectedHeight = Number(this.data.sheetFullHeight) - projectedTop;
-    this.setSheetMode(snapSheetMode(projectedHeight, this.sheetMetrics));
+    const releasedHeight = Number(this.data.sheetFullHeight) - (state.startTop + delta);
+    const next = snapSheetModeWithVelocity(releasedHeight, velocity, this.sheetMetrics, mode);
+    // 降档（可见带变短）时列表回顶，否则列表停在中间看起来像坏了
+    if (this.sheetMetrics[next] < this.sheetMetrics[mode]) this.resetSheetScroll();
+    this.setSheetMode(next);
   },
 
   onHide() {
@@ -1566,7 +1769,7 @@ Page({
       accuracyMeters: fix.accuracy,
       viewBox: this.viewBoxSize,
     });
-    this.setData({ userLocation: marker });
+    this.setData({ userLocation: marker }, () => this.refreshPinAnimatedStyle());
     if (!focusAfter) return;
     if (!marker) {
       // 定位不在任何校区内（switchCampusForUserFix 已先尝试过跨校区切换）：
@@ -1702,7 +1905,8 @@ Page({
         iconUrl: `/images/poi/${poiRowIconName(poi)}.png`,
       };
     });
-    this.setData({ recents, recentRows });
+    // 列表条数变了 → 溢出情况变（最近查看只一两条时不可滚，此时整卡可拖）
+    this.setData({ recents, recentRows }, () => this.measureSheetScrollable());
   },
 
   onSearchInput(e: any) {
@@ -1812,7 +2016,10 @@ Page({
         .filter((pair) => pair.row && keep(pair.hit.poi));
       this.displayHits = pairs.map((pair) => pair.hit);
       const resultRows = pairs.map((pair) => pair.row);
-      this.setData({ searchHits: resultRows, resultRows, filterRows: [], searchActive: true });
+      this.setData(
+        { searchHits: resultRows, resultRows, filterRows: [], searchActive: true },
+        () => this.measureSheetScrollable(),
+      );
       return;
     }
     if (filters.length > 0 && loaded && campus) {
@@ -1833,16 +2040,22 @@ Page({
         subtitle: poi.kindName ? `${poi.kindName} · ${poi.campusLabel}` : poi.campusLabel,
         iconUrl: `/images/poi/${poiRowIconName(poi)}.png`,
       }));
-      this.setData({
-        searchHits: [],
-        filterRows,
-        resultRows,
-        searchActive: true,
-      });
+      this.setData(
+        {
+          searchHits: [],
+          filterRows,
+          resultRows,
+          searchActive: true,
+        },
+        () => this.measureSheetScrollable(),
+      );
       return;
     }
     this.currentFilterPois = [];
-    this.setData({ filterRows: [], resultRows: [], searchActive: false });
+    this.setData(
+      { filterRows: [], resultRows: [], searchActive: false },
+      () => this.measureSheetScrollable(),
+    );
   },
 
   // ---------------------------------------------------------------------------
@@ -1877,6 +2090,8 @@ Page({
 
   /** 搜索面板「标签筛选」chip：只改筛选/高亮（联动结果列表），不改抽屉档位。 */
   onSearchFilterTap(e: any) {
+    // 整卡拖拽抢到手势时本轮 tap 作废（chip 行落在可拖区，拖完抽屉不该顺手切筛选）
+    if (this.consumeSheetTap()) return;
     this.toggleFilter(String(e.currentTarget.dataset.key));
   },
 
@@ -1934,6 +2149,8 @@ Page({
   },
 
   openResultRow(e: any) {
+    // 拖完卡片松手会在同一手势里派发 tap，抢到手势的那轮要作废（同地图面 tapSuppress）
+    if (this.consumeSheetTap()) return;
     const index = Number(e.currentTarget.dataset.index);
     const row = this.data.resultRows[index] as SearchHitRow | undefined;
     const poi = row ? this.poiByKey.get(row.poiKey) : undefined;
@@ -1995,23 +2212,25 @@ Page({
       items = [];
     }
     this.eventItems = items;
-    this.eventAnchors = items.map((item) => {
+    // 图钉/锚点只给点状「事件位置」；区域/路径靠轮廓 + eventRegionHit 命中（对齐 Web 端）
+    const pinItems = eventMarkerItems(items);
+    this.eventAnchors = pinItems.map((item) => {
       const [x, y] = overlayAnchor(item.geometry);
       return { eventId: item.event.id, x, y };
     });
     const markers: EventMarkerRow[] = this.data.eventsOn
-      ? items.map((item) => {
+      ? pinItems.map((item) => {
         const [x, y] = overlayAnchor(item.geometry);
         return {
           key: item.locationId,
           eventId: item.event.id,
           x,
           y,
-          color: severityColor(item.event.severity),
+          color: eventColor(item.event),
         };
       })
       : [];
-    this.setData({ eventMarkers: markers, eventCount: items.length });
+    this.setData({ eventMarkers: markers, eventCount: items.length }, () => this.refreshPinAnimatedStyle());
     this.applyEventOverlayImage(items);
   },
 
@@ -2028,7 +2247,7 @@ Page({
     const shapes: string[] = [];
     const strokeWidth = Math.max(1.5, this.viewBoxSize.width / 500);
     for (const item of items) {
-      const color = severityColor(item.event.severity);
+      const color = eventColor(item.event);
       const geometry = item.geometry;
       if (geometry.type === "Polygon" || geometry.type === "MultiPolygon") {
         const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
@@ -2096,7 +2315,7 @@ Page({
     this.setData({
       eventSummary: {
         id: event.id,
-        color: severityColor(event.severity),
+        color: eventColor(event),
         severity: event.severity,
         iconUrl: severityIconUrl(event.severity),
         typeLabel: eventTypeLabel(event.eventType),
@@ -2123,7 +2342,7 @@ Page({
       eventDetailOpen: true,
       eventDetail: {
         id: event.id,
-        color: severityColor(event.severity),
+        color: eventColor(event),
         severity: event.severity,
         iconUrl: severityIconUrl(event.severity),
         typeLabel: eventTypeLabel(event.eventType),
@@ -2177,6 +2396,7 @@ Page({
   },
 
   openRecentRow(e: any) {
+    if (this.consumeSheetTap()) return;
     const poi = this.poiByKey.get(String(e.currentTarget.dataset.poiKey));
     if (poi) this.openPoi(poi, null);
   },

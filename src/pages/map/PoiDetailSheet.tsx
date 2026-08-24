@@ -183,8 +183,8 @@ export function PoiDetailSheet({
           </div>
         ) : null}
 
-        {/* 楼宇专属的楼层设施入口。 */}
-        {building.entityType === "building" ? <div className="mt-4">
+        {/* 楼宇专属的楼层设施入口。未录入设施时整节不显示（连同楼层图入口）。 */}
+        {building.entityType === "building" && facilities.length > 0 ? <div className="mt-4">
           <SectionHeader
             title="楼内设施指引"
             action={
@@ -200,7 +200,7 @@ export function PoiDetailSheet({
           ) : null}
           {facilityStatus.status === "loading" && facilities.length > 0 ? (
             <p className="mt-2 text-aux text-sub">正在加载设施实时状态…</p>
-          ) : facilityStatus.status === "ready" && facilities.length > 0 ? (
+          ) : facilityStatus.status === "ready" ? (
             <div className="scrollbar-hidden mt-3 flex gap-4 overflow-x-auto pb-1">
               {facilities.map((facility) => {
                 const Icon = facilityIcon(facility.typeCode);
@@ -216,8 +216,6 @@ export function PoiDetailSheet({
                 );
               })}
             </div>
-          ) : facilities.length === 0 ? (
-            <p className="mt-2 text-aux text-sub">该楼宇的设施信息正在完善中</p>
           ) : null}
         </div> : null}
 
@@ -281,13 +279,9 @@ function PhotoCarousel({
 
   const usable = media.filter((item) => !broken.has(item.url));
 
-  if (usable.length === 0) {
-    return (
-      <div className="mt-4">
-        <div className="grid h-44 w-full place-items-center rounded-xl bg-line/60 text-body text-sub">实拍图</div>
-      </div>
-    );
-  }
+  // 没有可用照片时整块不渲染。以前这里给一个「实拍图」灰底占位：它不承载任何信息，
+  // 只是在每个没配图的地点详情顶部占掉 176px，把摘要与信息行整体压到首屏之外。
+  if (usable.length === 0) return null;
 
   const current = Math.min(page, usable.length - 1);
 

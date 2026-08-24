@@ -85,3 +85,23 @@ test("a stop without its own anchor falls back to the bound place on both client
     assert.match(source, /navigation\.get\(`transit_stop:\$\{stop\.id\}`\)\s*\?\? \(stop\.place_id \? navigation\.get\(`place:\$\{stop\.place_id\}`\) : undefined\)/, file);
   }
 });
+
+test("stop marker size ships only when non-standard and is consumed on both clients", () => {
+  // 0026：站点没有 content 通道，图钉系数落 transit_stops.marker_size 列；
+  // 0027 起是 0.5~2.0 连续值。旧版客户端对 stops 是 exactObject 白名单，标准系数绝不能进 manifest。
+  const releases = read("worker/modules/releases.ts");
+  assert.match(releases, /scale !== 1/, "装配时必须剥掉标准系数");
+  assert.match(releases, /select id,place_id,campus_id,code,name,status,marker_size/, "候选查询要带出系数列");
+
+  for (const contract of ["src/lib/release/manifestContract.ts", "miniprogram/miniprogram/lib/release/manifestContract.ts"]) {
+    const source = read(contract);
+    assert.match(source, /\["marker_size"\]/, `${contract} 应把 marker_size 列为可选键`);
+  }
+  assert.match(read("src/lib/release/mapData.ts"), /stop\.marker_size \?\? 1/, "Web 端应消费站点系数");
+  assert.match(read("miniprogram/miniprogram/lib/release/mapData.ts"), /stop\.marker_size \?\? 1/, "小程序端应消费站点系数");
+
+  const transit = read("worker/modules/transit.ts");
+  assert.match(transit, /parseStopMarkerScale/, "站点读写接口要按连续系数校验 markerSize");
+  const page = read("src/admin/pages/TransitPage.tsx");
+  assert.match(page, /MarkerScaleField/, "站点编辑器应复用统一滑杆控件");
+});

@@ -175,6 +175,18 @@ test("only entities outside buildings become independent campus-map POIs", () =>
   ]);
 });
 
+test("admin marker tier flows from content.marker.size into each poi", () => {
+  const value = manifest();
+  value.places[1].content.marker = { size: 1.2 };
+  value.facilities[0].content = { marker: { size: "small" } };
+  value.merchants[0].content = { marker: { size: "huge" } };
+  const pois = buildMapPointPois(value, [campus]);
+  const byKey = new Map(pois.map((poi) => [poi.poiKey, poi]));
+  assert.ok(Math.abs(byKey.get("place:place_free").markerScale - 1.2) < 1e-9, "0027 起连续系数直读");
+  assert.ok(Math.abs(byKey.get("facility:facility_free").markerScale - 0.72) < 1e-9, "存量三档 small 按原系数读出");
+  assert.equal(byKey.get("merchant:merchant_free").markerScale, 1, "未知档位回落标准");
+});
+
 test("facility marker icon, filter, and visibility policy come from published dictionaries", () => {
   const poi = buildMapPointPois(manifest(), [campus]).find((item) => item.poiKey === "facility:facility_free");
   assert.ok(poi);
@@ -324,10 +336,34 @@ test("a shuttle stop with its own anchor becomes an independent pin", () => {
   assert.equal(poi.campusKey, "baoshan");
   // 站点不走修订流，没有修订号；供稿页据此判空。
   assert.equal(poi.revisionId, null);
+  assert.equal(poi.markerScale, 1, "未输出 marker_size 时图钉为标准档");
   assert.deepEqual(poi.detail.facts, [
     { label: "站点代码", value: "N1" },
     { label: "候车点", value: "北门东侧" },
   ]);
+});
+
+test("a shuttle stop marker tier comes from the manifest marker_size column", () => {
+  const value = manifest();
+  value.transit.stops.push({ ...stop(), marker_size: "large" });
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.ok(Math.abs(poi.markerScale - 1.35) < 1e-9, "存量 large 档 = 1.35");
+});
+
+test("a shuttle stop marker scale accepts continuous values", () => {
+  // 0027：marker_size 从三档枚举改为 0.5~2.0 连续系数。
+  const value = manifest();
+  value.transit.stops.push({ ...stop(), marker_size: 1.2 });
+  value.locations.push(location("transit_stop", "stop_gate", "point_stop_gate", {
+    role: "boarding_point",
+    geometry_json: '{"type":"Point","coordinates":[60,70]}',
+  }));
+  const poi = buildMapPointPois(value, [campus]).find((item) => item.poiKey === "transit_stop:stop_gate");
+  assert.ok(Math.abs(poi.markerScale - 1.2) < 1e-9, "连续系数直读 = 1.2");
 });
 
 test("a stop without a marked anchor produces no pin", () => {

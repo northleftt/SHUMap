@@ -18,6 +18,7 @@
     "worker:dev": "npm run build && npx wrangler dev",
     "preview": "vite preview",
     "pick:coords": "node scripts/pick_coords_playwright.js",
+    "transit:sample": "node scripts/run_travel_time_sampling.mjs",
     "test": "npm run test:unit && npm run test:schema && npm run test:migrations && npm run test:split && npm run test:guide-icons",
     "test:unit": "node --test tests/*.test.mjs",
     "test:schema": "node scripts/validate_v2_schema.mjs",

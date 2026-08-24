@@ -139,7 +139,9 @@ test("no canvas shape falls back to a raw viewBox width baseline", () => {
 test("the public map overlay is already container-only and stays that way", () => {
   // 前台图钉走 markerUnit(viewWindow)：viewWindow 由屏幕窗口换算，与 viewBox 尺寸
   // 无关，所以三校区本来就同样大——别为了「对齐」把它改成吃 viewBox。
-  const markerScale = read("src/lib/map/markerScale.ts");
-  assert.match(markerScale, /Math\.min\(view\.width, view\.height\)/);
-  assert.doesNotMatch(markerScale, /viewBox/, "前台基准不应引入 viewBox 尺寸");
+  // 纯逻辑在 markerTiers.ts（无 React，release 装配与 node 单测直接引用）；
+  // markerScale.ts 只剩用户档位 hook。
+  const markerTiers = read("src/lib/map/markerTiers.ts");
+  assert.match(markerTiers, /Math\.min\(view\.width, view\.height\)/);
+  assert.doesNotMatch(markerTiers, /viewBox/, "前台基准不应引入 viewBox 尺寸");
 });

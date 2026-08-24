@@ -467,7 +467,7 @@ const content = guide.normalizeGuideContent(fixture.content);
 }
 
 // ---------------------------------------------------------------------------
-// 9. 源码断言：app.json 注册 + openGuide 改跳原生页（webview 保留给预约乘车）
+// 9. 源码断言：app.json 注册 + openGuide 改跳原生页（不再借 webview 容器）
 // ---------------------------------------------------------------------------
 {
   const app = JSON.parse(readFileSync(join(repoRoot, "miniprogram/miniprogram/app.json"), "utf8"));

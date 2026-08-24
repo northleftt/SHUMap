@@ -101,6 +101,7 @@ test("listMapImportJobs returns parsed payload fields and joined file name", asy
     mediaAssetId: "media_a",
     fileName: "宝山校区.svg",
     anchorReview: [],
+    anchorAutoMigrated: [],
     createdAt: now,
     startedAt: now,
     finishedAt: now,
@@ -151,6 +152,9 @@ test("listMapImportJobs parses anchorReview from succeeded job result", async ()
         { anchorId: "anchor_1", role: "primary_display", entityType: "facility", entityId: "facility_1", entityName: "饮水点" },
         { broken: true },
       ],
+      anchorAutoMigrated: [
+        { anchorId: "anchor_2", role: "boarding_point", entityType: "transit_stop", entityId: "stop_1", entityName: "北门" },
+      ],
     }),
     now,
   );
@@ -160,6 +164,9 @@ test("listMapImportJobs parses anchorReview from succeeded job result", async ()
   assert.deepEqual(items[0].anchorReview, [
     { anchorId: "anchor_1", role: "primary_display", entityType: "facility", entityId: "facility_1", entityName: "饮水点" },
     { anchorId: null, role: null, entityType: null, entityId: null, entityName: null },
+  ]);
+  assert.deepEqual(items[0].anchorAutoMigrated, [
+    { anchorId: "anchor_2", role: "boarding_point", entityType: "transit_stop", entityId: "stop_1", entityName: "北门" },
   ]);
   database.close();
 });

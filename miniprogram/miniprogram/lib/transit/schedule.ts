@@ -10,6 +10,15 @@
 //
 // 预约与否是线路级属性（CampusLine.bookingPolicy）；时刻网格按发车时刻把
 // 预/非班次合并成一格展示（旧版 mergeSchedulesByTime 语义）。
+//
+// 日型（工作日/周末/假日/寒暑假）**在线时由服务端按管理端的服务日历给出**
+// （CampusLinesResponse.dayType）。本文件仍保留 getCurrentDateBucket 的本地算法，
+// 但它**只服务离线快照**：快照按日型分桶存时刻（snapshotCampusLines），断网时没有
+// 服务端可问，只能本地判。Web 端不需要这个回退，所以那边已经完全删掉了本地算法。
+//
+// 本地算法的数据源 data/academic-calendar 是 2026-03-11 提交 1ee1733 手写的草稿
+// （无生成脚本、worker 侧零引用、假日只列到 2026-06-19），所以它天生会过期——
+// 这也正是在线路径不能再用它的原因。离线时宁可标签不准，也要有个时刻表可看。
 
 import { apiGet } from "../api";
 import academicCalendarData from "../../data/academic-calendar";
@@ -18,18 +27,27 @@ import type {
   CampusJourney,
   CampusLine,
   CampusLinesResponse,
+  PublicDayType,
   ReleaseNavigationLocation,
   ReleaseTransitManifest,
   TransitStop,
 } from "./types";
 
+/**
+ * 站点的 GCJ-02 导航终点（唤起第三方地图用）。
+ *
+ * 刻意**不看 isPrimary**：一个实体的 primary 名额只有一个，站点那一个被候车点
+ * （boarding_point，svg 画布坐标）占着，所以 navigation_target 行必然是
+ * isPrimary=0。旧实现要求 isPrimary===1，于是 11 个站点无一命中——预览时间线上
+ * 的「导航」入口从来没出现过。发布层保证同一实体的 navigation_target 唯一
+ * （src/lib/release/mapData.ts 会对重复直接报契约错误），因此不必再排序取优。
+ */
 export function navigationPointForStop(
   stop: TransitStop,
   locations: ReleaseNavigationLocation[],
 ): TransitStop["navigationPoint"] {
   const location = locations.find((item) =>
     item.role === "navigation_target"
-    && item.isPrimary === 1
     && (
       (item.entityType === "transit_stop" && item.entityId === stop.id)
       || (Boolean(stop.place_id) && item.entityType === "place" && item.entityId === stop.place_id)
@@ -52,6 +70,34 @@ export function navigationPointForStop(
   } catch {
     return null;
   }
+}
+
+/**
+ * 站点在地图上的 POI 键，没上图时返回 null。
+ *
+ * 发布层给每个「有画布点位」的站点造一枚 `transit_stop:<id>` 的 POI：自己标了
+ * 候车点就用它，否则借绑定地点的点位（见 lib/release/mapData.ts）。所以地图深链
+ * 的键一律是 `transit_stop:<id>`，与站点有没有绑地点无关。
+ *
+ * 这里判「有没有上图」必须跟发布层同一条规则（svg_viewbox 画布点），不能只看
+ * `place_id`：11 个站点里只有嘉定北门绑了地点，其余 10 个 place_id 都是 null，
+ * 旧实现于是回落到 `campus:<id>` —— 那个深链只切校区、不开详情，正是「点了上下车点
+ * 回到地图却没打开 POI」的原因。而陈太公寓只有 GCJ02 坐标、没有画布点位，
+ * 确实没有 POI 可开，这里如实返回 null，让调用方不要给出可点入口。
+ */
+export function mapPoiKeyForStop(
+  stop: TransitStop,
+  locations: ReleaseNavigationLocation[],
+): string | null {
+  const hasCanvasPoint = (entityType: string, entityId: string): boolean =>
+    locations.some((item) =>
+      item.entityType === entityType
+      && item.entityId === entityId
+      && item.geometry_type === "Point"
+      && item.crs === "svg_viewbox");
+  if (hasCanvasPoint("transit_stop", stop.id)) return `transit_stop:${stop.id}`;
+  if (stop.place_id && hasCanvasPoint("place", stop.place_id)) return `transit_stop:${stop.id}`;
+  return null;
 }
 
 export type DateBucket = "weekday" | "weekend" | "holiday" | "winterBreak" | "summerBreak";
@@ -116,12 +162,22 @@ export function getCurrentDateBucket(date: Date = new Date()): DateBucket {
   return date.getDay() === 0 || date.getDay() === 6 ? "weekend" : "weekday";
 }
 
+/** 离线快照分桶名 → 中文标签（断网时用；在线走 DAY_TYPE_LABELS）。 */
 export const BUCKET_LABELS: Record<DateBucket, string> = {
   weekday: "工作日",
   weekend: "周末",
   holiday: "假日",
   winterBreak: "寒假",
   summerBreak: "暑假",
+};
+
+/** 服务端日型 → 中文标签。键与 0025 迁移的 day_type 枚举一致。 */
+export const DAY_TYPE_LABELS: Record<PublicDayType, string> = {
+  weekday: "工作日",
+  weekend: "周末",
+  holiday: "假日",
+  winter_break: "寒假",
+  summer_break: "暑假",
 };
 
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -292,6 +348,20 @@ export function flattenLineJourneys(lines: CampusLine[]): FlatLineJourney[] {
   return flat.sort((a, b) => parseTime(a.departureTime) - parseTime(b.departureTime));
 }
 
+/**
+ * 某个发车时刻的全部班次，非预约在前、预约在后。
+ *
+ * 时刻网格把同一时刻的预约与非预约班次合并成一格（见 mergeSchedulesByTime），
+ * 所以点开这一格必须把两班都给出来。以前这里是 `find(...)`，只返回先命中的那一班
+ * ——摊平顺序里非预约常在前，于是「预 非」那一格点开永远只看到非预约车，
+ * 另一半信息在界面上没有任何入口。与 Web 端 src/lib/transit/schedule.ts 同式。
+ */
+export function journeysAtTime(journeys: FlatLineJourney[], departureTime: string): FlatLineJourney[] {
+  return journeys
+    .filter((item) => item.departureTime === departureTime)
+    .sort((left, right) => Number(left.isReservation) - Number(right.isReservation));
+}
+
 /** 同一时刻可能既有预约又有非预约班次 — 合并成一个时刻格（旧版时刻网格语义）。 */
 export type ScheduleStatus = "reservation" | "nonReservation" | "mixed";
 
@@ -455,7 +525,7 @@ export function snapshotCampusLines(fromEndpointId: string, toEndpointId: string
 }
 
 /**
- * 端点列表：优先 release manifest（站点带 place_id，上下车点可跳地图），
+ * 端点列表：优先 release manifest（站点带画布点位，上下车点可跳地图），
  * 接口失败时退化为快照里的端点集合（stops 为空，地图深链不可用）。
  */
 export async function loadTransitEndpoints(): Promise<{
@@ -473,6 +543,7 @@ export async function loadTransitEndpoints(): Promise<{
         stops: manifest.transit.stops.map((stop) => ({
           ...stop,
           navigationPoint: navigationPointForStop(stop, locations),
+          mapPoiKey: mapPoiKeyForStop(stop, locations),
         })),
         source: "api",
       };
@@ -491,13 +562,20 @@ export async function fetchCampusLinesWithFallback(
   fromEndpoint: TransitEndpoint,
   toEndpoint: TransitEndpoint,
   date: Date,
-): Promise<{ lines: CampusLine[]; source: ScheduleSource }> {
+): Promise<{ lines: CampusLine[]; source: ScheduleSource; dayTypeLabel: string }> {
   try {
     const response = await fetchCampusLines(fromEndpoint.id, toEndpoint.id, date);
-    return { lines: response.lines, source: "api" };
+    // 在线：日型由服务端按管理端的服务日历给出。老版本服务端不带这个字段，
+    // 此时回落到本地分桶（?? 分支），不让标签整块消失。
+    return {
+      lines: response.lines,
+      source: "api",
+      dayTypeLabel: DAY_TYPE_LABELS[response.dayType] ?? BUCKET_LABELS[getCurrentDateBucket(date)],
+    };
   } catch {
     const fallback = snapshotCampusLines(fromEndpoint.id, toEndpoint.id, date);
     if (fallback === null) throw new Error("离线数据中没有这条线路");
-    return { lines: fallback, source: "snapshot" };
+    // 离线：没有服务端可问，只能本地判（数据源是那份会过期的草稿，见文件头）。
+    return { lines: fallback, source: "snapshot", dayTypeLabel: BUCKET_LABELS[getCurrentDateBucket(date)] };
   }
 }

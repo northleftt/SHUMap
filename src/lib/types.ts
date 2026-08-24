@@ -126,6 +126,8 @@ export interface MapPoi {
   sourceElementId: string | null;
   markerPoint: MapPoiPoint | null;
   markerIconKey: string | null;
+  /** 管理端在 content.marker.size 定的图钉大小系数；缺省 1（标准档）。 */
+  markerScale: number;
   name: string;
   campusKey: CampusKey;
   campusLabel: string;

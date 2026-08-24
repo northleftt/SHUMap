@@ -1,6 +1,7 @@
 node_modules/
 dist/
 tmp/
+tmp_pdf_edit/
 output/
 tests/.cache/
 __pycache__/

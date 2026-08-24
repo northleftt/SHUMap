@@ -1,0 +1,143 @@
+/* 校车乘坐指南。配色对齐校车页（shuttle.wxss）与 Web 端 src/index.css 的设计令牌。
+   单位 rpx，与校车页一致（返校指南那页用 px 是因为它对齐网页版的像素稿）。 */
+
+page {
+  height: 100%;
+  background: #f5f6f8;
+}
+
+.page {
+  height: 100%;
+}
+
+/* ══════════════ 状态块 ══════════════ */
+.state {
+  margin: 48rpx 40rpx;
+  padding: 96rpx 40rpx;
+  text-align: center;
+  font-size: 28rpx;
+  line-height: 42rpx;
+  color: #94a3b8;
+  background: #ffffff;
+  border-radius: 28rpx;
+}
+
+.state-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #334155;
+}
+
+.state-sub {
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  color: #64748b;
+}
+
+.state-retry {
+  display: inline-block;
+  margin-top: 28rpx;
+  padding: 12rpx 40rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #ffffff;
+  background: #1e80c1;
+  border-radius: 999rpx;
+}
+
+/* ══════════════ 正文 ══════════════ */
+.article {
+  padding: 0 40rpx;
+}
+
+.header {
+  padding: 48rpx 0 8rpx;
+}
+
+.header-title {
+  display: block;
+  font-size: 44rpx;
+  font-weight: 600;
+  line-height: 60rpx;
+  color: #0f172a;
+}
+
+.header-subtitle {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 28rpx;
+  line-height: 42rpx;
+  color: #64748b;
+}
+
+/* 小标题。上边距比段落大，用来分段——正文里唯一的层级信号。 */
+.block-heading {
+  margin-top: 48rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  line-height: 46rpx;
+  color: #0f172a;
+}
+
+.block-paragraph {
+  margin-top: 24rpx;
+  font-size: 28rpx;
+  line-height: 48rpx;
+  color: #334155;
+}
+
+.block-list {
+  margin-top: 24rpx;
+}
+
+.list-row {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  margin-top: 16rpx;
+}
+
+.list-row:first-child {
+  margin-top: 0;
+}
+
+/* 圆点与首行文字的基线对齐：行高 48rpx，点直径 10rpx，(48-10)/2 = 19rpx */
+.list-dot {
+  flex: none;
+  width: 10rpx;
+  height: 10rpx;
+  margin: 19rpx 20rpx 0 8rpx;
+  border-radius: 50%;
+  background: #1e80c1;
+}
+
+.list-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 28rpx;
+  line-height: 48rpx;
+  color: #334155;
+}
+
+.block-image {
+  margin-top: 32rpx;
+}
+
+/* mode="widthFix" 按原图比例定高，不裁切也不留白 */
+.figure {
+  width: 100%;
+  border-radius: 20rpx;
+  background: #ffffff;
+}
+
+.figure-caption {
+  margin-top: 12rpx;
+  font-size: 24rpx;
+  line-height: 36rpx;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.footer-space {
+  height: 80rpx;
+}

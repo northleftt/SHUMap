@@ -39,6 +39,8 @@ export interface OperationalEvent {
   id: string;
   eventType: EventType;
   severity: EventSeverity;
+  /** 地图标注颜色（#rrggbb）；null = 按 severity 默认色。 */
+  color: string | null;
   operationalStatus: EventOperationalStatus;
   title: string;
   description: string | null;
@@ -104,6 +106,7 @@ function parseEvent(value: unknown, index: number): OperationalEvent {
     id: requireString(raw.id, `${field}.id`),
     eventType,
     severity,
+    color: optionalString(raw.color, `${field}.color`),
     operationalStatus,
     title: requireString(raw.title, `${field}.title`),
     description: optionalString(raw.description, `${field}.description`),
@@ -201,6 +204,15 @@ export function overlayAnchor(geometry: GeoGeometry): GeoPosition {
   return centroid(geometry.coordinates[0][0]);
 }
 
+/**
+ * 出「!」图钉的 overlay item 子集：只有点状「事件位置」出图钉。
+ * 影响区域/绕行路径本身已是完整图形（且整块可点，eventRegionHit），
+ * 再叠一个质心图钉只是噪音——对齐 Web 端 MapEventOverlay 的渲染口径。
+ */
+export function eventMarkerItems(items: EventOverlayItem[]): EventOverlayItem[] {
+  return items.filter((item) => item.geometry.type === "Point");
+}
+
 /** 射线法点在环内（偶奇规则；Polygon 的外环+洞逐环翻转即标准含洞判定）。 */
 function pointInRing(point: GeoPosition, ring: GeoPosition[]): boolean {
   let inside = false;
@@ -273,6 +285,11 @@ export const SEVERITY_COLORS: Record<EventSeverity, string> = {
 
 export function severityColor(severity: EventSeverity): string {
   return SEVERITY_COLORS[severity];
+}
+
+/** 事件标注颜色：管理端可自选（#rrggbb），未设置时按 severity 默认色（同 Web 端）。 */
+export function eventColor(event: Pick<OperationalEvent, "severity" | "color">): string {
+  return event.color ?? severityColor(event.severity);
 }
 
 export function eventTypeLabel(eventType: EventType): string {

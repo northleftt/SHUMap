@@ -153,6 +153,8 @@ export interface TransitStop {
   code: string | null;
   name: string;
   status: "active";
+  /** 管理端图钉系数（0026 三档 / 0027 起 0.5~2.0 连续值）；标准系数不进 manifest，缺省即 1。 */
+  marker_size?: number;
   created_at: string;
   updated_at: string;
 }
@@ -325,6 +327,8 @@ export interface MapPoi {
   sourceElementId: string | null;
   markerPoint: MapPoiPoint | null;
   markerIconKey: string | null;
+  /** 管理端在 content.marker.size 定的图钉大小系数；缺省 1（标准档）。 */
+  markerScale: number;
   name: string;
   campusKey: CampusKey;
   campusLabel: string;

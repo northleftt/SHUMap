@@ -315,10 +315,22 @@ export interface CampusMapCanvasOptions {
   enabled?: boolean;
   /** 只读：底图与已完成图形照常显示，但不能再画。 */
   disabled?: boolean;
+  /**
+   * 额外已完成的图形（只读展示，不可编辑）。给「同一事件挂多个区域/路径」这类
+   * 调用方用：画完一个形状就追加到 extras 并清空画布槽位，地图上仍能看到存量。
+   */
+  extras?: readonly CanvasExtraShape[];
   /** 已完成图形在清单与状态行里的称呼，如「事件位置」。 */
   labels?: Partial<Record<CanvasTool, string>>;
   /** 拼在空闲状态行开头的工具栏方位，如「在左侧」。 */
   toolsHint?: string;
+}
+
+/** extras 里的一条只读图形；point 的 verts 只有一个顶点。 */
+export interface CanvasExtraShape {
+  key: string;
+  tool: CanvasTool;
+  verts: CanvasVert[];
 }
 
 export interface CampusMapCanvasState {
@@ -338,6 +350,8 @@ export interface CampusMapCanvasState {
   draftReady: boolean;
   /** 与当前校区一致的已完成几何；不一致时为 null。 */
   geometry: CanvasGeometry | null;
+  /** 调用方托管的额外只读图形（随底图同坐标系渲染）。 */
+  extras: readonly CanvasExtraShape[];
   statusText: string;
   viewBox: { x: number; y: number; w: number; h: number } | null;
   unit: number;
@@ -376,6 +390,7 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
     mapVersions,
     enabled = true,
     disabled = false,
+    extras = [],
     toolsHint = "",
   } = options;
   const labels: Record<CanvasTool, string> = { point: "位置", area: "区域", path: "路径", ...options.labels };
@@ -661,6 +676,7 @@ export function useCampusMapCanvas(options: CampusMapCanvasOptions): CampusMapCa
     drafting,
     draftReady,
     geometry,
+    extras,
     statusText,
     viewBox: vb,
     unit: (unitBase ?? 0) / 40,
@@ -850,6 +866,45 @@ function CampusMapCanvasSurface({
           preserveAspectRatio="xMidYMid meet"
           viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`}
         >
+          {/* 调用方托管的存量图形（只读，略淡；多区域/多路径事件的已存部分） */}
+          {canvas.extras.map((extra) => {
+            if (extra.tool === "point") {
+              const [x, y] = extra.verts[0];
+              return (
+                <g key={extra.key} opacity={0.75}>
+                  <circle cx={x} cy={y} r={base / 90} fill={POINT_COLOR} opacity={0.25} />
+                  <circle cx={x} cy={y} r={base / 200} fill={POINT_COLOR} stroke="#fff" strokeWidth={base / 500} />
+                </g>
+              );
+            }
+            if (extra.tool === "area") {
+              return (
+                <polygon
+                  key={extra.key}
+                  points={extra.verts.map(([x, y]) => `${x},${y}`).join(" ")}
+                  fill={AREA_COLOR}
+                  fillOpacity={0.1}
+                  stroke={AREA_COLOR}
+                  strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
+                  strokeWidth={unit * 0.09}
+                  opacity={0.8}
+                />
+              );
+            }
+            return (
+              <polyline
+                key={extra.key}
+                fill="none"
+                points={extra.verts.map(([x, y]) => `${x},${y}`).join(" ")}
+                stroke={PATH_COLOR}
+                strokeDasharray={`${unit * 0.35} ${unit * 0.25}`}
+                strokeLinecap="round"
+                strokeWidth={unit * 0.12}
+                opacity={0.8}
+              />
+            );
+          })}
+
           {/* 已完成：区域 */}
           {geometry?.area ? (
             <g>

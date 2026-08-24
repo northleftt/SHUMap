@@ -22,9 +22,25 @@ import type {
 } from "./types";
 import { NAVIGATION_CRS } from "../revision-contract";
 
-function exactObject(value: unknown, field: string, fields: readonly string[]): Record<string, unknown> {
+// 图钉系数解析（与 src/lib/map/markerTiers.ts 同口径）：0.5~2.0 连续值；
+// 0026 的三档字符串存量按原系数读出；缺省/非法一律回落 1。
+const LEGACY_MARKER_SCALES: Record<string, number> = { small: 0.72, standard: 1, large: 1.35 };
+
+export function markerScaleValue(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.min(2, Math.max(0.5, value));
+  if (typeof value === "string") {
+    const legacy = LEGACY_MARKER_SCALES[value];
+    if (legacy !== undefined) return legacy;
+    const trimmed = value.trim();
+    const parsed = trimmed === "" ? NaN : Number(trimmed);
+    if (Number.isFinite(parsed)) return Math.min(2, Math.max(0.5, parsed));
+  }
+  return 1;
+}
+
+function exactObject(value: unknown, field: string, fields: readonly string[], optionalFields: readonly string[] = []): Record<string, unknown> {
   const record = objectValue(value, field);
-  const allowed = new Set(fields);
+  const allowed = new Set([...fields, ...optionalFields]);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) throw new Error(`${field}.${key} is not supported`);
   }
@@ -329,7 +345,9 @@ function location(value: unknown, field: string): ReleaseLocation {
 }
 
 function transitStop(value: unknown, field: string): TransitStop {
-  const row = exactObject(value, field, ["id", "place_id", "campus_id", "code", "name", "status", "created_at", "updated_at"]);
+  // marker_size 可选：worker 只在非标准系数（≠1）才输出它（旧版客户端的白名单不认识
+  // 这个键），缺失即 1。0027 起是 0.5~2.0 连续系数；0026 的三档字符串仍按原系数读出。
+  const row = exactObject(value, field, ["id", "place_id", "campus_id", "code", "name", "status", "created_at", "updated_at"], ["marker_size"]);
   return {
     id: requiredString(row.id, `${field}.id`),
     place_id: nullableString(row.place_id, `${field}.place_id`),
@@ -337,6 +355,9 @@ function transitStop(value: unknown, field: string): TransitStop {
     code: nullableString(row.code, `${field}.code`),
     name: requiredString(row.name, `${field}.name`),
     status: oneOf(row.status, `${field}.status`, ["active"] as const),
+    ...(Object.hasOwn(row, "marker_size")
+      ? { marker_size: markerScaleValue(row.marker_size) }
+      : {}),
     created_at: requiredString(row.created_at, `${field}.created_at`),
     updated_at: requiredString(row.updated_at, `${field}.updated_at`),
   };

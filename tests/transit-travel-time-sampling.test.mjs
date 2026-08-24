@@ -982,3 +982,57 @@ test("scopeSegmentMedians 只取本 pattern 本发车时刻的段", () => {
   const scoped = scopeSegmentMedians(medians, "pat_a", "07:00");
   assert.deepEqual([...scoped.entries()].sort(), [["0|1", 600], ["1|2", 700]]);
 });
+
+// ---------------------------------------------------------------------------
+// 脏发车时刻：防线只在代码的正则上，不能指望 SQLite CHECK
+// ---------------------------------------------------------------------------
+
+test("非法发车时刻被跳过，不产生调用也不落库（线上真有这种行）", () => {
+  // 生产库 transit_stop_times 里实测有两行 departure_time 是 '测试:00' 与
+  // '00000:00'（宝山→延长（预约）的两个班次，status='active'）。它们从管理端
+  // 录进去的，后端当时没拦。采样必须安静跳过而不是拿它去问 provider。
+  for (const dirty of ["测试:00", "00000:00", "7:00", "", "25:00", "07:60"]) {
+    assert.equal(
+      nextServiceInstant(dirty, [0, 1, 2, 3, 4, 5, 6], new Date("2026-08-20T00:00:00Z")),
+      null,
+      `${dirty} 必须被跳过`,
+    );
+    assert.equal(addSecondsToTimeOfDay(dirty, 600), null, `${dirty} 不该算出到达时刻`);
+  }
+});
+
+test("脏值区间不占用单轮调用次数（否则挤掉合法区间）", () => {
+  const segments = [
+    {
+      patternId: "pat_dirty", fromStopSequence: 0, toStopSequence: 1, departureTime: "测试:00",
+      fromStopId: "stop_a", toStopId: "stop_b", serviceDays: [0, 1, 2, 3, 4, 5, 6],
+    },
+    {
+      patternId: "pat_ok", fromStopSequence: 0, toStopSequence: 1, departureTime: "07:00",
+      fromStopId: "stop_a", toStopId: "stop_b", serviceDays: [0, 1, 2, 3, 4, 5, 6],
+    },
+  ];
+  const calls = planSampleCalls(segments, new Map(), new Date("2026-08-20T00:00:00Z"));
+  assert.equal(calls.length, 1, "只有合法那条该产生调用");
+  assert.equal(calls[0].departureTime, "07:00");
+});
+
+test("样本表的 CHECK 拦不住全部脏值（`_` 匹配任意单字符），所以代码守卫是唯一防线", () => {
+  // like '__:__' 是按「字符数」匹配的，'测试:00' 正好 5 个字符也能过。
+  // 这条测试存在的意义是：不要因为迁移里有 CHECK 就把代码里的正则删掉。
+  const sqlite = seedCampusNetwork(migrated());
+  const insert = (departureTime) => sqlite.prepare(
+    `insert into transit_travel_time_samples(
+       id,pattern_id,from_stop_sequence,to_stop_sequence,departure_time,departure_at,duration_seconds,provider,sampled_at
+     ) values(?,'pat_bs-yc',0,1,?,?,1300,?,?)`,
+  ).run(`tts_${Math.random().toString(36).slice(2)}`, departureTime, NOW_ISO, PROVIDER, NOW_ISO);
+  // 字符数不对的被 CHECK 拦住
+  assert.throws(() => insert("00000:00"), /CHECK|constraint/i);
+  // 字符数正好 5 的非法值 CHECK 放行 —— 记录这个事实
+  insert("测试:00");
+  assert.equal(
+    sqlite.prepare("select count(*) as n from transit_travel_time_samples where departure_time='测试:00'").get().n,
+    1,
+    "CHECK 放过了这个值：代码侧的正则守卫不能删",
+  );
+});

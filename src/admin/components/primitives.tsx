@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, subscribeAdminDataChanged } from "../../lib/api/client";
+import { MARKER_SCALE_MAX, MARKER_SCALE_MIN, MARKER_SCALE_STEP } from "../../lib/map/markerTiers";
 
 // ---------------------------------------------------------------------------
 // 管理后台共享原语（v2 设计令牌版）。色调规范与移动端一致：
@@ -171,18 +172,21 @@ export function TextArea({
   onChange,
   placeholder,
   rows = 3,
+  disabled,
 }: {
   label?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   rows?: number;
+  disabled?: boolean;
 }) {
   return (
     <label className="block">
       {label ? <span className="mb-1.5 block text-label text-sub">{label}</span> : null}
       <textarea
-        className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-body text-ink outline-none placeholder:text-sub focus:border-primary"
+        className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-body text-ink outline-none placeholder:text-sub focus:border-primary disabled:opacity-60"
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
@@ -366,4 +370,36 @@ export function useAsyncData<T>(loader: (signal: AbortSignal) => Promise<T>, dep
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, nonce]);
   return { state, reload };
+}
+
+/** 图钉大小滑杆：0.5~2.0 连续系数（步进 0.05），1 = 标准。 */
+export function MarkerScaleField({
+  label = "地图图标大小",
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label?: string;
+  value: number;
+  onChange: (value: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 flex items-baseline justify-between text-label text-sub">
+        <span>{label}</span>
+        <span className="text-ink">{Math.round(value * 100)}%{value === 1 ? "（标准）" : ""}</span>
+      </span>
+      <input
+        className="w-full accent-primary disabled:cursor-not-allowed"
+        disabled={disabled}
+        max={MARKER_SCALE_MAX}
+        min={MARKER_SCALE_MIN}
+        onChange={(e) => onChange(Number(e.target.value))}
+        step={MARKER_SCALE_STEP}
+        type="range"
+        value={value}
+      />
+    </label>
+  );
 }

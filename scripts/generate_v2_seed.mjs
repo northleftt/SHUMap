@@ -31,6 +31,18 @@ const CALENDAR_NAMES = new Map([
   ["summerBreak", "暑假"],
 ]);
 const SHUTTLE_BUCKETS = ["weekday", "weekend", "holiday", "winterBreak", "summerBreak"];
+/**
+ * bucket → service_calendars.day_type（0025 迁移）。客户端的「今天是工作日 / 假日……」
+ * 标签读这一列（worker 的 resolveDayType），列名用下划线，和这里的 camelCase bucket
+ * 不是同一套写法，所以要显式映射而不是直接塞 bucket。
+ */
+const CALENDAR_DAY_TYPES = new Map([
+  ["weekday", "weekday"],
+  ["weekend", "weekend"],
+  ["holiday", "holiday"],
+  ["winterBreak", "winter_break"],
+  ["summerBreak", "summer_break"],
+]);
 
 const campusOf = (name) => {
   const campus = CAMPUS_IDS.get(name);
@@ -251,7 +263,9 @@ for (const [routeIndex, route] of shuttle.routes.entries()) {
       if (!calendarName) throw new Error(`Unknown shuttle calendar bucket: ${bucket}`);
       const weekday = bucket === "weekday";
       const weekend = bucket === "weekend";
-      lines.push(`insert or ignore into service_calendars(id,name,timezone,valid_from,valid_to,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id) values(${q(calendarId)},${q(`${academicYear} ${calendarName}`)},'Asia/Shanghai','2025-01-01','2026-12-31',${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekend ? 1 : 0},${weekend ? 1 : 0},'source_academic_calendar');`);
+      const dayType = CALENDAR_DAY_TYPES.get(bucket);
+      if (!dayType) throw new Error(`Unknown shuttle calendar bucket: ${bucket}`);
+      lines.push(`insert or ignore into service_calendars(id,name,timezone,valid_from,valid_to,day_type,monday,tuesday,wednesday,thursday,friday,saturday,sunday,source_id) values(${q(calendarId)},${q(`${academicYear} ${calendarName}`)},'Asia/Shanghai','2025-01-01','2026-12-31',${q(dayType)},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekday ? 1 : 0},${weekend ? 1 : 0},${weekend ? 1 : 0},'source_academic_calendar');`);
       for (const [tripIndex, departure] of departures.entries()) {
         if (departure.isReservation !== reservation) continue;
         const tripId = `trip_${slug(route.id)}${suffix}_${bucket}_${tripIndex + 1}`;

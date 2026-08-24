@@ -78,10 +78,6 @@ Page({
     wx.switchTab({ url: "/pages/map/map" });
   },
 
-  openDebug() {
-    wx.navigateTo({ url: "/pages/debug/debug" });
-  },
-
   openFeedback() {
     wx.navigateTo({ url: "/pages/feedback/feedback" });
   },

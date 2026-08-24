@@ -608,3 +608,68 @@ test("deleting an asset still referenced by published content is refused", async
   const res = await payload(await guide.deleteGuideAsset(e, principal, "fig", "req_8"));
   assert.equal(res.deleted, true);
 });
+
+// ---------------------------------------------------------------------------
+// 地图入口横幅：公共读端把 content.meta.banner 抬到顶层
+//
+// 为什么值得钉：横幅以前没有自己的字段，只能借文档标题 + 版次拼。上面 content()
+// 里的 meta.title 正是线上那份原稿的值——「上海大学」，于是地图上挂出一条主标题
+// 写着单位名、副标题混进版次的横幅。现在横幅有独立字段，且提到顶层，客户端取一行
+// 标题不必解析整份 40KB 内容。
+// ---------------------------------------------------------------------------
+
+test("the public read lifts the map banner config to the top level", async () => {
+  const e = env(database());
+  const { documentId, revisionId } = await approvedRevision(e, {
+    meta: {
+      title: "上海大学",
+      subtitle: "新生入校交通指南",
+      edition: "2026 版",
+      banner: { title: "2026 版入校指南", subtitle: "点击查看", icon: "banner-icon" },
+    },
+  });
+  await guide.publishGuideRevision(jsonRequest({ revisionId }), e, principal, documentId, "req_5");
+
+  const live = await payload(await guide.getPublicGuide(
+    new Request("https://example.test/api/public/guide/freshman-transit"), e, "freshman-transit",
+  ));
+  assert.deepEqual(live.banner, {
+    title: "2026 版入校指南",
+    subtitle: "点击查看",
+    icon: "banner-icon",
+  });
+  // 文档标题仍照原样下发（前台指南页要用），只是不再是横幅的来源
+  assert.equal(live.content.meta.title, "上海大学");
+});
+
+test("a guide with no banner config yields nulls rather than the document title", async () => {
+  const e = env(database());
+  // content() 的 meta 没有 banner 字段（老内容的形状）
+  const { documentId, revisionId } = await approvedRevision(e);
+  await guide.publishGuideRevision(jsonRequest({ revisionId }), e, principal, documentId, "req_5");
+
+  const live = await payload(await guide.getPublicGuide(
+    new Request("https://example.test/api/public/guide/freshman-transit"), e, "freshman-transit",
+  ));
+  // 三项全空：兜底文案属于展示层（fallbackBannerTitle），服务端不替客户端决定
+  assert.deepEqual(live.banner, { title: null, subtitle: null, icon: null });
+  assert.notEqual(live.banner.title, "上海大学", "文档标题绝不能漏成横幅标题");
+});
+
+test("blank and non-string banner fields are normalised to null", async () => {
+  const e = env(database());
+  const { documentId, revisionId } = await approvedRevision(e, {
+    meta: {
+      title: "上海大学",
+      edition: "2026 版",
+      // 空串与错类型都当作没配，否则横幅会渲染出一行空白或 "[object Object]"
+      banner: { title: "   ", subtitle: 42, icon: { key: "x" } },
+    },
+  });
+  await guide.publishGuideRevision(jsonRequest({ revisionId }), e, principal, documentId, "req_5");
+
+  const live = await payload(await guide.getPublicGuide(
+    new Request("https://example.test/api/public/guide/freshman-transit"), e, "freshman-transit",
+  ));
+  assert.deepEqual(live.banner, { title: null, subtitle: null, icon: null });
+});

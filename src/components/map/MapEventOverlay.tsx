@@ -20,6 +20,11 @@ function severityColor(severity: OperationalEvent["severity"]): string {
   return SEVERITY_COLORS[severity];
 }
 
+/** 事件标注颜色：管理端可自选（#rrggbb），未设置时按 severity 默认色。 */
+export function eventColor(event: Pick<OperationalEvent, "severity" | "color">): string {
+  return event.color ?? severityColor(event.severity);
+}
+
 /**
  * 事件位置由 /api/public/operations 随事件 live 下发（crs=svg_viewbox），
  * 审核通过即可上图，不依赖发布新 release。geographic CRS 本轮跳过（无 geo→SVG 变换）。
@@ -66,7 +71,7 @@ export function MapEventOverlay({
       style={{ pointerEvents: "none" }}
     >
       {items.map((item) => {
-        const color = severityColor(item.event.severity);
+        const color = eventColor(item.event);
         const selected = item.event.id === selectedEventId;
         const common = {
           // 手势层 pointer capture 会吞 click；命中检测靠这个 data 属性（MapCanvas.handlePointerUp）
@@ -112,9 +117,8 @@ export function MapEventOverlay({
         if (item.geometry.type === "Polygon" || item.geometry.type === "MultiPolygon") {
           const polygons = item.geometry.type === "Polygon" ? [item.geometry.coordinates] : item.geometry.coordinates;
           const rings = polygons.map((polygon) => polygon[0]);
-          const labelRing = rings[0];
-          const cx = labelRing.reduce((sum, [x]) => sum + x, 0) / labelRing.length;
-          const cy = labelRing.reduce((sum, [, y]) => sum + y, 0) / labelRing.length;
+          // 标题不再画在区域中心（大面积区域上居中的文字既挡图又读不清），
+          // 事件名在点选后的摘要卡 / 详情里看。
           return (
             <g key={item.locationId} {...common}>
               {rings.map((ring, ringIndex) => (
@@ -128,17 +132,6 @@ export function MapEventOverlay({
                   strokeDasharray={`${unit * 0.3} ${unit * 0.22}`}
                 />
               ))}
-              <text
-                x={cx}
-                y={cy}
-                textAnchor="middle"
-                fontSize={unit * 0.5}
-                fill={color}
-                fontWeight={600}
-                style={{ textShadow: "0 0 4px #fff" }}
-              >
-                {item.event.title}
-              </text>
             </g>
           );
         }

@@ -69,10 +69,10 @@
           class="poi-marker"
           style="left: {{item.x}}px; top: {{item.y}}px;"
         >
-          <view class="poi-pin {{item.dimmed ? 'poi-pin-dimmed' : ''}}">
-            <view wx:if="{{item.selected}}" class="poi-halo"></view>
-            <view class="poi-circle {{item.selected ? 'poi-circle-selected' : ''}}">
-              <image class="poi-icon" src="{{item.iconUrl}}" mode="aspectFit" />
+          <view class="poi-pin {{item.dimmed ? 'poi-pin-dimmed' : ''}}" style="{{item.pinStyle}}">
+            <view wx:if="{{item.selected}}" class="poi-halo" style="{{item.haloStyle}}"></view>
+            <view class="poi-circle {{item.selected ? 'poi-circle-selected' : ''}}" style="{{item.circleStyle}}">
+              <image class="poi-icon" src="{{item.iconUrl}}" mode="aspectFit" style="{{item.iconStyle}}" />
             </view>
           </view>
         </view>
@@ -133,11 +133,12 @@
     </block>
 
     <!-- 已发布返校指南入口；关闭按 revisionNo 记忆，新版发布后会重新出现。
-         results（近全屏）档抽屉顶边与横幅同高，不隐藏会盖住搜索条。 -->
+         results（近全屏）档抽屉顶边与横幅同高，不隐藏会盖住搜索条。
+         标题/副标题/图标都来自后台（content.meta.banner），图标没配就不占位。 -->
     <view wx:if="{{guideVisible && sheetMode !== 'results'}}" class="guide-banner" style="top: {{capsuleTop + 44}}px;">
       <view class="guide-banner-main" bindtap="openGuide">
-        <view class="guide-banner-icon">▤</view>
-        <view class="guide-banner-copy">
+        <image wx:if="{{guideIconUrl}}" class="guide-banner-icon" src="{{guideIconUrl}}" mode="aspectFit" />
+        <view class="guide-banner-copy {{guideIconUrl ? '' : 'guide-banner-copy-flush'}}">
           <view class="guide-banner-title">{{guideTitle}}</view>
           <view class="guide-banner-sub">{{guideSubtitle}}</view>
         </view>
@@ -264,10 +265,11 @@
     <view wx:if="{{ready}}">
     <view class="sheet">
       <view class="sheet-frame" style="height: {{sheetFullHeight}}px;">
-      <!-- 拖拽把手（在卡片上缘之上，白色小横条） -->
+      <!-- 拖拽把手（在卡片上缘之上，白色小横条）。整卡可拖之后它只是视觉提示 +
+           无条件归抽屉的命中区（onSheetHandleTouchStart 置 fromHandle）。 -->
       <view
         class="sheet-handle"
-        bindtouchstart="onSheetTouchStart"
+        bindtouchstart="onSheetHandleTouchStart"
         bindtouchmove="onSheetTouchMove"
         bindtouchend="onSheetTouchEnd"
         bindtouchcancel="onSheetTouchEnd"
@@ -276,11 +278,33 @@
       </view>
 
       <!-- 内容只在「可见高度」这条带子里排版；卡片下方多出来的白色是填充，
-           被 tab 栏盖住或落在视口之外，保证列表底边不会藏到 tab 栏后面。 -->
-      <view class="sheet-shell" style="height: {{sheetVisibleHeight}}px;">
+           被 tab 栏盖住或落在视口之外，保证列表底边不会藏到 tab 栏后面。
+           2026-08-24：拖拽命中区从把手扩到整个 .sheet-shell——手势归属按落点判定，
+           落在纵向滚动框（.sheet-scroll，自带 bindtouchstart 打标记）里归列表滚动，
+           落在搜索行/标签筛选/标题行等处归抽屉拖动（lib/map/sheet.ts sheetGestureOwner）。
+           这里不能用 catchtouch*：搜索框聚焦、列表行 tap 都还要正常派发。 -->
+      <view
+        class="sheet-shell"
+        style="height: {{sheetVisibleHeight}}px;"
+        bindtouchstart="onSheetTouchStart"
+        bindtouchmove="onSheetTouchMove"
+        bindtouchend="onSheetTouchEnd"
+        bindtouchcancel="onSheetTouchEnd"
+      >
         <!-- ---------- POI 详情（对齐 Web 端 PoiDetailSheet） ---------- -->
         <block wx:if="{{sheetMode === 'poi' && detail}}">
-          <scroll-view scroll-y class="sheet-scroll" enhanced show-scrollbar="{{false}}">
+          <!-- bindtouchstart 只是给手势归属打「落点在滚动框内」的标记（先于 .sheet-shell
+               的同名事件冒泡到达）；bounces 必须关，否则 iOS 橡皮筋会吃掉到顶后的下拉，
+               poi 档「下拉关详情」就没了出口。 -->
+          <scroll-view
+            scroll-y
+            class="sheet-scroll"
+            enhanced
+            bounces="{{false}}"
+            show-scrollbar="{{false}}"
+            bindtouchstart="onScrollAreaTouchStart"
+            bindscroll="onScrollAreaScroll"
+          >
             <!-- 内容自适应高度：poi 档抽屉可见高度 = 该容器实测高度（封顶 heights.poi），
                  量的是自然内容高度，与 scroll-view 自身裁剪无关，见 map.ts measurePoiContentHeight。 -->
             <view class="detail-measure">
@@ -411,7 +435,6 @@
                     ></view>
                   </view>
                 </block>
-                <view wx:else class="photo-placeholder">实拍图</view>
 
                 <view class="detail-summary detail-summary-strong" wx:if="{{detail.summary}}">{{detail.summary}}</view>
 
@@ -427,13 +450,13 @@
                   </view>
                 </view>
 
-                <!-- 楼内设施指引（圆形图标徽章横滑）+ 楼层图入口 -->
-                <block wx:if="{{detail.isBuilding}}">
+                <!-- 楼内设施指引（圆形图标徽章横滑）+ 楼层图入口；未录入设施时整节不显示 -->
+                <block wx:if="{{detail.isBuilding && detail.facilities.length > 0}}">
                   <view class="section-head">
                     <view class="section-title">楼内设施指引</view>
                     <view class="section-action" bindtap="openFloors">查看楼层图 ›</view>
                   </view>
-                  <scroll-view wx:if="{{detail.facilities.length > 0}}" scroll-x class="badge-row" enhanced show-scrollbar="{{false}}">
+                  <scroll-view scroll-x class="badge-row" enhanced show-scrollbar="{{false}}">
                     <view class="badge-row-inner">
                       <view class="icon-badge" wx:for="{{detail.facilities}}" wx:key="id">
                         <view class="icon-badge-circle">
@@ -443,7 +466,6 @@
                       </view>
                     </view>
                   </scroll-view>
-                  <view wx:else class="detail-hint">该楼宇的设施信息正在完善中</view>
                 </block>
 
                 <!-- 楼内商户 -->
@@ -547,7 +569,17 @@
               <view class="state-title">没有相关搜索结果</view>
               <view class="state-button" bindtap="resetSearch">清空搜索条件</view>
             </view>
-            <scroll-view wx:else scroll-y class="sheet-scroll" enhanced show-scrollbar="{{false}}">
+            <scroll-view
+              wx:else
+              scroll-y
+              class="sheet-scroll"
+              enhanced
+              bounces="{{false}}"
+              show-scrollbar="{{false}}"
+              scroll-top="{{scrollAreaResetTop}}"
+              bindtouchstart="onScrollAreaTouchStart"
+              bindscroll="onScrollAreaScroll"
+            >
               <view class="row-list">
                 <view
                   class="poi-row"
@@ -572,7 +604,16 @@
             <view class="section-head section-head-inline">
               <view class="section-title">最近查看</view>
             </view>
-            <scroll-view scroll-y class="sheet-scroll" enhanced show-scrollbar="{{false}}">
+            <scroll-view
+              scroll-y
+              class="sheet-scroll"
+              enhanced
+              bounces="{{false}}"
+              show-scrollbar="{{false}}"
+              scroll-top="{{scrollAreaResetTop}}"
+              bindtouchstart="onScrollAreaTouchStart"
+              bindscroll="onScrollAreaScroll"
+            >
               <view class="row-list">
                 <view
                   class="poi-row"

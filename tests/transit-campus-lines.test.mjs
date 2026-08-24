@@ -31,7 +31,7 @@ import { build } from "esbuild";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = await build({
   stdin: {
-    contents: `export { publicCampusLines } from "./worker/modules/transit.ts";`,
+    contents: `export { publicCampusLines, resolveDayType } from "./worker/modules/transit.ts";`,
     resolveDir: root,
     sourcefile: "transit-campus-lines-entry.ts",
     loader: "ts",
@@ -43,7 +43,7 @@ const bundle = await build({
   write: false,
 });
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].contents).toString("base64")}`;
-const { publicCampusLines } = await import(moduleUrl);
+const { publicCampusLines, resolveDayType } = await import(moduleUrl);
 
 class Statement {
   constructor(database, sql, values = []) {
@@ -310,5 +310,65 @@ test("参数与端点校验：400 / 404 / 空校区 200 lines=[]", async () => {
   const empty = await callJson(db, "from=campus_empty&to=campus_jiading&date=2026-08-21");
   assert.deepEqual(empty.from, { id: "campus_empty", name: "空校区" });
   assert.deepEqual(empty.lines, []);
+  db.close();
+});
+
+// ---------------------------------------------------------------------------
+// 日型（0025：day_type 上收到服务日历）
+//
+// 为什么值得单独钉：这个标签此前算在客户端，数据源是 data/academic-calendar
+// （2026-03-11 提交 1ee1733 手写的草稿，与班次归属所依据的 service_calendars
+// 没有任何连通），于是会出现「页面说今天是假日、但假日班次一个都不出」。
+// 现在标签和班次读同一批日历，两者必须同源。
+// ---------------------------------------------------------------------------
+
+test("resolveDayType 的优先级：假日 > 寒假 > 暑假 > 周末 > 工作日", () => {
+  // 现有数据里日历有效期重叠（「工作日」日历覆盖整个寒暑假），同一天会命中多条，
+  // 所以优先级必须确定，否则标签随查询顺序漂。
+  assert.equal(resolveDayType([{ dayType: "weekday" }, { dayType: "holiday" }], "monday"), "holiday");
+  assert.equal(resolveDayType([{ dayType: "weekday" }, { dayType: "winter_break" }], "monday"), "winter_break");
+  assert.equal(resolveDayType([{ dayType: "weekday" }, { dayType: "summer_break" }], "monday"), "summer_break");
+  // 寒假里的周六该显示「寒假」，不是「周末」
+  assert.equal(resolveDayType([{ dayType: "weekend" }, { dayType: "winter_break" }], "saturday"), "winter_break");
+  assert.equal(resolveDayType([{ dayType: "weekday" }], "monday"), "weekday");
+});
+
+test("resolveDayType 忽略 'other'，并在无命中时按星期回落", () => {
+  // 'other' 是逃生舱（考试周、临时加开）：班次照常运营，但不参与日型标签。
+  assert.equal(resolveDayType([{ dayType: "other" }], "monday"), "weekday");
+  assert.equal(resolveDayType([{ dayType: "other" }], "saturday"), "weekend");
+  // 一条都没命中（学年空档）也要给个标签，只是标签，不影响班次。
+  assert.equal(resolveDayType([], "sunday"), "weekend");
+  assert.equal(resolveDayType([], "wednesday"), "weekday");
+});
+
+test("campus-lines 响应带 dayType，且与班次读同一批日历", async () => {
+  const db = database();
+  // cal_a 建表时没给 day_type → 默认 'other' → 回落按星期（2026-08-21 是周五）
+  const fallback = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-21");
+  assert.equal(fallback.dayType, "weekday", "day_type='other' 时按星期回落");
+
+  // 把 cal_a 标成假日日历：同一天的标签必须跟着变（而班次不变——同一批日历）
+  db.prepare("update service_calendars set day_type='holiday' where id='cal_a'").run();
+  const holiday = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-21");
+  assert.equal(holiday.dayType, "holiday");
+  assert.deepEqual(
+    holiday.lines.flatMap((line) => line.journeys.map((journey) => journey.tripId)).sort(),
+    fallback.lines.flatMap((line) => line.journeys.map((journey) => journey.tripId)).sort(),
+    "改日型不该改变班次归属",
+  );
+
+  // 日历没命中的那天（周六 saturday=0）：标签回落按星期，而不是沿用 holiday
+  const saturday = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-22");
+  assert.equal(saturday.dayType, "weekend", "日历没命中时不该沿用它的日型");
+
+  // added 例外日（2026-08-23 周日加开）：日历命中 → 标签用日历的日型，不按星期
+  const added = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-23");
+  assert.equal(added.dayType, "holiday", "added 例外日命中日历，标签要跟日历走");
+
+  // removed 例外日（2026-08-28 周五停运）：日历被排除 → 标签回落，班次也为空
+  const removed = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-28");
+  assert.equal(removed.dayType, "weekday", "removed 例外日排除日历，标签要回落");
+  assert.deepEqual(removed.lines.flatMap((line) => line.journeys), [], "removed 当天不该有班次");
   db.close();
 });

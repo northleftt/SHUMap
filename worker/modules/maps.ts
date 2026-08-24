@@ -195,13 +195,14 @@ function parseJobPayload(raw: string | null): MapImportJobPayload {
   }
 }
 
-// result_json 里导入端写入的 anchorReview（滞留旧坐标系的手工标注），同样容错解析。
-function parseAnchorReview(raw: string | null): AnchorReviewItem[] {
+// result_json 里导入端写入的 anchorReview（滞留旧坐标系的手工标注）与
+// anchorAutoMigrated（画布一致已自动迁移的标注），同样容错解析。
+function parseAnchorReview(raw: string | null, key: "anchorReview" | "anchorAutoMigrated" = "anchorReview"): AnchorReviewItem[] {
   if (!raw) return [];
   try {
     const value = JSON.parse(raw) as unknown;
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
-    const list = (value as Record<string, unknown>).anchorReview;
+    const list = (value as Record<string, unknown>)[key];
     if (!Array.isArray(list)) return [];
     const text = (field: unknown): string | null => (typeof field === "string" && field.trim() ? field.trim() : null);
     return list
@@ -254,6 +255,7 @@ export async function listMapImportJobs(env: Env): Promise<Response> {
       mediaAssetId: payload.mediaAssetId,
       fileName: payload.mediaAssetId ? fileNames.get(payload.mediaAssetId) ?? null : null,
       anchorReview: row.status === "succeeded" ? parseAnchorReview(row.resultJson) : [],
+      anchorAutoMigrated: row.status === "succeeded" ? parseAnchorReview(row.resultJson, "anchorAutoMigrated") : [],
       createdAt: row.createdAt,
       startedAt: row.startedAt,
       finishedAt: row.finishedAt,

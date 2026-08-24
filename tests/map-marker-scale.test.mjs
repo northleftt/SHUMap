@@ -56,11 +56,23 @@ test("the standard tier is neutral and the tiers are ordered small to large", ()
   assert.ok(values.every((value) => value > 0), "系数必须为正，否则图钉会翻转或消失");
 });
 
-test("an unknown stored tier falls back to standard instead of drawing a broken pin", () => {
-  // localStorage 可被用户手改，也可能残留旧版本写的档位键。
-  for (const dirty of ["", "huge", "0.5", "SMALL"]) {
+test("an unknown stored value falls back to standard instead of drawing a broken pin", () => {
+  // localStorage 可被用户手改，也可能残留旧版本写的档位键；0027 起数值（含数值
+  // 字符串）是合法系数，只有解析不出来的才回落。
+  for (const dirty of ["", "huge", "SMALL", null, undefined]) {
     assert.equal(markerScaleValue(dirty), 1, `脏值 ${JSON.stringify(dirty)} 应回落标准档`);
   }
+});
+
+test("continuous scales parse and clamp to range; legacy tiers keep their factors", () => {
+  // 0027：管理端 per-POI 图钉大小从三档枚举改为 0.5~2.0 连续系数；
+  // 0026 的存量三档字符串（DB / content / localStorage）仍按原系数读出。
+  assert.equal(markerScaleValue(1.2), 1.2);
+  assert.equal(markerScaleValue("1.2"), 1.2);
+  assert.equal(markerScaleValue("small"), 0.72, "存量小档 = 0.72");
+  assert.equal(markerScaleValue("large"), 1.35, "存量大档 = 1.35");
+  assert.equal(markerScaleValue(5), 2, "超出上限夹紧");
+  assert.equal(markerScaleValue(0.1), 0.5, "低于下限夹紧");
 });
 
 test("both map overlays derive their size from the shared base unit", () => {
@@ -92,4 +104,45 @@ test("the tier is persisted under a namespaced key like the other local stores",
   const source = read("src/lib/map/markerScale.ts");
   assert.match(source, /"shumap\.map-marker-scale"/);
   assert.match(source, /useLocalStore/, "复用 localStore 才能多处消费者同步");
+});
+
+// ---------------------------------------------------------------------------
+// 管理端 per-POI 档位（content.marker.size）：2026-08-23 新增。地点/设施/商户
+// 编辑器可给单个图钉定大小，随修订→发布进 manifest 的 content，两端装配时解析。
+// ---------------------------------------------------------------------------
+
+const { markerScaleFromContent } = await import(moduleUrl);
+
+test("admin marker scale resolves from content.marker.size with dirty-value fallback", () => {
+  assert.equal(markerScaleFromContent(undefined), 1);
+  assert.equal(markerScaleFromContent(null), 1);
+  assert.equal(markerScaleFromContent({}), 1, "没有 marker 键 = 标准系数");
+  assert.equal(markerScaleFromContent({ marker: {} }), 1);
+  assert.equal(markerScaleFromContent({ marker: "large" }), 1, "marker 不是对象时回落");
+  assert.equal(markerScaleFromContent({ marker: { size: "huge" } }), 1, "未知值回落标准");
+  assert.equal(markerScaleFromContent({ marker: { size: "standard" } }), 1, "存量三档字符串仍按原系数读出");
+  assert.ok(Math.abs(markerScaleFromContent({ marker: { size: "small" } }) - 0.72) < 1e-9);
+  assert.ok(Math.abs(markerScaleFromContent({ marker: { size: "large" } }) - 1.35) < 1e-9);
+  // 0027 起连续系数：数值与数值字符串直读，超出 0.5~2.0 夹紧。
+  assert.ok(Math.abs(markerScaleFromContent({ marker: { size: 1.35 } }) - 1.35) < 1e-9);
+  assert.ok(Math.abs(markerScaleFromContent({ marker: { size: 1.234 } }) - 1.23) < 1e-9);
+  assert.equal(markerScaleFromContent({ marker: { size: 9 } }), 2);
+});
+
+test("the poi overlay applies the admin tier per pin, not globally", () => {
+  const overlay = read("src/components/map/MapPoiOverlay.tsx");
+  assert.match(overlay, /poi\.markerScale/, "每个图钉要乘自己的管理端系数");
+  const mapData = read("src/lib/release/mapData.ts");
+  for (const entity of ["place", "facility", "merchant"]) {
+    assert.match(mapData, new RegExp(`markerScaleFromContent\\(${entity}\\.content\\)`), `${entity} 应从 content 解析档位`);
+  }
+});
+
+test("all three admin editors expose the scale control and persist it into content", () => {
+  for (const page of ["PlaceEditorPage", "FacilityEditorPage", "MerchantEditorPage"]) {
+    const source = read(`src/admin/pages/${page}.tsx`);
+    assert.match(source, /markerScaleFromContent/, `${page} 应从 content 回填系数`);
+    assert.match(source, /MarkerScaleField/, `${page} 应复用统一滑杆控件`);
+    assert.match(source, /content\.marker = \{ size: markerSize \}|next\.marker = \{ size: markerSize \}/, `${page} 保存时应写回 content.marker.size`);
+  }
 });

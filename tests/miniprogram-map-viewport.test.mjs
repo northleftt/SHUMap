@@ -202,3 +202,74 @@ const container = { width: 390, height: 700 };
 }
 
 console.log("miniprogram-map-viewport: all assertions passed");
+
+// ---------------------------------------------------------------------------
+// 7. 最小缩放档的空白必须四面均等（回归：延长/宝山下方一大片可拖动空白、上方没有）
+//
+// 三个校区的 viewBox 纵横比与手机屏都不同，最小缩放（fit）时短轴装不满容器 ——
+// 宝山/延长是**高**方向装不满，于是容器里会有一圈装不下地图的空白。
+//
+// 旧的 clampWindow 把 y 的允许区间写成 [-padY, max(0, vb.h-win.h)+padY]，
+// 窗口比 viewBox 高时 max(...) 恒为 0，区间退化成 [-padY, padY]，中心是 0 ——
+// 也就是把 viewBox 顶边钉在容器顶边，空白全被挤到下方（截图里那一大片）。
+// 现在区间以「viewBox 居中」为中心，上下空白相等。
+// ---------------------------------------------------------------------------
+{
+  // 宝山：fit 时 y 方向装不满（win.h 1654 > vb.h 1019.7），正是截图那种情形
+  const fitScale = viewport.getFitScale(viewBox, container);
+  const win = {
+    x: 0,
+    y: 0,
+    width: container.width / fitScale,
+    height: container.height / fitScale,
+  };
+  assert.ok(win.height > viewBox.height, "宝山 fit 视口应在 y 方向装不满（否则这条用例失去意义）");
+
+  /** 该轴上「地图之外」的空白在两端各有多少（世界单位）。 */
+  const blanks = (w) => ({
+    before: -w.y,
+    after: w.y + w.height - viewBox.height,
+  });
+
+  // 拖到顶：上方空白与下方空白应大致相等（差值来自 padding，不是系统性偏置）
+  const draggedUp = viewport.panWindowBy(win, 0, 100000, container, viewBox, campus.edgePaddingRatio);
+  const draggedDown = viewport.panWindowBy(win, 0, -100000, container, viewBox, campus.edgePaddingRatio);
+  const padY = viewBox.height * campus.edgePaddingRatio;
+
+  // 两个极限位置对称于「居中」，因此两端可露出的空白量相同
+  const up = blanks(draggedUp);
+  const down = blanks(draggedDown);
+  assert.ok(
+    Math.abs(up.before - down.after) < 1e-6,
+    `上下两个拖动极限应对称：上端露白 ${up.before}，下端露白 ${down.after}`,
+  );
+
+  // 居中位置：上下空白严格相等（这条才是用户看到的「默认不偏”）
+  const centered = viewport.clampWindow(
+    { ...win, y: (viewBox.height - win.height) / 2 },
+    viewBox,
+    campus.edgePaddingRatio,
+  );
+  const mid = blanks(centered);
+  assert.ok(
+    Math.abs(mid.before - mid.after) < 1e-6,
+    `最小缩放时上下空白应相等：上 ${mid.before} / 下 ${mid.after}`,
+  );
+  // 且这个居中位置本身是合法的（没被 clamp 挪走）
+  assert.ok(Math.abs(centered.y - (viewBox.height - win.height) / 2) < 1e-9, "居中位置不该被 clamp 推开");
+
+  // 旧实现会把 y=0（viewBox 顶边贴容器顶边）当成合法极限；现在它越界，被拉回
+  const pinnedTop = viewport.clampWindow({ ...win, y: 0 }, viewBox, campus.edgePaddingRatio);
+  assert.ok(pinnedTop.y < 0, "y=0 意味着空白全在下方，新的约束应把它拉回居中区间内");
+  assert.ok(
+    Math.abs(pinnedTop.y - ((viewBox.height - win.height) / 2 + padY)) < 1e-9,
+    "被拉回后应恰好停在「居中 + padding」这个上界",
+  );
+
+  // x 轴（fit 时刚好装满）行为不变：仍是 [-padX, padX]
+  const padX = viewBox.width * campus.edgePaddingRatio;
+  const draggedLeft = viewport.panWindowBy(win, 100000, 0, container, viewBox, campus.edgePaddingRatio);
+  assert.ok(Math.abs(draggedLeft.x + padX) < 1e-9, "x 方向刚好装满时，左极限仍是 -padX");
+}
+
+console.log("miniprogram-map-viewport: min-zoom padding symmetry assertions passed");

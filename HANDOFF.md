@@ -92,6 +92,11 @@ npm run deploy:cloudflare
 - dev server 的 `/api` 代理默认指向 `https://map.shutf.com`（`vite.config.ts`，可用 `VITE_API_PROXY_TARGET` 覆盖）；`scripts/fetch_published_maps.mjs` 同理，本地 worker 用 `--base http://127.0.0.1:8787`
 - 根目录的 `返校指南2025秋/`（358MB .ai 源）与 `shumaps.*` 品牌文件已 gitignore，留在磁盘上；指南正稿走 `public/guide` 与 R2，不依赖它们
 - Lody 预览白屏是 Lody 自身 CSP `frame-src` 问题，验收用 Chrome 直开
+- **校车用时采样手动触发**：`TENCENT_MAP_KEY=... npm run transit:sample`（加 `-- --local` 打本地库）。
+  跑的就是 cron 那个 `sampleTravelTimes`，D1 经 `wrangler d1 execute --remote` 打生产库。
+  cron 每天北京 02:00 只跑一轮、单轮上限 60 次调用，而排空 188 个区间需 116 次——想立刻看
+  效果就手动补一轮。**不要走 `wrangler dev --remote` + scheduled**：生产 secret 不下发到本地
+  dev，那条路要求把 key 写进 `.dev.vars`（落盘）。
 
 ## 排查经验
 

@@ -58,6 +58,16 @@ function nullableIsoTimestamp(value: unknown, field: string): string | null {
   return isoTimestamp(value, field);
 }
 
+/** 地图标注颜色：#rrggbb 或 null（null = 双端按 severity 默认色渲染）。 */
+function eventColor(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  const text = requiredString(value, field, 20);
+  if (!/^#[0-9a-fA-F]{6}$/.test(text)) {
+    throw new HttpError(400, "validation_error", `${field} must be a #rrggbb hex color`);
+  }
+  return text.toLowerCase();
+}
+
 function eventTargets(value: unknown): EventTargetInput[] {
   const targets = arrayValue(value, "targets", 100).map((raw, index) => {
     const field = `targets[${index}]`;
@@ -105,9 +115,9 @@ export async function listOperationalEvents(env: Env, publicOnly = false): Promi
     : "";
   const items = await all<Record<string, unknown>>(
     env.DB,
-    `select id,event_type as eventType,severity,editorial_status as editorialStatus,operational_status as operationalStatus,
+    `select id,event_type as eventType,severity,color,editorial_status as editorialStatus,operational_status as operationalStatus,
             title,description,starts_at as startsAt,expected_ends_at as expectedEndsAt,auto_expire_at as autoExpireAt,
-            resolved_at as resolvedAt,last_verified_at as lastVerifiedAt,created_at as createdAt,updated_at as updatedAt
+            resolved_at as resolvedAt,last_verified_at as lastVerifiedAt,${publicOnly ? "" : "review_note as reviewNote,"}created_at as createdAt,updated_at as updatedAt
        from operational_events ${where} order by starts_at desc`,
     publicOnly ? [now, now, weekAgo] : [],
   );
@@ -155,10 +165,11 @@ export async function createOperationalEvent(
 ): Promise<Response> {
   const body = exactObject(await readJson<unknown>(request), "operation", [
     "eventType", "severity", "title", "description", "startsAt", "expectedEndsAt", "autoExpireAt", "sourceId",
-    "responsibleOrganizationId", "targets", "locations",
+    "responsibleOrganizationId", "targets", "locations", "color",
   ]);
   const eventType = oneOf(body.eventType, "eventType", EVENT_TYPES);
   const severity = oneOf(body.severity, "severity", EVENT_SEVERITIES);
+  const color = eventColor(body.color, "color");
   const title = requiredString(body.title, "title", 200);
   const description = optionalString(body.description, "description", 10_000);
   const startsAt = isoTimestamp(body.startsAt, "startsAt");
@@ -183,9 +194,9 @@ export async function createOperationalEvent(
   const now = isoNow();
   const statements: D1PreparedStatement[] = [
     env.DB.prepare(
-      `insert into operational_events(id,event_type,severity,editorial_status,operational_status,title,description,starts_at,expected_ends_at,auto_expire_at,source_id,responsible_organization_id,created_by,created_at,updated_at)
-       values(?,?,?,'draft','scheduled',?,?,?,?,?,?,?,?,?,?)`,
-    ).bind(id, eventType, severity, title, description, startsAt, expectedEndsAt, autoExpireAt, sourceId, organizationId, principal.userId, now, now),
+      `insert into operational_events(id,event_type,severity,color,editorial_status,operational_status,title,description,starts_at,expected_ends_at,auto_expire_at,source_id,responsible_organization_id,created_by,created_at,updated_at)
+       values(?,?,?,?,'draft','scheduled',?,?,?,?,?,?,?,?,?,?)`,
+    ).bind(id, eventType, severity, color, title, description, startsAt, expectedEndsAt, autoExpireAt, sourceId, organizationId, principal.userId, now, now),
     ...targets.map((target) => env.DB.prepare(
       "insert into operational_event_targets(event_id,target_type,target_id,impact_type) values(?,?,?,?)",
     ).bind(id, target.type, target.id, target.impactType)),
@@ -226,6 +237,114 @@ export async function decideOperationalEvent(
     event, { ...event, editorial_status: next, review_note: note }, note,
   );
   return json({ id: eventId, editorialStatus: next, reviewNote: note });
+}
+
+/**
+ * PUT /api/admin/operations/:id — 编辑事件主体（不含几何，几何走 PUT :id/locations）。
+ *
+ * 草稿/被驳回/已通过的事件都能改：被驳回的改完回到 draft 重新排队审核（并清掉
+ * 上一轮的 reviewed_by/at，review_note 保留供审核人参考）；已通过的保持 approved，
+ * 改动即时生效——与 locations replace 的「live 数据无需发版」同一口径。
+ * 已结束（resolved/expired/cancelled）的事件只读，只能删除。
+ */
+export async function updateOperationalEvent(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  eventId: string,
+  requestId: string,
+): Promise<Response> {
+  const event = await first<Record<string, unknown>>(env.DB, "select * from operational_events where id=?", [eventId]);
+  if (!event) throw new HttpError(404, "not_found", "Event does not exist");
+  const editorialStatus = String(event.editorial_status);
+  if (!["draft", "in_review", "rejected", "approved"].includes(editorialStatus)) {
+    throw new HttpError(409, "invalid_state", "Event cannot be edited in its current state");
+  }
+  if (["resolved", "expired", "cancelled"].includes(String(event.operational_status))) {
+    throw new HttpError(409, "invalid_state", "Ended events cannot be edited");
+  }
+
+  const body = exactObject(await readJson<unknown>(request), "operation", [
+    "eventType", "severity", "title", "description", "startsAt", "expectedEndsAt", "autoExpireAt", "sourceId",
+    "responsibleOrganizationId", "targets", "color",
+  ]);
+  const eventType = oneOf(body.eventType, "eventType", EVENT_TYPES);
+  const severity = oneOf(body.severity, "severity", EVENT_SEVERITIES);
+  const color = eventColor(body.color, "color");
+  const title = requiredString(body.title, "title", 200);
+  const description = optionalString(body.description, "description", 10_000);
+  const startsAt = isoTimestamp(body.startsAt, "startsAt");
+  const expectedEndsAt = nullableIsoTimestamp(body.expectedEndsAt, "expectedEndsAt");
+  const autoExpireAt = nullableIsoTimestamp(body.autoExpireAt, "autoExpireAt");
+  if (expectedEndsAt !== null && expectedEndsAt <= startsAt) {
+    throw new HttpError(400, "validation_error", "expectedEndsAt must be after startsAt");
+  }
+  if (autoExpireAt !== null && autoExpireAt <= startsAt) {
+    throw new HttpError(400, "validation_error", "autoExpireAt must be after startsAt");
+  }
+  const sourceId = optionalString(body.sourceId, "sourceId", 100);
+  const organizationId = optionalString(body.responsibleOrganizationId, "responsibleOrganizationId", 100);
+  const targets = eventTargets(body.targets);
+  await Promise.all([
+    assertExists(env.DB, "data_sources", sourceId, "Data source"),
+    assertExists(env.DB, "organizations", organizationId, "Responsible organization"),
+    ...targets.map((target) => assertExists(env.DB, EVENT_TARGET_TABLES[target.type], target.id, "Event target")),
+  ]);
+
+  const now = isoNow();
+  // 被驳回 → 改完回草稿重新排队；其余状态原样保留。
+  const nextEditorialStatus = editorialStatus === "rejected" ? "draft" : editorialStatus;
+  await env.DB.batch([
+    env.DB.prepare(
+      `update operational_events
+          set event_type=?,severity=?,color=?,title=?,description=?,starts_at=?,expected_ends_at=?,auto_expire_at=?,
+              source_id=?,responsible_organization_id=?,editorial_status=?,
+              reviewed_by=case when editorial_status='rejected' then null else reviewed_by end,
+              reviewed_at=case when editorial_status='rejected' then null else reviewed_at end,
+              updated_at=?
+        where id=?`,
+    ).bind(eventType, severity, color, title, description, startsAt, expectedEndsAt, autoExpireAt,
+      sourceId, organizationId, nextEditorialStatus, now, eventId),
+    env.DB.prepare("delete from operational_event_targets where event_id=?").bind(eventId),
+    ...targets.map((target) => env.DB.prepare(
+      "insert into operational_event_targets(event_id,target_type,target_id,impact_type) values(?,?,?,?)",
+    ).bind(eventId, target.type, target.id, target.impactType)),
+  ]);
+  await audit(env, principal, "operational_event.update", "operational_event", eventId, requestId, event, body);
+  return json({ id: eventId, editorialStatus: nextEditorialStatus });
+}
+
+/**
+ * DELETE /api/admin/operations/:id — 删除事件。
+ * targets/updates 靠外键 cascade；entity_locations 的 entity_id 是多态弱引用，
+ * 与其锚点一起显式删除（同 replace 端点的清理顺序）。任何状态都可删，一律审计。
+ */
+export async function deleteOperationalEvent(
+  env: Env,
+  principal: SessionPrincipal,
+  eventId: string,
+  requestId: string,
+): Promise<Response> {
+  const event = await first<Record<string, unknown>>(env.DB, "select * from operational_events where id=?", [eventId]);
+  if (!event) throw new HttpError(404, "not_found", "Event does not exist");
+  const previous = await all<{ anchorId: string }>(
+    env.DB,
+    "select anchor_id as anchorId from entity_locations where entity_type='operational_event' and entity_id=?",
+    [eventId],
+  );
+  const statements: D1PreparedStatement[] = [
+    env.DB.prepare("delete from entity_locations where entity_type='operational_event' and entity_id=?").bind(eventId),
+  ];
+  if (previous.length > 0) {
+    statements.push(
+      env.DB.prepare(`delete from location_anchors where id in (${previous.map(() => "?").join(",")})`)
+        .bind(...previous.map((row) => row.anchorId)),
+    );
+  }
+  statements.push(env.DB.prepare("delete from operational_events where id=?").bind(eventId));
+  await env.DB.batch(statements);
+  await audit(env, principal, "operational_event.delete", "operational_event", eventId, requestId, event, null);
+  return json({ id: eventId, deleted: true });
 }
 
 export async function createOperationalEventUpdate(

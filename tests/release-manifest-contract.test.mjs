@@ -196,6 +196,25 @@ test("release manifest parser allows an independent merchant without a host plac
   assert.throws(() => parseReleaseManifest(missing), /merchants\[0\]\.hostPlaceId is required/);
 });
 
+test("transit stop marker size is optional and parsed tolerantly", () => {
+  // 0027 起连续系数：worker 只在 ≠1 时输出 marker_size（保护旧版客户端的 exactObject
+  // 白名单），缺失即 1；0026 的三档字符串存量按原系数读出，脏值回落而不是整份解析失败。
+  const value = manifestFixture();
+  assert.equal(parseReleaseManifest(value).transit.stops[0].marker_size, undefined);
+
+  const scaled = manifestFixture();
+  scaled.transit.stops[0].marker_size = 1.35;
+  assert.equal(parseReleaseManifest(scaled).transit.stops[0].marker_size, 1.35);
+
+  const legacy = manifestFixture();
+  legacy.transit.stops[0].marker_size = "large";
+  assert.equal(parseReleaseManifest(legacy).transit.stops[0].marker_size, 1.35, "0026 三档存量按原系数读出");
+
+  const dirty = manifestFixture();
+  dirty.transit.stops[0].marker_size = "huge";
+  assert.equal(parseReleaseManifest(dirty).transit.stops[0].marker_size, 1, "脏值回落标准而不是解析失败");
+});
+
 test("release manifest parser rejects malformed service hours and contacts", () => {
   const serviceHours = manifestFixture();
   serviceHours.facilities[0].serviceHours = "08:00-22:00";

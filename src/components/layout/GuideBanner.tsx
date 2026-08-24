@@ -6,7 +6,7 @@ import {
   GUIDE_URL,
   type GuideSummary,
   dismissStamp,
-  guideSubtitle,
+  guideAssetUrl,
   parseGuideSummary,
   shouldShowGuideBanner,
 } from "../../lib/guideEntry";
@@ -18,7 +18,8 @@ import {
  * 发布 = 出现，下线 = 消失。这样运营只需要记一件事，而且和指南自己的
  * 审核/发布流是同一个开关 —— 不会出现「内容下线了但入口还在」。
  *
- * 显示判断在 lib/guideEntry.ts，那边有单测覆盖；这里只负责取数与渲染。
+ * 文案与图标来自内容里的 meta.banner（管理端指南编辑器「地图入口横幅」一节）。
+ * 显示判断与 fallback 在 lib/guideEntry.ts，那边有单测覆盖；这里只负责取数与渲染。
  */
 
 function readDismissed(): string {
@@ -40,6 +41,8 @@ function writeDismissed(value: string): void {
 export function GuideBanner() {
   const [guide, setGuide] = useState<GuideSummary | null>(null);
   const [dismissed, setDismissed] = useState(() => readDismissed());
+  // 图标素材可能被删掉（键还留在内容里）：裂图不如不显示，回落到内置书本图标。
+  const [iconBroken, setIconBroken] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -58,13 +61,23 @@ export function GuideBanner() {
 
   if (!guide || !shouldShowGuideBanner(guide, dismissed)) return null;
   const stamp = dismissStamp(guide.revisionNo);
+  const showCustomIcon = Boolean(guide.iconAsset) && !iconBroken;
 
   return (
     <div className="pointer-events-auto flex items-center gap-2.5 rounded-2xl bg-primary px-3.5 py-2.5 text-white shadow-floating">
-      <BookOpenText size={18} className="shrink-0" />
+      {showCustomIcon ? (
+        <img
+          alt=""
+          className="h-[18px] w-[18px] shrink-0 object-contain"
+          onError={() => setIconBroken(true)}
+          src={guideAssetUrl(guide.iconAsset as string)}
+        />
+      ) : (
+        <BookOpenText size={18} className="shrink-0" />
+      )}
       <a href={GUIDE_URL} className="min-w-0 flex-1 text-white no-underline">
         <p className="truncate text-body font-semibold leading-tight">{guide.title}</p>
-        <p className="truncate text-label text-white/75">{guideSubtitle(guide)}</p>
+        <p className="truncate text-label text-white/75">{guide.subtitle}</p>
       </a>
       <button
         type="button"

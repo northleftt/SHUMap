@@ -1008,8 +1008,9 @@
 
 .img-viewer-close {
   position: absolute;
+  /* 右上角是小程序胶囊，关闭键放左上避开（公测反馈重合）。 */
   top: 52px;
-  right: 16px;
+  left: 16px;
   width: 36px;
   height: 36px;
   line-height: 36px;

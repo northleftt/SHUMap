@@ -4,24 +4,24 @@ import { useNavigate } from "react-router-dom";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SheetModal } from "../../components/ui/SheetModal";
-import type { CampusJourney, CampusLine } from "../../lib/api/types";
+import type { CampusLine, PublicDayType } from "../../lib/api/types";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useNow } from "../../lib/hooks/useNow";
 import { MapAppSheet, type MapTarget } from "../../lib/nav";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import type { LoadedRelease } from "../../lib/release/mapData";
 import {
-  BUCKET_LABELS,
+  DAY_TYPE_LABELS,
   buildLinePreview,
   fetchCampusLines,
   flattenLineJourneys,
   formatDate,
-  getCurrentDateBucket,
   getDaysInMonth,
   getRemainingJourneys,
   getSafeDate,
   isReservationLine,
   isSameDay,
+  journeysAtTime,
   linesAlightingStops,
   linesBoardingStops,
   listTransitEndpoints,
@@ -36,7 +36,9 @@ const BOOKING_SITE_URL = "http://vcard.shu.edu.cn/shu-wechat-client/schoolbus/pa
 
 type LinesState =
   | { status: "loading" }
-  | { status: "ready"; lines: CampusLine[] }
+  // dayType 随班次一起来：日型由管理端的服务日历决定，客户端不再自己算
+  // （见 lib/transit/schedule.ts 顶部注释）。
+  | { status: "ready"; lines: CampusLine[]; dayType: PublicDayType | null }
   | { status: "error"; message: string };
 
 /** 倒计时文案：「5分钟后」/「1小时内」等，departure 已过返回 null。 */
@@ -118,9 +120,12 @@ function EndpointPicker({
 
 function DatePicker({
   date,
+  dayType,
   onChange,
 }: {
   date: Date;
+  /** 服务端给的日型；班次还没加载好（或加载失败）时为 null，此时只显示日期。 */
+  dayType: PublicDayType | null;
   onChange: (date: Date) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -133,7 +138,9 @@ function DatePicker({
   return (
     <div className="relative">
       <button type="button" className="text-right" onClick={() => setOpen((v) => !v)}>
-        <div className="text-label text-sub">{today ? "今天" : BUCKET_LABELS[getCurrentDateBucket(date)]}</div>
+        <div className="text-label text-sub">
+          {today ? "今天" : dayType ? DAY_TYPE_LABELS[dayType] : " "}
+        </div>
         <div className="mt-0.5 text-aux font-medium text-ink">
           {info.month}/{info.day} {info.weekday.replace("周", " ")}
         </div>
@@ -210,30 +217,169 @@ function StopNavLink({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** 站点 → 地图导航目标：借站点绑定的 place 的导航链接。 */
-function useStopNavigation(release: LoadedRelease) {
-  return (stopId: string, stopName: string): MapTarget | null => {
-    const releaseStop = release.manifest.transit.stops.find((stop) => stop.id === stopId);
-    if (!releaseStop?.place_id) return null;
-    // 站点绑的地点可能是楼宇（poiKey 就是 placeId），也可能是独立上图的楼外地点
-    // （poiKey 形如 `place:<id>`）。两种都要认，否则绑在校门这类非楼宇地点的站点
-    // 明明在地图上有点位，这里却取不到导航链接。
-    const place = release.pois.find((poi) =>
-      poi.entityType === "building"
-        ? poi.poiKey === releaseStop.place_id
-        : poi.entityType === "place" && poi.entityId === releaseStop.place_id,
-    );
-    if (!place?.navigationUrls) return null;
-    return { label: stopName, navigationUrls: place.navigationUrls };
-  };
+/**
+ * 站点 → 地图上的那个 POI。
+ *
+ * 发布层给每个上图的站点都造了一枚 `transit_stop:<id>` 的 POI
+ * （见 src/lib/release/mapData.ts：站点自己标了候车点就用它，否则回退到绑定地点的
+ * 点位），所以站点的地图身份一律是这个键。
+ *
+ * 这里曾经拿 `stop.place_id` 当 POI 键找：11 个站点里只有嘉定北门绑了地点，其余
+ * 10 个 place_id 都是 null，于是「查看地图」按钮几乎全程是禁用/点了没反应的状态。
+ * 导航链接同理 —— 站点 POI 的 navigationUrls 在发布层已经处理过「没有自有导航终点
+ * 就借绑定地点的」这层回退，客户端不必再走一遍。
+ */
+function useStopMapTargets(release: LoadedRelease) {
+  return useMemo(() => {
+    const byKey = new Map(release.pois.map((poi) => [poi.poiKey, poi]));
+    return {
+      /** 地图深链用的 POI 键；站点没上图（如陈太公寓）时返回 null。 */
+      poiKey: (stopId: string): string | null => {
+        const key = `transit_stop:${stopId}`;
+        return byKey.has(key) ? key : null;
+      },
+      /** 唤起第三方地图 App 的导航目标；站点没有导航终点时返回 null。 */
+      navigation: (stopId: string, stopName: string): MapTarget | null => {
+        const poi = byKey.get(`transit_stop:${stopId}`);
+        if (!poi?.navigationUrls) return null;
+        return { label: stopName, navigationUrls: poi.navigationUrls };
+      },
+    };
+  }, [release]);
 }
 
+/**
+ * 一个发车时刻上的全部班次（非预约在前、预约在后）。
+ *
+ * 不是单趟：同一时刻可能同时有预约车与非预约车，时刻网格也是按时刻合并成一格的。
+ * 只装一趟的话，另一趟在界面上就没有任何入口（见 journeysAtTime 的注释）。
+ */
 interface PreviewSelection {
-  line: CampusLine;
-  journey: CampusJourney;
+  departureTime: string;
+  items: FlatLineJourney[];
 }
 
-/** 班次预览内容（移动端 SheetModal / 桌面端常驻侧卡共用）。 */
+/**
+ * 一趟班次的乘车方式 + 全程用时那一行，以及它的停靠时间线。
+ *
+ * 停靠序列缺失时（快照线路 patterns 为空、或数据异常）只降级掉时间线，标题与
+ * 乘车方式照旧显示 —— 以前这里是在 useMemo 里 throw，同一时刻两班车只要有一班
+ * 的数据不全，整张卡片会连带崩掉。
+ */
+function TripSection({
+  item,
+  stopTargets,
+  onNavigate,
+}: {
+  item: FlatLineJourney;
+  stopTargets: ReturnType<typeof useStopMapTargets>;
+  onNavigate: (target: MapTarget) => void;
+}) {
+  const { line, journey } = item;
+  const isReservation = isReservationLine(line);
+
+  const preview = useMemo(() => {
+    try {
+      const value = buildLinePreview(line, journey);
+      return value.stops.length >= 2 && value.stops[0].role === "boarding" ? value : null;
+    } catch {
+      return null;
+    }
+  }, [line, journey]);
+
+  const boarding = preview?.stops[0] ?? null;
+  const alightingStops = preview ? preview.stops.slice(1) : [];
+  const boardingNavigation = boarding ? stopTargets.navigation(boarding.stopId, boarding.stopName) : null;
+
+  return (
+    <div>
+      {/* 乘车方式 + 预计全程用时（时刻与方向在卡片大标题里，这里不再重复） */}
+      <p className="text-aux text-sub">
+        {[
+          isReservation ? "预约车" : "非预约车",
+          preview?.durationMinutes != null
+            ? `${preview.hasEstimated ? "预计" : "约"} ${preview.durationMinutes} 分钟`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
+
+      {boarding ? (
+        /* 站点时间线：每行「站点名 · 上/下车」+ 时刻，右侧轻量导航链接 */
+        <div className="mt-3">
+          <div className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
+              <span className="mt-1 w-px flex-1 bg-line" />
+            </div>
+            <div className="flex min-w-0 flex-1 items-start justify-between gap-2 pb-3">
+              <div className="min-w-0">
+                <div className="truncate text-body font-medium text-ink">{boarding.stopName} · 上车</div>
+                <div className="mt-1 text-label text-sub">
+                  {boarding.time ? `${boarding.time} 发车` : "发车时间待定"}
+                </div>
+              </div>
+              {boardingNavigation ? <StopNavLink onClick={() => onNavigate(boardingNavigation)} /> : null}
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
+            </div>
+            <div className="min-w-0 flex-1">
+              {alightingStops.map((stop, index) => {
+                const stopNavigation = stopTargets.navigation(stop.stopId, stop.stopName);
+                return (
+                  <div
+                    key={stop.stopId}
+                    className={`flex items-start justify-between gap-2 ${index > 0 ? "mt-2" : ""}`}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-body font-medium text-ink">
+                        {stop.stopName}
+                        {stop.role === "alighting" && alightingStops.length > 1 ? ` · 下车点${index + 1}` : " · 下车"}
+                      </div>
+                      {stop.time ? (
+                        <div className="mt-1 text-label text-sub">
+                          {/* 推算值必须和排班时刻在措辞上分开：写成确定时刻会让人按它掐点到站。 */}
+                          {stop.isEstimated
+                            ? `预计 ${stop.dayOffset > 0 ? "次日 " : ""}${stop.time} 到达`
+                            : `${stop.time} ${stop.timeLabel ?? ""}`}
+                        </div>
+                      ) : null}
+                    </div>
+                    {stopNavigation ? <StopNavLink onClick={() => onNavigate(stopNavigation)} /> : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 text-label text-sub">暂无停靠站点信息</p>
+      )}
+
+      {isReservation ? (
+        <button
+          type="button"
+          className="mt-4 w-full rounded-full bg-primary py-3 text-body font-semibold text-white active:bg-primary-pressed"
+          onClick={() => window.open(line.bookingUrl ?? BOOKING_SITE_URL, "_blank")}
+        >
+          预约此班次
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 班次预览内容（移动端 SheetModal / 桌面端常驻侧卡共用）。
+ *
+ * 一个发车时刻可能同时有非预约车与预约车（时刻网格里就是「预 非」那一格），
+ * 两班都要列出来：非预约在上、预约在下。
+ */
 function TripPreviewContent({
   selection,
   fromName,
@@ -247,38 +393,20 @@ function TripPreviewContent({
   release: LoadedRelease;
   onClose: () => void;
 }) {
-  const { line, journey } = selection;
   const [navTarget, setNavTarget] = useState<MapTarget | null>(null);
-  const navigationTarget = useStopNavigation(release);
-  const isReservation = isReservationLine(line);
-
-  const preview = useMemo(() => {
-    const value = buildLinePreview(line, journey);
-    if (value.stops.length < 2) throw new Error(`班次 ${journey.tripId} 缺少完整停靠序列`);
-    if (value.stops[0].role !== "boarding") throw new Error(`班次 ${journey.tripId} 缺少上车站`);
-    return value;
-  }, [line, journey]);
-
-  const boarding = preview.stops[0];
-  const alightingStops = preview.stops.slice(1);
-  const boardingNavigationTarget = navigationTarget(boarding.stopId, boarding.stopName);
+  const stopTargets = useStopMapTargets(release);
 
   return (
     <div className="px-5 pb-6 pt-1">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-card text-ink">{journey.departureTime ?? "--:--"} 班车</h2>
-          <p className="mt-1 text-aux text-sub">
-            {[
-              `${fromName} → ${toName}`,
-              isReservation ? "预约车" : "非预约车",
-              preview.durationMinutes !== null
-                ? `${preview.hasEstimated ? "预计" : "约"} ${preview.durationMinutes} 分钟`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
+          {/* 「班车」是废字，大标题直接给时刻 + 方向 */}
+          <h2 className="text-card text-ink">
+            {selection.departureTime}
+            <span className="ml-2 text-body font-medium text-sub">
+              {fromName} → {toName}
+            </span>
+          </h2>
         </div>
         <button
           type="button"
@@ -290,75 +418,25 @@ function TripPreviewContent({
         </button>
       </div>
 
-      {/* 站点时间线：每行「站点名 · 上/下车」+ 发车时间，右侧轻量导航链接 */}
-      <div className="mt-4">
-        <div className="flex gap-3">
-          <div className="flex flex-col items-center">
-            <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-primary" />
-            <span className="mt-1 w-px flex-1 bg-line" />
+      <div className="mt-4 space-y-4">
+        {selection.items.map((item, index) => (
+          <div
+            key={item.journey.tripId}
+            className={index > 0 ? "border-t border-line pt-4" : ""}
+          >
+            <TripSection item={item} stopTargets={stopTargets} onNavigate={setNavTarget} />
           </div>
-          <div className="flex min-w-0 flex-1 items-start justify-between gap-2 pb-3">
-            <div className="min-w-0">
-              <div className="truncate text-body font-medium text-ink">{boarding.stopName} · 上车</div>
-              <div className="mt-1 text-label text-sub">
-                {boarding.time ? `${boarding.time} 发车` : "发车时间待定"}
-              </div>
-            </div>
-            {boardingNavigationTarget ? (
-              <StopNavLink onClick={() => setNavTarget(boardingNavigationTarget)} />
-            ) : null}
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <div className="flex flex-col items-center">
-            <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-success" />
-          </div>
-          <div className="min-w-0 flex-1">
-            {alightingStops.map((stop, index) => {
-              const stopNavigationTarget = navigationTarget(stop.stopId, stop.stopName);
-              return (
-                <div
-                  key={stop.stopId}
-                  className={`flex items-start justify-between gap-2 ${index > 0 ? "mt-2" : ""}`}
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-body font-medium text-ink">
-                      {stop.stopName}
-                      {stop.role === "alighting" && alightingStops.length > 1 ? ` · 下车点${index + 1}` : " · 下车"}
-                    </div>
-                    {stop.time ? (
-                      <div className="mt-1 text-label text-sub">
-                        {/* 推算值必须和排班时刻在措辞上分开：写成确定时刻会让人按它掐点到站。 */}
-                        {stop.isEstimated
-                          ? `预计 ${stop.dayOffset > 0 ? "次日 " : ""}${stop.time} 到达`
-                          : `${stop.time} ${stop.timeLabel ?? ""}`}
-                      </div>
-                    ) : null}
-                  </div>
-                  {stopNavigationTarget ? (
-                    <StopNavLink onClick={() => setNavTarget(stopNavigationTarget)} />
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        ))}
       </div>
-
-      {isReservation ? (
-        <button
-          type="button"
-          className="mt-5 w-full rounded-full bg-primary py-3 text-body font-semibold text-white active:bg-primary-pressed"
-          onClick={() => window.open(line.bookingUrl ?? BOOKING_SITE_URL, "_blank")}
-        >
-          预约此班次
-        </button>
-      ) : null}
 
       <MapAppSheet target={navTarget} onClose={() => setNavTarget(null)} />
     </div>
   );
+}
+
+/** 一趟班次占的弹卡高度：预约车多一个 CTA，所以比非预约车高一档。 */
+function tripSectionHeight(item: FlatLineJourney): number {
+  return isReservationLine(item.line) ? 0.34 : 0.26;
 }
 
 /** 班次预览（移动端底部弹卡）。 */
@@ -375,8 +453,11 @@ function TripPreviewSheet({
   release: LoadedRelease;
   onClose: () => void;
 }) {
-  // 内容精简后 0.55 会留大片空白：标题 + 两站时间线约 200px，预约车多一个 CTA。
-  const height = selection && isReservationLine(selection.line) ? 0.42 : 0.34;
+  // 高度随装了几趟班次走：同一时刻预约 + 非预约两班时卡片要更高，
+  // 否则第二班被压在可视区外，等于又看不到（0.92 是 SheetModal 的上拉上限）。
+  const height = selection
+    ? Math.min(0.92, selection.items.reduce((sum, item) => sum + tripSectionHeight(item), 0.08))
+    : 0.34;
   return (
     <SheetModal open={selection !== null} onClose={onClose} initialHeight={height}>
       {selection ? (
@@ -410,6 +491,7 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
   const isDesktop = useBreakpoint() === "desktop";
   // OD 选择是校区级端点：有站点的校区 + 无校区站点各自成端点（如陈太公寓）。
   const endpoints = useMemo(() => listTransitEndpoints(release.manifest), [release]);
+  const stopTargets = useStopMapTargets(release);
 
   const [fromEndpoint, setFromEndpoint] = useState<TransitEndpoint | null>(null);
   const [toEndpoint, setToEndpoint] = useState<TransitEndpoint | null>(null);
@@ -433,13 +515,13 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
   useEffect(() => {
     if (!fromEndpoint || !toEndpoint) return;
     if (fromEndpoint.id === toEndpoint.id) {
-      setLinesState({ status: "ready", lines: [] });
+      setLinesState({ status: "ready", lines: [], dayType: null });
       return;
     }
     const controller = new AbortController();
     setLinesState({ status: "loading" });
     fetchCampusLines(fromEndpoint.id, toEndpoint.id, selectedDate, controller.signal)
-      .then((response) => setLinesState({ status: "ready", lines: response.lines }))
+      .then((response) => setLinesState({ status: "ready", lines: response.lines, dayType: response.dayType }))
       .catch((error) => {
         if (controller.signal.aborted) return;
         setLinesState({ status: "error", message: error instanceof Error ? error.message : "加载失败" });
@@ -488,11 +570,12 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
     setToEndpoint(fromEndpoint);
   };
 
+  /** 打开某个发车时刻：该时刻上的全部班次（预约 + 非预约）一起装进卡片。 */
   const handleTimeClick = (departureTime: string) => {
     if (linesState.status !== "ready") return;
     const remaining = todayFlag ? getRemainingJourneys(flatJourneys, nowDate) : flatJourneys;
-    const item = remaining.find((entry) => entry.departureTime === departureTime);
-    if (item) setPreview({ line: item.line, journey: item.journey });
+    const items = journeysAtTime(remaining, departureTime);
+    if (items.length > 0) setPreview({ departureTime, items });
   };
 
   const heroCard = (
@@ -507,7 +590,7 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
         type="button"
         disabled={!item}
         className={`min-w-0 flex-1 rounded-3xl px-4 py-4 text-left text-white ${palette} ${item ? "active:opacity-90" : "opacity-45"}`}
-        onClick={() => item && setPreview({ line: item.line, journey: item.journey })}
+        onClick={() => item && handleTimeClick(item.departureTime)}
       >
         <div className="flex items-baseline justify-between gap-2 whitespace-nowrap text-aux text-white/85">
           <span>{label}</span>
@@ -559,7 +642,11 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
               </div>
             </div>
             <div className="ml-3 shrink-0 border-l border-line pl-3">
-              <DatePicker date={selectedDate} onChange={setSelectedDate} />
+              <DatePicker
+                date={selectedDate}
+                dayType={linesState.status === "ready" ? linesState.dayType : null}
+                onChange={setSelectedDate}
+              />
             </div>
           </div>
         </div>
@@ -629,9 +716,9 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
                       <span className="w-28 shrink-0 pt-0.5 text-label text-sub">{row.label}</span>
                       <div className="flex min-w-0 flex-1 flex-wrap gap-x-4 gap-y-1.5">
                         {row.stops.map((stop) => {
-                          const poiKey = release.manifest.transit.stops.find(
-                            (candidate) => candidate.id === stop.stopId,
-                          )?.place_id;
+                          // 站点的地图身份是 `transit_stop:<id>`，不是它绑的地点
+                          // （11 个站点里 10 个 place_id 为 null，见 useStopMapTargets）。
+                          const poiKey = stopTargets.poiKey(stop.stopId);
                           return (
                             <button
                               key={stop.stopId}

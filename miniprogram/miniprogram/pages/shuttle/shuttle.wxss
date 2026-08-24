@@ -25,10 +25,11 @@ page {
   color: #0f172a;
 }
 
-.booking-link {
+/* 「如何坐车？」入口：灰色小字，与大标题基线对齐（.header 是 align-items: flex-end）。
+   不做成按钮/主题蓝：它是补充说明的入口，不该跟页面主操作抢注意力。 */
+.guide-link {
   font-size: 26rpx;
-  font-weight: 500;
-  color: #1e80c1;
+  color: #94a3b8;
   padding-bottom: 8rpx;
 }
 
@@ -280,11 +281,6 @@ page {
   margin-top: 12rpx;
 }
 
-.stop-row-pin {
-  font-size: 26rpx;
-  flex-shrink: 0;
-}
-
 .stop-row-name {
   min-width: 0;
   flex: 1;
@@ -341,8 +337,36 @@ page {
   color: #0f172a;
 }
 
-.sheet-meta {
-  margin-top: 8rpx;
+/* 大标题里跟在时刻后面的方向（「07:00　嘉定校区 → 宝山校区」） */
+.sheet-title-route {
+  margin-left: 16rpx;
+  font-size: 28rpx;
+  font-weight: 500;
+  color: #64748b;
+}
+
+/* 同一时刻两趟车时内容会变高，弹层内部自己滚，不把 tabBar 顶掉。
+   max-height 直接给在 scroll-view 上（同 map.wxss 的 .layer-card-scroll）——
+   它本身就是有界高度，不必再套一层 flex 容器。
+   显式宽度 + border-box 是 Skyline 的老坑：不写会把长内容撑出右边界
+   （见 map.wxss .modal-scroll 的同一条注释）。 */
+.sheet-scroll {
+  max-height: 60vh;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 一趟班次一段：第二段起加分隔线（非预约在上、预约在下） */
+.trip {
+  padding-top: 32rpx;
+}
+
+.trip-border {
+  margin-top: 32rpx;
+  border-top: 2rpx solid #e2e8f0;
+}
+
+.trip-meta {
   font-size: 24rpx;
   color: #64748b;
 }
@@ -453,19 +477,4 @@ page {
 
 .alighting-gap {
   margin-top: 16rpx;
-}
-
-.book-btn {
-  margin-top: 40rpx;
-  width: 100%;
-  border-radius: 999rpx;
-  background: #1e80c1;
-  color: #ffffff;
-  font-size: 30rpx;
-  font-weight: 600;
-  padding: 8rpx 0;
-}
-
-.book-btn::after {
-  border: none;
 }

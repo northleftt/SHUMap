@@ -206,4 +206,38 @@ function pointPoi(overrides) {
   assert.equal(markers.hitTest(markerList, buildings, { x: 500, y: 500 }, 5), null, "空白处返回 null");
 }
 
+// ---------------------------------------------------------------------------
+// 6. 管理端图钉档位：scale 随 marker 投影传递，markerPinStyles 换算内联尺寸
+//    （worklet 反向缩放是统一通道，per-marker 系数只能走内联样式）
+// ---------------------------------------------------------------------------
+{
+  const withScale = markers.buildMarkers([
+    pointPoi({ poiKey: "s", markerScale: 1.35 }),
+    pointPoi({ poiKey: "t" }),
+  ], "baoshan");
+  assert.equal(withScale[0].scale, 1.35, "管理端系数应投影到 marker");
+  assert.equal(withScale[1].scale, 1, "缺省回落标准档");
+
+  const std = markers.markerPinStyles(1);
+  assert.match(std.pinStyle, /width: 44px/, "标准档 pin 44px");
+  assert.match(std.pinStyle, /left: -22px/, "标准档锚点偏移 -22px");
+  assert.match(std.pinStyle, /transform-origin: 22px 22px/, "锚点居中，反向缩放不漂");
+  assert.match(std.circleStyle, /width: 32px/);
+  assert.match(std.iconStyle, /width: 22px/);
+
+  const large = markers.markerPinStyles(1.35);
+  assert.match(large.pinStyle, /width: 59.4px/, "large 档 pin = 44 × 1.35");
+  assert.match(large.pinStyle, /left: -29.7px/);
+  assert.match(large.pinStyle, /transform-origin: 29.7px 29.7px/);
+  assert.match(large.circleStyle, /width: 43.2px/, "圆 = 32 × 1.35");
+  assert.match(large.iconStyle, /width: 29.7px/, "图标 = 22 × 1.35");
+
+  const small = markers.markerPinStyles(0.72);
+  assert.match(small.pinStyle, /width: 31.68px/);
+
+  for (const dirty of [0, -1, NaN, Infinity]) {
+    assert.match(markers.markerPinStyles(dirty).pinStyle, /width: 44px/, `脏系数 ${dirty} 应回落标准档`);
+  }
+}
+
 console.log("miniprogram-map-markers: all assertions passed");

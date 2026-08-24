@@ -5,7 +5,7 @@
 // 带缓存的装配入口在 ./loader.ts；这里的 loadRelease 是不带缓存的直拉版本。
 
 import { apiGet, apiGetText } from "../api";
-import { parseReleaseManifest } from "./manifestContract";
+import { markerScaleValue, parseReleaseManifest } from "./manifestContract";
 import type {
   PublicPlaceFacility,
   ReleaseFacility,
@@ -28,6 +28,14 @@ import type {
   PoiDetailData,
 } from "./types";
 import { NAVIGATION_CRS } from "../revision-contract";
+
+// 管理端图钉系数（content.marker.size → 系数）：0027 起是 0.5~2.0 连续值，
+// 0026 的三档字符串存量由 markerScaleValue 按原系数读出；未知/缺省回落 1（标准）。
+function markerScaleFromContent(content: Record<string, unknown> | null | undefined): number {
+  const marker = content?.marker;
+  if (!marker || typeof marker !== "object") return 1;
+  return markerScaleValue((marker as Record<string, unknown>).size);
+}
 import { groupMerchantsByPlace, normalizeMerchant } from "./merchants";
 
 type CampusDisplayConfig = Omit<
@@ -631,6 +639,7 @@ export function buildMapBuildings(
         sourceElementId: footprint.sourceElementId,
         markerPoint: null,
         markerIconKey: null,
+        markerScale: 1,
         name: place.displayName,
         campusKey: campus.key,
         campusLabel: campus.label,
@@ -716,6 +725,7 @@ export function buildMapPointPois(
           : place.kindId === "service_place"
             ? "service"
             : "generic",
+      markerScale: markerScaleFromContent(place.content),
       name: place.displayName,
       campusKey: campus.key,
       campusLabel: campus.label,
@@ -774,6 +784,7 @@ export function buildMapPointPois(
       sourceElementId: null,
       markerPoint: pointOf(location),
       markerIconKey: type.iconKey,
+      markerScale: markerScaleFromContent(facility.content),
       name: facility.displayName,
       campusKey: campus.key,
       campusLabel: campus.label,
@@ -826,6 +837,7 @@ export function buildMapPointPois(
       sourceElementId: null,
       markerPoint: pointOf(location),
       markerIconKey: "store",
+      markerScale: markerScaleFromContent(merchant.content),
       name: merchant.displayName,
       campusKey: campus.key,
       campusLabel: campus.label,
@@ -876,6 +888,8 @@ export function buildMapPointPois(
       sourceElementId: null,
       markerPoint: pointOf(location),
       markerIconKey: "bus",
+      // 站点的图钉系数来自 transit_stops.marker_size 列（0027 起连续值），非标准系数才进 manifest。
+      markerScale: markerScaleValue(stop.marker_size ?? 1),
       name: stop.name,
       campusKey: campus.key,
       campusLabel: campus.label,

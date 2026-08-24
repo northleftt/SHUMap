@@ -456,6 +456,19 @@ export function LocationEditor({
 }) {
   const allowedRoles = roles ?? ALL_ROLES;
   const roleOptions = allowedRoles.map((role) => ({ value: role, label: ROLE_LABELS[role] }));
+  // 校区级版本（floorId 为空）每个校区只默认放出最新一个 ready/published：
+  // 历史版本留在库里是存档，继续出现在下拉里只会被人工修复时误选（宝山轮廓
+  // 残留 20 条就是这么来的）。已绑定旧版本的行例外保留，否则回显成空。
+  const latestCampusVersionId = useMemo(() => {
+    const latest = new Map<string, admin.MapVersionRow>();
+    for (const version of mapVersions) {
+      if (version.floorId !== null || version.campusId === null) continue;
+      if (version.lifecycleStatus !== "ready" && version.lifecycleStatus !== "published") continue;
+      const current = latest.get(version.campusId);
+      if (!current || version.createdAt > current.createdAt) latest.set(version.campusId, version);
+    }
+    return new Set([...latest.values()].map((version) => version.id));
+  }, [mapVersions]);
   const patch = (index: number, update: Partial<LocationDraft>) => onChange(value.map((row, i) => i === index ? { ...row, ...update } : row));
   const [featuresByVersion, setFeaturesByVersion] = useState<Record<string, admin.MapFeatureRow[]>>({});
   const [loadingVersions, setLoadingVersions] = useState<Set<string>>(new Set());
@@ -505,6 +518,8 @@ export function LocationEditor({
       const versionOptions = mapVersions
         .filter((version) => version.lifecycleStatus === "ready" || version.lifecycleStatus === "published")
         .filter((version) => {
+          if (version.id === row.mapVersionId) return true;
+          if (version.floorId === null && version.campusId !== null && !latestCampusVersionId.has(version.id)) return false;
           if (row.role === "footprint") return version.floorId === null && (!row.campusId || version.campusId === row.campusId);
           if (row.floorId) return version.floorId === row.floorId;
           if (row.campusId) return version.campusId === row.campusId;

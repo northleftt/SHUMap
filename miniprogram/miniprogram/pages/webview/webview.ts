@@ -8,11 +8,17 @@
 import { config } from "../../config";
 import { APP_SHARE_TITLE, enableShareMenus, sharePath, shareTitle } from "../../lib/share";
 
-/** web-view 允许加载的地址前缀：本站网页 + 校车预约系统（含 API 下发的 bookingUrl）。 */
+/**
+ * web-view 允许加载的地址前缀：只有本站网页。
+ *
+ * 白名单必须是「已配成业务域名的域名」的子集，否则点进来只会看到微信的
+ * 「不支持打开非业务域名」原生错误页，而那个错误未必触发 binderror——
+ * 用户卡在报错页上，连本页的「复制链接」降级都摸不到。校车预约站
+ * vcard.shu.edu.cn 就是这么被移出去的（2026-08-24，原因见 shuttle.ts 顶部注释）。
+ */
 const ALLOWED_URL_PREFIXES = [
   config.webBaseUrl + "/",
   config.webBaseUrl, // 不带尾斜杠的根地址
-  "https://vcard.shu.edu.cn/",
 ];
 
 function isAllowedUrl(url: string): boolean {
@@ -31,7 +37,7 @@ Page({
     // 分享出去只会得到一个空白容器页，所以只请求「转发」菜单（复制链接随之解锁）。
     enableShareMenus(false);
     const url = options.url ? decodeURIComponent(options.url) : "";
-    const title = options.title ? decodeURIComponent(options.title) : "预约乘车";
+    const title = options.title ? decodeURIComponent(options.title) : "网页";
     // 域名不在白名单：不加载，直接展示「复制链接」降级页（与 web-view 加载失败同形态）。
     this.setData({ url, title, loadFailed: !isAllowedUrl(url) });
     wx.setNavigationBarTitle({ title });

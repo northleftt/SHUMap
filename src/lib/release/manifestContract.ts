@@ -21,10 +21,11 @@ import type {
   TransitStop,
 } from "../api/types";
 import { NAVIGATION_CRS } from "../../../shared/revision-contract";
+import { markerScaleValue } from "../map/markerTiers";
 
-function exactObject(value: unknown, field: string, fields: readonly string[]): Record<string, unknown> {
+function exactObject(value: unknown, field: string, fields: readonly string[], optionalFields: readonly string[] = []): Record<string, unknown> {
   const record = objectValue(value, field);
-  const allowed = new Set(fields);
+  const allowed = new Set([...fields, ...optionalFields]);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) throw new Error(`${field}.${key} is not supported`);
   }
@@ -329,7 +330,9 @@ function location(value: unknown, field: string): ReleaseLocation {
 }
 
 function transitStop(value: unknown, field: string): TransitStop {
-  const row = exactObject(value, field, ["id", "place_id", "campus_id", "code", "name", "status", "created_at", "updated_at"]);
+  // marker_size 可选：worker 只在非标准档才输出它（旧版客户端的白名单不认识这个键），
+  // 缺失即 standard。
+  const row = exactObject(value, field, ["id", "place_id", "campus_id", "code", "name", "status", "created_at", "updated_at"], ["marker_size"]);
   return {
     id: requiredString(row.id, `${field}.id`),
     place_id: nullableString(row.place_id, `${field}.place_id`),
@@ -337,6 +340,9 @@ function transitStop(value: unknown, field: string): TransitStop {
     code: nullableString(row.code, `${field}.code`),
     name: requiredString(row.name, `${field}.name`),
     status: oneOf(row.status, `${field}.status`, ["active"] as const),
+    ...(Object.hasOwn(row, "marker_size")
+      ? { marker_size: markerScaleValue(row.marker_size) }
+      : {}),
     created_at: requiredString(row.created_at, `${field}.created_at`),
     updated_at: requiredString(row.updated_at, `${field}.updated_at`),
   };

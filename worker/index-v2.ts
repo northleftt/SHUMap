@@ -26,7 +26,7 @@ import {
   uploadGuideAsset,
 } from "./modules/guide";
 import { createMerchant, createMerchantRevision, getMerchant, listMerchants, updateMerchantLifecycle } from "./modules/merchants";
-import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations } from "./modules/operations";
+import { createCampaign, createOperationalEvent, createOperationalEventUpdate, decideOperationalEvent, deleteOperationalEvent, listCampaigns, listOperationalEvents, replaceOperationalEventLocations, updateOperationalEvent } from "./modules/operations";
 import { createPlaceHandler, createPlaceRevisionHandler, deletePlace, getPlace, listPlaces, updatePlaceLifecycle } from "./modules/places";
 import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
@@ -475,6 +475,15 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && path === "/api/admin/operations") {
     principal = await requireSession(request, env, "write:content");
     return createOperationalEvent(request, env, principal, requestId);
+  }
+  const eventItem = match(path, "/api/admin/operations/:id");
+  if (eventItem && method === "PUT") {
+    principal = await requireSession(request, env, "write:content");
+    return updateOperationalEvent(request, env, principal, eventItem.id, requestId);
+  }
+  if (eventItem && method === "DELETE") {
+    principal = await requireSession(request, env, "write:content");
+    return deleteOperationalEvent(env, principal, eventItem.id, requestId);
   }
   const eventReview = match(path, "/api/admin/operations/:id/review");
   if (method === "POST" && eventReview) {

@@ -234,6 +234,8 @@ interface TransitStopCandidate {
   code: string | null;
   name: string;
   status: "active";
+  // 0027 起列里是十进制字符串（连续系数）；0026 的三档枚举存量由迁移映射成数值。
+  marker_size: string;
   created_at: string;
   updated_at: string;
 }
@@ -312,7 +314,8 @@ export interface ReleaseManifest {
   floors: FloorCandidate[];
   facilityTypes: FacilityTypeCandidate[];
   mapFilters: ReleaseMapFilter[];
-  transit: { stops: TransitStopCandidate[] };
+  // marker_size 只在非标准系数（≠1）才进快照（见 buildCandidate 的 stops 映射注释），所以可选。
+  transit: { stops: Array<Omit<TransitStopCandidate, "marker_size"> & { marker_size?: number }> };
   searchDocuments: SearchDocumentCandidate[];
   generatedAt: string;
 }
@@ -608,7 +611,7 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
       : all<MapCandidate>(env.DB, DEFAULT_MAP_VERSION_QUERY),
     // 快照只留站点：站点带几何，是地图数据。线路/班次/时刻/日历改点即生效，
     // 由 GET /api/public/transit/journeys 与 /transit/trips/:tripId/stops 实时下发。
-    all<TransitStopCandidate>(env.DB, `select id,place_id,campus_id,code,name,status,created_at,updated_at
+    all<TransitStopCandidate>(env.DB, `select id,place_id,campus_id,code,name,status,marker_size,created_at,updated_at
       from transit_stops where status='active' order by name,id`),
   ]);
 
@@ -685,7 +688,14 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
     // 位置逐字段挑进快照（releaseLocation）：校验用的 boundMap* 别名留在
     // locations 里给 validateCandidate 用，不外发给客户端。
     maps: releaseMaps, locations: locations.map(releaseLocation), floors, facilityTypes, mapFilters,
-    transit: { stops },
+    // marker_size 只在非标准系数（≠1）才进快照：客户端对 stops 是 exactObject 白名单校验，
+    // 已发布的旧版小程序不认识这个键，全量输出会让它们在下次发版时整份解析失败。
+    transit: { stops: stops.map((stop) => {
+      const scale = Number(stop.marker_size);
+      if (Number.isFinite(scale) && scale !== 1) return { ...stop, marker_size: scale };
+      const { marker_size: _omitted, ...rest } = stop;
+      return rest;
+    }) },
     searchDocuments,
     generatedAt: isoNow(),
   };

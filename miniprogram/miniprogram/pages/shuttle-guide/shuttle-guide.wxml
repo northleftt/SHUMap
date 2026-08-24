@@ -1,0 +1,51 @@
+<!-- 校车乘坐指南（「如何坐车？」）。一篇图文：小标题 / 段落 / 要点 / 图。
+     内容来自 GET /api/public/guide/shuttle-ride，块类型判断在 lib/shuttle-guide.ts
+     里摊成布尔标志（WXML 没有 switch）。用默认渲染器 + 原生导航栏：本页只是
+     竖排文章，没有手势与图层，不需要 Skyline 那套自定义导航。 -->
+<scroll-view scroll-y class="page" enhanced show-scrollbar="{{false}}">
+  <view wx:if="{{state === 'loading'}}" class="state">正在载入…</view>
+
+  <view wx:elif="{{state === 'unpublished'}}" class="state">
+    <view class="state-title">乘车指南暂未发布</view>
+    <view class="state-sub">内容准备好后会在这里显示。</view>
+  </view>
+
+  <view wx:elif="{{state === 'error'}}" class="state">
+    <view class="state-title">内容加载失败</view>
+    <view class="state-sub">{{errorMessage}}</view>
+    <view class="state-retry" bindtap="load">重试</view>
+  </view>
+
+  <view wx:else class="article">
+    <view class="header">
+      <text class="header-title">{{title}}</text>
+      <text wx:if="{{subtitle}}" class="header-subtitle">{{subtitle}}</text>
+    </view>
+
+    <block wx:for="{{blocks}}" wx:key="key">
+      <view wx:if="{{item.isHeading}}" class="block-heading">{{item.text}}</view>
+
+      <view wx:elif="{{item.isParagraph}}" class="block-paragraph">{{item.text}}</view>
+
+      <view wx:elif="{{item.isList}}" class="block-list">
+        <view wx:for="{{item.items}}" wx:for-item="entry" wx:key="*this" class="list-row">
+          <view class="list-dot"></view>
+          <text class="list-text">{{entry}}</text>
+        </view>
+      </view>
+
+      <view wx:elif="{{item.isImage}}" class="block-image">
+        <image
+          class="figure"
+          src="{{item.src}}"
+          mode="widthFix"
+          data-src="{{item.src}}"
+          bindtap="previewImage"
+        />
+        <view wx:if="{{item.caption}}" class="figure-caption">{{item.caption}}</view>
+      </view>
+    </block>
+
+    <view class="footer-space"></view>
+  </view>
+</scroll-view>

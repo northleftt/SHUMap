@@ -149,6 +149,9 @@ function eventRow(overrides = {}) {
     [5, 5],
     "LineString 用顶点质心",
   );
+
+  // 图钉只给点状「事件位置」；区域/路径靠轮廓 + eventRegionHit（对齐 Web 端）
+  assert.deepEqual(ops.eventMarkerItems(items).map((item) => item.locationId), ["loc_2"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +170,12 @@ function eventRow(overrides = {}) {
   assert.equal(ops.eventStatusLabel("scheduled"), "已排期");
   assert.equal(ops.severityLabel("critical"), "严重");
   assert.equal(ops.severityColor("warning"), "#f59e0b");
+  // color：管理端自选颜色优先，未设置回落 severity 默认色（同 Web 端 eventColor）
+  assert.equal(ops.eventColor({ severity: "warning", color: "#7c3aed" }), "#7c3aed");
+  assert.equal(ops.eventColor({ severity: "warning", color: null }), "#f59e0b");
+  const colored = ops.parseOperationsResponse({ items: [eventRow({ color: "#059669" })] })[0];
+  assert.equal(colored.color, "#059669", "color 字段应透传");
+  assert.equal(ops.parseOperationsResponse({ items: [eventRow()] })[0].color, null, "缺 color 字段按 null 处理");
   assert.match(ops.formatEventDay("2026-07-22T11:21:09.239Z"), /^\d+月\d+日$/);
 }
 

@@ -72,7 +72,7 @@ assert.equal(share.shareTitle("宝山 → 延长", "校车时刻"), "宝山 → 
   const tooLong = "四十字的超长地点名".repeat(5);
   assert.ok(share.shareTitle(tooLong).length <= 28, "整句应截到 28 字以内");
 }
-assert.equal(share.shareTitle("预约乘车", ""), "预约乘车", "后缀为空串时只用主题");
+assert.equal(share.shareTitle("网页", ""), "网页", "后缀为空串时只用主题");
 
 // enableShareMenus：老基础库不认 menus（fail 回调）时退回只请求转发菜单
 {

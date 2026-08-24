@@ -225,12 +225,52 @@ test("calendar weekdays only accept explicit booleans", async () => {
       name: "教学周",
       validFrom: "2026-09-01",
       validTo: "2027-01-31",
+      dayType: "weekday",
       weekdays: { ...weekdays, monday: 1 },
       exceptions: [],
       sourceId: null,
     }), env, principal, "request_calendar"),
     /weekdays\.monday must be a boolean/,
   );
+});
+
+// 日型（0025）是必填且枚举受限：它决定客户端「今天是工作日/假日……」标签。
+// 漏填时宁可 400，也不要默默落成 'other' —— 那样标签会静默消失，而运营以为填好了。
+test("calendar dayType is required and enum-checked", async () => {
+  const { env } = environment();
+  const body = {
+    name: "教学周",
+    validFrom: "2026-09-01",
+    validTo: "2027-01-31",
+    weekdays,
+    exceptions: [],
+    sourceId: null,
+  };
+  await rejectsValidation(
+    () => handlers.createCalendar(request(body), env, principal, "request_calendar"),
+    /dayType is required/,
+  );
+  await rejectsValidation(
+    () => handlers.createCalendar(request({ ...body, dayType: "winterBreak" }), env, principal, "request_calendar"),
+    /dayType/,
+  );
+});
+
+test("calendar dayType reaches the insert", async () => {
+  const { env, database } = environment();
+  await handlers.createCalendar(request({
+    name: "2026-2027 寒假",
+    validFrom: "2027-01-26",
+    validTo: "2027-03-01",
+    dayType: "winter_break",
+    weekdays,
+    exceptions: [],
+    sourceId: null,
+  }), env, principal, "request_calendar");
+  const insert = database.executions.find((entry) => entry.sql.includes("insert into service_calendars"));
+  assert.ok(insert, "应写入 service_calendars");
+  assert.match(insert.sql, /day_type/);
+  assert.ok(insert.values.includes("winter_break"), `day_type 应进绑定值：${JSON.stringify(insert.values)}`);
 });
 
 const completeTrip = {

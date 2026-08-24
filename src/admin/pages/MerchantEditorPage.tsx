@@ -24,12 +24,15 @@ import {
   Panel,
   PrimaryButton,
   SelectField,
+  MarkerScaleField,
   TextArea,
   errorMessage,
   useAsyncData,
 } from "../components/primitives";
+
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
 import { LocationEditor, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { markerScaleFromContent } from "../../lib/map/markerScale";
 import type { MerchantContent } from "../../../shared/revision-contract";
 
 function parseMenu(value: unknown): MerchantMenuItem[] {
@@ -159,6 +162,7 @@ export function MerchantEditorPage() {
   const [sourceId, setSourceId] = useState("");
   const [menu, setMenu] = useState<MerchantMenuItem[]>([]);
   const [baseContent, setBaseContent] = useState<MerchantContent>({});
+  const [markerSize, setMarkerSize] = useState(1);
   const [media, setMedia] = useState<MediaRow[]>([]);
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>([]);
   const [lifecycleStatus, setLifecycleStatus] = useState<admin.MerchantLifecycle>("active");
@@ -181,6 +185,7 @@ export function MerchantEditorPage() {
     setOpeningHours(editor.openingHours);
     setPhone(editor.phone);
     setBaseContent(editor.content);
+    setMarkerSize(markerScaleFromContent(editor.content));
     setMedia(editor.media);
     setAvgPrice(editor.avgPrice);
     setStallCode(editor.stallCode);
@@ -246,6 +251,9 @@ export function MerchantEditorPage() {
       }));
     if (menuItems.length) content.menu = menuItems;
     else delete content.menu;
+    // 图钉大小：标准档不落字段；非标准写 content.marker.size。
+    if (markerSize === 1) delete content.marker;
+    else content.marker = { size: markerSize };
     try {
       let revisionId = "";
       if (isNew) {
@@ -351,6 +359,13 @@ export function MerchantEditorPage() {
             placeholder="不指定"
             value={sourceId}
           />
+          <div>
+            <MarkerScaleField
+              onChange={setMarkerSize}
+              value={markerSize}
+              />
+            <p className="mt-1.5 text-aux text-sub">仅对楼外图钉生效；楼内商户不出图钉。改动经审核发布后生效。</p>
+          </div>
           {reviewLocked ? <InfoNote tone="warning">当前修订正在审核，处理完成后才能继续编辑。</InfoNote> : null}
           <ErrorBanner message={error} />
           <div className="flex gap-3">

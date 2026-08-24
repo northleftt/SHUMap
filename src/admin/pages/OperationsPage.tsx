@@ -105,13 +105,30 @@ export function OperationsPage() {
                   </Pill>
                 )}
                 <div className="shrink-0 text-aux font-medium">
-                  {pending ? (
-                    <Link className="text-primary" to="/admin/review">去审核 ›</Link>
-                  ) : ended ? (
-                    <Link className="text-primary" to={`/admin/operations/${event.id}`}>查看 ›</Link>
-                  ) : (
-                    <Link className="text-primary" to={`/admin/operations/${event.id}`}>更新进展 ›</Link>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {pending ? (
+                      <Link className="text-primary" to="/admin/review">去审核 ›</Link>
+                    ) : ended ? (
+                      <Link className="text-primary" to={`/admin/operations/${event.id}`}>查看 ›</Link>
+                    ) : (
+                      <Link className="text-primary" to={`/admin/operations/${event.id}`}>更新进展 ›</Link>
+                    )}
+                    {canWrite && !ended ? (
+                      <Link className="text-primary" to={`/admin/operations/${event.id}/edit`}>编辑 ›</Link>
+                    ) : null}
+                    {canWrite ? (
+                      <button
+                        className="text-error"
+                        onClick={() => {
+                          if (!window.confirm(`确定删除运营事件「${event.title}」？该操作不可恢复。`)) return;
+                          void admin.deleteOperation(event.id).then(() => events.reload()).catch(() => window.alert("删除失败，请稍后重试"));
+                        }}
+                        type="button"
+                      >
+                        删除 ›
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </div>

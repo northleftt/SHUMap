@@ -23,6 +23,7 @@ import type {
   PoiDetailData,
 } from "../types";
 import { NAVIGATION_CRS } from "../../../shared/revision-contract";
+import { markerScaleFromContent, markerScaleValue } from "../map/markerTiers";
 import { groupMerchantsByPlace, normalizeMerchant } from "./merchants";
 
 type CampusDisplayConfig = Omit<
@@ -648,6 +649,7 @@ export function buildMapBuildings(
         sourceElementId: footprint.sourceElementId,
         markerPoint: null,
         markerIconKey: null,
+        markerScale: 1,
         name: place.displayName,
         campusKey: campus.key,
         campusLabel: campus.label,
@@ -732,6 +734,7 @@ export function buildMapPointPois(
           : place.kindId === "service_place"
             ? "service"
             : "generic",
+      markerScale: markerScaleFromContent(place.content),
       name: place.displayName,
       campusKey: campus.key,
       campusLabel: campus.label,
@@ -789,6 +792,7 @@ export function buildMapPointPois(
       sourceElementId: null,
       markerPoint: pointOf(location),
       markerIconKey: type.iconKey,
+      markerScale: markerScaleFromContent(facility.content),
       name: facility.displayName,
       campusKey: campus.key,
       campusLabel: campus.label,
@@ -840,6 +844,7 @@ export function buildMapPointPois(
       sourceElementId: null,
       markerPoint: pointOf(location),
       markerIconKey: "store",
+      markerScale: markerScaleFromContent(merchant.content),
       name: merchant.displayName,
       campusKey: campus.key,
       campusLabel: campus.label,
@@ -888,6 +893,8 @@ export function buildMapPointPois(
       sourceElementId: null,
       markerPoint: pointOf(location),
       markerIconKey: "bus",
+      // 站点的图钉系数来自 transit_stops.marker_size 列（0027 起连续值），非标准系数才进 manifest。
+      markerScale: markerScaleValue(stop.marker_size ?? 1),
       name: stop.name,
       campusKey: campus.key,
       campusLabel: campus.label,

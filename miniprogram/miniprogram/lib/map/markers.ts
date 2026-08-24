@@ -19,6 +19,8 @@ export interface MapMarker {
   /** viewBox 世界坐标。 */
   x: number;
   y: number;
+  /** 管理端档位系数（content.marker.size），缺省 1；页面按它换算图钉像素尺寸。 */
+  scale: number;
   /** 设施不可用且策略允许展示时置灰（对应 Web 端的弱化展示）。 */
   dimmed: boolean;
 }
@@ -36,6 +38,31 @@ export interface BuildingShape {
 export type MapHit =
   | { kind: "marker"; marker: MapMarker }
   | { kind: "building"; building: BuildingShape };
+
+/**
+ * 图钉像素尺寸（基准与 map.wxss 的 .poi-pin 系一致：44/32/22/2）。
+ * worklet 反向缩放是全局统一通道，给不了单个图钉系数，所以管理端档位
+ * （MapMarker.scale）只能换算成内联尺寸——这里一次算好四个节点的 style。
+ */
+export interface MarkerPinStyles {
+  pinStyle: string;
+  haloStyle: string;
+  circleStyle: string;
+  iconStyle: string;
+}
+
+export function markerPinStyles(scale: number): MarkerPinStyles {
+  const k = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const r = (n: number) => Math.round(n * 100) / 100;
+  const pin = r(44 * k);
+  const half = r(pin / 2);
+  return {
+    pinStyle: `left: ${-half}px; top: ${-half}px; width: ${pin}px; height: ${pin}px; transform-origin: ${half}px ${half}px;`,
+    haloStyle: `width: ${pin}px; height: ${pin}px;`,
+    circleStyle: `width: ${r(32 * k)}px; height: ${r(32 * k)}px; border-width: ${r(2 * k)}px;`,
+    iconStyle: `width: ${r(22 * k)}px; height: ${r(22 * k)}px;`,
+  };
+}
 
 type Ring = number[][];
 type PolygonCoords = Ring[];
@@ -110,6 +137,7 @@ export function buildMarkers(pois: MapPoi[], campusKey: string): MapMarker[] {
       iconKey: poi.markerIconKey ?? "generic",
       x: poi.markerPoint!.x,
       y: poi.markerPoint!.y,
+      scale: poi.markerScale || 1,
       dimmed: poi.facilityOperationalStatus === "unavailable",
     }));
 }
@@ -145,6 +173,7 @@ export function buildVisibleMarkers(
       iconKey: poi.markerIconKey ?? "generic",
       x: poi.markerPoint!.x,
       y: poi.markerPoint!.y,
+      scale: poi.markerScale || 1,
       dimmed: poi.facilityOperationalStatus === "unavailable",
     }));
 }

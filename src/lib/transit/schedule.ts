@@ -5,33 +5,26 @@
 //
 // 预约与否是线路级属性（CampusLine.bookingPolicy）；时刻网格按发车时刻把
 // 预/非班次合并成一格展示（旧版 mergeSchedulesByTime 语义）。
+//
+// 日型（工作日/周末/假日/寒暑假）**由服务端按管理端的服务日历给出**
+// （CampusLinesResponse.dayType，见 worker/modules/transit.ts 的 resolveDayType）。
+// 这里曾经自己算：读 data/academic-calendar.json —— 2026-03-11 提交 1ee1733 手写的
+// 一份草稿，没有生成脚本、worker 侧零引用、假日只列到 2026-06-19。而班次归属早就
+// 按 service_calendars 过滤了，两套数据没有代码连通，于是会出现「页面说今天是假日、
+// 但假日班次一个都不出」。运营只应该改一处（管理端日历），所以本文件不再读那份 JSON。
 
-import academicCalendarData from "../../../data/academic-calendar.json";
 import { publicApi } from "../api";
-import type { CampusJourney, CampusLine, CampusLinesResponse, TransitStop } from "../api/types";
-
-export type DateBucket = "weekday" | "weekend" | "holiday" | "winterBreak" | "summerBreak";
+import type {
+  CampusJourney,
+  CampusLine,
+  CampusLinesResponse,
+  PublicDayType,
+  TransitStop,
+} from "../api/types";
 
 // ---------------------------------------------------------------------------
-// Date helpers (display + bucket label only; schedule resolution is server-side)
+// Date helpers (display only; 日型与班次归属都在服务端定)
 // ---------------------------------------------------------------------------
-
-interface DateRange {
-  start: string;
-  end: string;
-}
-
-interface AcademicYear {
-  id: string;
-  firstSemester: DateRange;
-  winterBreak: DateRange;
-  secondSemester: DateRange;
-  summerBreak: DateRange;
-  holidayDates: string[];
-  workdayOverrideDates?: string[];
-}
-
-const academicCalendar = academicCalendarData as { academicYears: AcademicYear[] };
 
 export function toDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -40,41 +33,13 @@ export function toDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function isDateInRange(dateKey: string, range: DateRange): boolean {
-  return dateKey >= range.start && dateKey <= range.end;
-}
-
-function findAcademicYear(dateKey: string): AcademicYear | undefined {
-  return academicCalendar.academicYears.find((year) => {
-    const ranges = [year.firstSemester, year.winterBreak, year.secondSemester, year.summerBreak];
-    return (
-      ranges.some((range) => isDateInRange(dateKey, range)) ||
-      year.holidayDates.includes(dateKey) ||
-      year.workdayOverrideDates?.includes(dateKey)
-    );
-  });
-}
-
-export function getCurrentDateBucket(date: Date = new Date()): DateBucket {
-  const dateKey = toDateKey(date);
-  const academicYear = findAcademicYear(dateKey);
-
-  if (academicYear) {
-    if (academicYear.holidayDates.includes(dateKey)) return "holiday";
-    if (isDateInRange(dateKey, academicYear.winterBreak)) return "winterBreak";
-    if (isDateInRange(dateKey, academicYear.summerBreak)) return "summerBreak";
-    if (academicYear.workdayOverrideDates?.includes(dateKey)) return "weekday";
-  }
-
-  return date.getDay() === 0 || date.getDay() === 6 ? "weekend" : "weekday";
-}
-
-export const BUCKET_LABELS: Record<DateBucket, string> = {
+/** 服务端日型 → 中文标签。键与 0025 迁移的 day_type 枚举一致。 */
+export const DAY_TYPE_LABELS: Record<PublicDayType, string> = {
   weekday: "工作日",
   weekend: "周末",
   holiday: "假日",
-  winterBreak: "寒假",
-  summerBreak: "暑假",
+  winter_break: "寒假",
+  summer_break: "暑假",
 };
 
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -240,6 +205,20 @@ export function flattenLineJourneys(lines: CampusLine[]): FlatLineJourney[] {
     }
   }
   return flat.sort((a, b) => parseTime(a.departureTime) - parseTime(b.departureTime));
+}
+
+/**
+ * 某个发车时刻的全部班次，非预约在前、预约在后。
+ *
+ * 时刻网格把同一时刻的预约与非预约班次合并成一格（见 mergeSchedulesByTime），
+ * 所以点开这一格必须把两班都给出来。以前这里是 `find(...)`，只返回先命中的那一班
+ * ——摊平顺序里非预约常在前，于是「预 非」那一格点开永远只看到非预约车，
+ * 另一半信息在界面上没有任何入口。
+ */
+export function journeysAtTime(journeys: FlatLineJourney[], departureTime: string): FlatLineJourney[] {
+  return journeys
+    .filter((item) => item.departureTime === departureTime)
+    .sort((left, right) => Number(left.isReservation) - Number(right.isReservation));
 }
 
 /** Same departure time can carry both a 预约 and a 非预约 trip — merge for the grid. */

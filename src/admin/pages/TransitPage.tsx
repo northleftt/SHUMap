@@ -4,6 +4,7 @@ import * as admin from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
 import type {
   ReferenceDataResponse,
+  ServiceCalendarDayType,
   ServiceCalendarRow,
   SpacesResponse,
   TransitBookingPolicy,
@@ -27,6 +28,7 @@ import {
   Pill,
   PrimaryButton,
   SelectField,
+  MarkerScaleField,
   errorMessage,
   fmtDay,
   useAsyncData,
@@ -39,12 +41,13 @@ import {
   locationInput,
   type LocationDraft,
 } from "../components/LocationEditor";
+import { ShuttleGuidePanel } from "../components/ShuttleGuidePanel";
 import type { LocationRole } from "../../../shared/revision-contract";
 
 // ---------------------------------------------------------------------------
 // A8 校车管理
 //
-// 四个分区共用一次 GET /api/admin/transit：
+// 前四个分区共用一次 GET /api/admin/transit：
 //   · 班次时刻 —— 选一条线路，编辑它的站点顺序与每日班次
 //   · 站点     —— 站点的增删改，含地点绑定与候车点 / 导航坐标
 //   · 线路     —— 线路（校区对 + 乘车方式）的增删改
@@ -56,17 +59,39 @@ import type { LocationRole } from "../../../shared/revision-contract";
 // 是 1:1，pattern 只是实现细节，界面上不出现「方向」概念。
 // ---------------------------------------------------------------------------
 
-type Tab = "schedule" | "stops" | "lines" | "calendars";
+// 「乘坐指南」与前四个分区不是一类东西：前四个都在写 transit_* 表（一次
+// GET /api/admin/transit 拿全），它写的是 guide_documents（slug=shuttle-ride），
+// 走草稿→送审→发布的独立流水线。放在同一个 tab 组里是因为运营视角上它就是
+// 「校车这件事」的一部分——编辑的人不该为了写一段乘车说明去翻另一个侧栏入口。
+type Tab = "schedule" | "stops" | "lines" | "calendars" | "guide";
 
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "schedule", label: "班次时刻" },
   { key: "stops", label: "站点" },
   { key: "lines", label: "线路" },
   { key: "calendars", label: "服务日历" },
+  { key: "guide", label: "乘坐指南" },
 ];
 
 const WEEK_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
 const WEEK_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
+
+/**
+ * 日历的日型（0025 迁移的 day_type 列）。客户端校车页那句「今天是工作日 / 假日……」
+ * 直接读它，所以这是运营唯一需要维护的地方——此前那个标签算在前端、数据源是一份
+ * 手写草稿（data/academic-calendar），和班次归属所依据的服务日历没有任何连通。
+ *
+ * 「不参与日型」= 'other'：考试周、临时加开这类不属于五种日型的日历选它，班次照常
+ * 运营，只是不影响标签。
+ */
+const DAY_TYPE_OPTIONS: Array<{ value: ServiceCalendarDayType; label: string }> = [
+  { value: "weekday", label: "工作日" },
+  { value: "weekend", label: "周末" },
+  { value: "holiday", label: "假日" },
+  { value: "winter_break", label: "寒假" },
+  { value: "summer_break", label: "暑假" },
+  { value: "other", label: "不参与日型标签" },
+];
 
 /** 站点自身的锚点：候车点，外加可选的导航终点。上 / 下车安排归线路（pattern 的 pickup/dropoff），不归站点。 */
 const STOP_LOCATION_ROLES: readonly LocationRole[] = ["boarding_point", "navigation_target"];
@@ -277,6 +302,9 @@ function ReadyTransitPage({ data, meta, reload }: { data: TransitResponse; meta:
         <LinesPanel busy={busy} data={data} deriveRouteName={deriveRouteName} meta={meta} mutate={mutate} />
       ) : null}
       {tab === "calendars" ? <CalendarsPanel busy={busy} data={data} meta={meta} mutate={mutate} /> : null}
+      {/* 乘坐指南自带数据加载与错误处理（写的是 guide_documents，不在 GET /api/admin/transit
+          里），所以不吃外层的 busy / mutate / data —— 那三个都是校车表的。 */}
+      {tab === "guide" ? <ShuttleGuidePanel /> : null}
     </div>
   );
 }
@@ -842,6 +870,7 @@ interface StopFormState {
   placeId: string;
   campusId: string;
   status: TransitStopStatus;
+  markerSize: number;
   locations: LocationDraft[];
 }
 
@@ -913,6 +942,7 @@ function StopsPanel({
                     code: form.code || null,
                     placeId: form.placeId || null,
                     campusId: form.campusId || null,
+                    markerSize: form.markerSize,
                     locations: form.locations.filter((row) => !isLocationDraftBlank(row)).map(locationInput),
                   }),
                   "新建站点失败",
@@ -938,6 +968,7 @@ function StopsPanel({
                         placeId: stop.placeId ?? "",
                         campusId: stop.campusId ?? "",
                         status: stop.status,
+                        markerSize: stop.markerSize ?? 1,
                         locations: locationsByStop.get(stop.id) ?? [],
                       }}
                       meta={meta}
@@ -950,6 +981,7 @@ function StopsPanel({
                             placeId: form.placeId || null,
                             campusId: form.campusId || null,
                             status: form.status,
+                            markerSize: form.markerSize,
                             locations: form.locations.filter((row) => !isLocationDraftBlank(row)).map(locationInput),
                           }),
                           "保存站点失败",
@@ -1059,6 +1091,7 @@ function StopEditor({
   const [placeId, setPlaceId] = useState(initial?.placeId ?? "");
   const [campusId, setCampusId] = useState(initial?.campusId ?? "");
   const [status, setStatus] = useState<TransitStopStatus>(initial?.status ?? "active");
+  const [markerSize, setMarkerSize] = useState(initial?.markerSize ?? 1);
   const [locations, setLocations] = useState<LocationDraft[]>(initial?.locations ?? []);
   const [formError, setFormError] = useState("");
 
@@ -1110,7 +1143,7 @@ function StopEditor({
       return;
     }
     setFormError("");
-    void onSave({ name: name.trim(), code: code.trim(), placeId, campusId, status, locations: normalized });
+    void onSave({ name: name.trim(), code: code.trim(), placeId, campusId, status, markerSize, locations: normalized });
   }
 
   return (
@@ -1143,6 +1176,10 @@ function StopEditor({
           placeholder="不指定"
           value={campusId}
         />
+        <MarkerScaleField
+          onChange={setMarkerSize}
+          value={markerSize}
+          />
       </div>
 
       {boundPlace === null ? (
@@ -1524,6 +1561,8 @@ interface CalendarFormState {
   name: string;
   validFrom: string;
   validTo: string;
+  /** 日型：决定客户端「今天是工作日/假日……」标签；'other' 表示不参与标签。 */
+  dayType: ServiceCalendarDayType;
   weekdays: boolean[];
   exceptions: Array<{ date: string; type: "added" | "removed"; label: string }>;
   sourceId: string;
@@ -1559,6 +1598,7 @@ function CalendarsPanel({
       name: calendar.name,
       validFrom: calendar.validFrom,
       validTo: calendar.validTo,
+      dayType: calendar.dayType,
       weekdays: WEEK_KEYS.map((key) => calendar[key] === 1),
       exceptions: exceptionsByCalendar.get(calendar.id) ?? [],
       sourceId: calendar.sourceId ?? "",
@@ -1592,6 +1632,7 @@ function CalendarsPanel({
                   name: form.name,
                   validFrom: form.validFrom,
                   validTo: form.validTo,
+                  dayType: form.dayType,
                   weekdays: Object.fromEntries(WEEK_KEYS.map((key, index) => [key, form.weekdays[index]])) as Record<
                     (typeof WEEK_KEYS)[number], boolean
                   >,
@@ -1625,6 +1666,7 @@ function CalendarsPanel({
                           name: form.name,
                           validFrom: form.validFrom,
                           validTo: form.validTo,
+                          dayType: form.dayType,
                           weekdays: Object.fromEntries(WEEK_KEYS.map((key, index) => [key, form.weekdays[index]])) as Record<
                             (typeof WEEK_KEYS)[number], boolean
                           >,
@@ -1661,6 +1703,10 @@ function CalendarsPanel({
                   </span>
                   <span className="w-40 shrink-0 text-aux text-sub">
                     {fmtDay(calendar.validFrom)} 至 {fmtDay(calendar.validTo)}
+                  </span>
+                  {/* 日型直接列出来：它决定客户端的日型标签，看不见就没人会去维护它。 */}
+                  <span className="w-20 shrink-0 text-aux text-sub">
+                    {DAY_TYPE_OPTIONS.find((option) => option.value === calendar.dayType)?.label ?? calendar.dayType}
                   </span>
                   <span className="w-24 shrink-0 text-aux text-sub">{exceptions.length ? `${exceptions.length} 个例外` : "无例外"}</span>
                   <span className="flex-1" />
@@ -1735,6 +1781,9 @@ function CalendarEditor({
   const [name, setName] = useState(initial?.name ?? "");
   const [validFrom, setValidFrom] = useState(initial?.validFrom ?? today());
   const [validTo, setValidTo] = useState(initial?.validTo ?? `${new Date().getFullYear()}-12-31`);
+  // 新建默认 'weekday'：最常见的日历就是工作日班表。不默认 'other' 是因为
+  // 'other' 不参与客户端日型标签，静默选它会让「今天是什么日子」这行字消失。
+  const [dayType, setDayType] = useState<ServiceCalendarDayType>(initial?.dayType ?? "weekday");
   const [weekdays, setWeekdays] = useState(initial?.weekdays ?? [true, true, true, true, true, false, false]);
   const [exceptions, setExceptions] = useState(initial?.exceptions ?? []);
   const [sourceId, setSourceId] = useState(initial?.sourceId ?? "");
@@ -1752,15 +1801,23 @@ function CalendarEditor({
       dates.add(item.date);
     }
     setFormError("");
-    void onSave({ name: name.trim(), validFrom, validTo, weekdays, exceptions: filled, sourceId });
+    void onSave({ name: name.trim(), validFrom, validTo, dayType, weekdays, exceptions: filled, sourceId });
   }
 
   return (
     <div className="space-y-3 rounded-xl bg-page p-4">
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         <Field label="日历名称" onChange={setName} placeholder="如 2025-2026 工作日" value={name} />
         <Field label="开始日期" onChange={setValidFrom} type="date" value={validFrom} />
         <Field label="结束日期" onChange={setValidTo} type="date" value={validTo} />
+        {/* 日型决定客户端「今天是工作日/假日……」那句标签。选「不参与」的日历
+            照常发班次，只是不影响标签（考试周、临时加开）。 */}
+        <SelectField
+          label="日型"
+          onChange={(value) => setDayType(value as ServiceCalendarDayType)}
+          options={DAY_TYPE_OPTIONS}
+          value={dayType}
+        />
         <SelectField
           label="数据来源（可选）"
           onChange={setSourceId}

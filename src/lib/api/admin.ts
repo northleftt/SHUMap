@@ -3,6 +3,7 @@
 // Route map: worker/index-v2.ts (routeAdmin) and worker/modules/*.
 
 import { apiFetch } from "./client";
+import type { ServiceCalendarDayType } from "../../admin/adminTypes";
 import type {
   FacilityRevisionWrite,
   GeometryType,
@@ -593,6 +594,7 @@ export interface MapImportJobRow {
   mediaAssetId: string | null;
   fileName: string | null;
   anchorReview: MapImportAnchorReviewItem[];
+  anchorAutoMigrated: MapImportAnchorReviewItem[];
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -633,6 +635,8 @@ export interface OperationTargetInput {
 export interface OperationCreateInput {
   eventType: OperationEventType;
   severity: OperationSeverity;
+  /** 地图标注颜色（#rrggbb）；null = 按 severity 默认色。 */
+  color: string | null;
   title: string;
   description: string | null;
   startsAt: string;
@@ -646,6 +650,21 @@ export interface OperationCreateInput {
 
 export function createOperation(body: OperationCreateInput): Promise<{ id: string }> {
   return apiFetch<{ id: string }>("/api/admin/operations", { method: "POST", body });
+}
+
+/** PUT /api/admin/operations/:id — 编辑事件主体（几何仍走 replaceOperationLocations）。 */
+export type OperationUpdateInput = Omit<OperationCreateInput, "locations">;
+
+export function updateOperation(id: string, body: OperationUpdateInput): Promise<{ id: string; editorialStatus: string }> {
+  return apiFetch<{ id: string; editorialStatus: string }>(`/api/admin/operations/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body,
+  });
+}
+
+/** DELETE /api/admin/operations/:id — 删除事件（含 targets/updates/几何锚点，服务端审计）。 */
+export function deleteOperation(id: string): Promise<{ id: string; deleted: boolean }> {
+  return apiFetch<{ id: string; deleted: boolean }>(`/api/admin/operations/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export function reviewOperation(
@@ -734,6 +753,7 @@ export interface TransitStopCreateInput {
   code: string | null;
   placeId: string | null;
   campusId: string | null;
+  markerSize?: number;
   locations: Array<import("../../../shared/revision-contract").RevisionLocationInput>;
 }
 
@@ -752,6 +772,7 @@ export interface TransitStopUpdateInput {
   placeId?: string | null;
   campusId?: string | null;
   status?: TransitStopStatus;
+  markerSize?: number;
   locations?: Array<import("../../../shared/revision-contract").RevisionLocationInput>;
 }
 
@@ -832,6 +853,8 @@ export interface TransitCalendarCreateInput {
   name: string;
   validFrom: string;
   validTo: string;
+  /** 日型：决定客户端的「今天是工作日/假日……」标签，'other' 表示不参与标签。 */
+  dayType: ServiceCalendarDayType;
   weekdays: Record<"monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday", boolean>;
   exceptions: TransitCalendarExceptionInput[];
   sourceId: string | null;
@@ -885,6 +908,7 @@ export interface TransitCalendarUpdateInput {
   name?: string;
   validFrom?: string;
   validTo?: string;
+  dayType?: ServiceCalendarDayType;
   weekdays?: Record<"monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday", boolean>;
   exceptions?: TransitCalendarExceptionInput[];
   sourceId?: string | null;
@@ -1401,4 +1425,168 @@ export function updateFloorPlanStatus(
     `/api/admin/floor-plans/${encodeURIComponent(mapVersionId)}/status`,
     { method: "PATCH", body: { lifecycleStatus } },
   );
+}
+
+// ---------------------------------------------------------------------------
+// 指南文档（guide_documents）
+//
+// 一套端点服务两份内容，按 slug 区分：freshman-transit 是返校指南（由
+// public/guide/editor.html 那个独立静态编辑器维护），shuttle-ride 是校车乘坐
+// 指南（由 admin 内的 ShuttleGuidePanel 维护）。两份走同一条草稿→送审→发布→
+// 回滚的流水线，互不干扰。
+//
+// 这些函数以前不存在：返校指南编辑器是纯静态页，直接 fetch 拼字符串。
+// 校车乘坐指南跑在 React admin 里，走 apiFetch 才能拿到统一的
+// ApiError 语义与 admin-data-changed 刷新广播。
+// ---------------------------------------------------------------------------
+
+export interface GuideDocumentRow {
+  id: string;
+  slug: string;
+  title: string;
+  lifecycleStatus: "draft" | "published" | "archived";
+  currentRevisionId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  publishedRevisionNo: number | null;
+  publishedEdition: string | null;
+  revisionCount: number;
+  openCount: number;
+}
+
+export interface GuideRevisionRow {
+  id: string;
+  revisionNo: number;
+  editorialStatus: "draft" | "in_review" | "approved" | "rejected" | "superseded";
+  title: string;
+  edition: string | null;
+  note: string | null;
+  contentHash: string;
+  createdAt: string;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+  reviewNote: string | null;
+  contentBytes: number;
+  authorName: string | null;
+  reviewerName: string | null;
+}
+
+export interface GuideDocumentDetail {
+  document: {
+    id: string;
+    slug: string;
+    title: string;
+    lifecycleStatus: "draft" | "published" | "archived";
+    currentRevisionId: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  revisions: GuideRevisionRow[];
+  /** 当前在编辑的那一版（优先 in_review，其次最新 draft，都没有则退回已发布版）。 */
+  working: {
+    id: string;
+    revisionNo: number;
+    editorialStatus: string;
+    content: Record<string, unknown>;
+  } | null;
+}
+
+/** GET /api/admin/guide/documents */
+export function listGuideDocuments(signal?: AbortSignal): Promise<ListResponse<GuideDocumentRow>> {
+  return apiFetch<ListResponse<GuideDocumentRow>>("/api/admin/guide/documents", { signal });
+}
+
+/** GET /api/admin/guide/documents/:id */
+export function getGuideDocument(id: string, signal?: AbortSignal): Promise<GuideDocumentDetail> {
+  return apiFetch<GuideDocumentDetail>(`/api/admin/guide/documents/${encodeURIComponent(id)}`, { signal });
+}
+
+/** POST /api/admin/guide/documents — 新建文档（content 可省，服务端给空壳）。 */
+export function createGuideDocument(body: {
+  slug: string;
+  title: string;
+  edition?: string | null;
+  note?: string | null;
+  content?: Record<string, unknown>;
+}): Promise<{ id: string; revisionId: string; revisionNo: number; editorialStatus: string; contentHash: string }> {
+  return apiFetch("/api/admin/guide/documents", { method: "POST", body });
+}
+
+/**
+ * POST /api/admin/guide/documents/:id/revisions — 保存草稿。
+ *
+ * 语义是「保存」而不是「开新版」：已有 draft 就原地更新，只有已发布版时才
+ * 开新的一版。送审中（in_review）保存会被服务端 409 拒掉。
+ */
+export function saveGuideRevision(
+  documentId: string,
+  body: { title: string; edition?: string | null; note?: string | null; content: Record<string, unknown> },
+): Promise<{ id: string; revisionNo: number; editorialStatus: string; contentHash: string; unchanged?: boolean }> {
+  return apiFetch(`/api/admin/guide/documents/${encodeURIComponent(documentId)}/revisions`, { method: "POST", body });
+}
+
+/** POST /api/admin/guide/revisions/:id/submit — 送审（仅 draft 可送）。 */
+export function submitGuideRevision(revisionId: string, note?: string): Promise<{ id: string; editorialStatus: string }> {
+  return apiFetch(`/api/admin/guide/revisions/${encodeURIComponent(revisionId)}/submit`, {
+    method: "POST",
+    body: note ? { note } : {},
+  });
+}
+
+/** POST /api/admin/guide/revisions/:id/review — 审核决议（仅 in_review 可决）。 */
+export function reviewGuideRevision(
+  revisionId: string,
+  decision: "approve" | "reject",
+  note?: string,
+): Promise<{ id: string; editorialStatus: string }> {
+  return apiFetch(`/api/admin/guide/revisions/${encodeURIComponent(revisionId)}/review`, {
+    method: "POST",
+    body: note ? { decision, note } : { decision },
+  });
+}
+
+/**
+ * POST /api/admin/guide/documents/:id/publish — 发布 / 回滚。
+ * 指向更新的版本是发布，指向更早的是回滚，机制完全一样；只能指向 approved 版。
+ */
+export function publishGuideRevision(
+  documentId: string,
+  revisionId: string,
+): Promise<{ id: string; currentRevisionId: string; lifecycleStatus: string }> {
+  return apiFetch(`/api/admin/guide/documents/${encodeURIComponent(documentId)}/publish`, {
+    method: "POST",
+    body: { revisionId },
+  });
+}
+
+/** POST /api/admin/guide/documents/:id/unpublish — 下线（前台立刻 404，内容与历史保留）。 */
+export function unpublishGuideDocument(
+  documentId: string,
+): Promise<{ id: string; currentRevisionId: null; lifecycleStatus: string }> {
+  return apiFetch(`/api/admin/guide/documents/${encodeURIComponent(documentId)}/unpublish`, { method: "POST" });
+}
+
+/**
+ * PUT /api/admin/guide/assets/:key?kind=… — 上传 / 替换素材。
+ *
+ * 按 key 寻址而不是 POST 新建：同一个键重复上传即替换，引用它的内容不必改。
+ * kind=figure_png 实收 PNG 与 JPEG（服务端按魔术字节嗅探），小程序端只有位图画得出来。
+ */
+export function uploadGuideAsset(
+  key: string,
+  bytes: ArrayBuffer | Blob,
+  kind: "figure_png" | "figure_svg" | "icon_png" | "icon_svg" = "figure_png",
+  contentType = "image/png",
+): Promise<{ assetKey: string; assetKind: string; byteSize: number; contentType: string; metadata: Record<string, unknown> }> {
+  return apiFetch(`/api/admin/guide/assets/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    query: { kind },
+    rawBody: bytes,
+    contentType,
+  });
+}
+
+/** 素材键 → 公共读地址（管理端预览用同源相对路径）。 */
+export function guideAssetUrl(assetKey: string): string {
+  return `/api/public/guide-assets/${encodeURIComponent(assetKey)}`;
 }

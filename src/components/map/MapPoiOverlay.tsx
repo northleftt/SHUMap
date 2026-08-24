@@ -35,7 +35,9 @@ export function MapPoiOverlay({
         if (!poi.markerPoint) return null;
         const selected = poi.poiKey === selectedPoiKey;
         const Icon = poi.entityType === "merchant" ? Store : facilityIconByKey(poi.markerIconKey);
-        const iconSize = unit * 1.08;
+        // 管理端档位（content.marker.size）乘在公共基准上，只对这一个图钉生效。
+        const poiUnit = unit * (poi.markerScale || 1);
+        const iconSize = poiUnit * 1.08;
         const { x, y } = poi.markerPoint;
         return (
           <g
@@ -50,15 +52,15 @@ export function MapPoiOverlay({
             style={{ cursor: "pointer", pointerEvents: "auto" }}
           >
             {selected ? (
-              <circle cx={x} cy={y} fill="#d7e8f3" opacity={0.82} r={unit * 1.08} />
+              <circle cx={x} cy={y} fill="#d7e8f3" opacity={0.82} r={poiUnit * 1.08} />
             ) : null}
             <circle
               cx={x}
               cy={y}
               fill={selected ? "#1e80c1" : "#ffffff"}
-              r={unit * 0.78}
+              r={poiUnit * 0.78}
               stroke="#1e80c1"
-              strokeWidth={unit * (selected ? 0.13 : 0.09)}
+              strokeWidth={poiUnit * (selected ? 0.13 : 0.09)}
             />
             <Icon
               color={selected ? "#ffffff" : "#1e80c1"}

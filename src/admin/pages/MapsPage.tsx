@@ -432,6 +432,11 @@ export function MapsPage() {
                       {job.anchorReview.length} 个手工标注仍在旧版地图坐标系（{job.anchorReview.map((a) => a.entityName ?? a.anchorId ?? "未知").join("、")}），画布如有平移/缩放会错位，发布前请到对应设施/地点重新选点。
                     </p>
                   ) : null}
+                  {job.status === "succeeded" && job.anchorAutoMigrated.length ? (
+                    <p className="mt-1 text-aux font-medium text-success">
+                      画布与上一版一致，{job.anchorAutoMigrated.length} 个手工标注已自动迁移到新地图（{job.anchorAutoMigrated.map((a) => a.entityName ?? a.anchorId ?? "未知").join("、")}），无需重新选点。
+                    </p>
+                  ) : null}
                 </div>
               </div>
             );

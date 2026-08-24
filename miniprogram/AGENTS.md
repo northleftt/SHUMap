@@ -13,6 +13,47 @@
 6. **后端数据源（方案 B）**：`config.ts` 的 `apiBaseUrl` 指向**线上 Worker** `https://map.shutf.com`，日常开发不依赖本地 D1，也不要再让本地 wrangler dev（8788）承担数据源。开发者工具"服务端口"开启后可用 CLI：`cli open`/`cli preview`/`cli auto`；**preview 需要 IDE 已登录，auto 不需要**。注意：workers.dev 未备案，真机/上线必须走云托管代理（`useCloudContainer: true`），本地开发依赖开发者工具的 `urlCheck: false`。
 7. **worklet 捕获的外部变量是序列化快照**（官方文档：捕获时序列化拷贝到 UI 线程、对象被 freeze、后续修改不同步）。onLoad 之后才赋值的可变配置（如手势用的 mapCfg/planCfg 普通对象）在 worklet 里永远是初值 → 真机手势全部静默失效（Part 2/3 踩过；automator 驱动不了 Skyline 手势、一直 evaluate 直调绕过，所以模拟器上发现不了）。**worklet 要读的每一项配置标量都必须放 `wx.worklet.shared()`**，赋值时先置 ready=false、赋完置 true 避免半更新。
 8. **`worklet:ongesture` 绑定在本环境真机上完全不触发**（glass-easel + TS + 当前基础库的组合；屏上诊断确认回调零次执行，而同页面 bindtap 正常、worklet 本身没坏——applyAnimatedStyle 渲染/动画都正常，原因未查明）。**手势识别已整体改为 JS 线程触摸事件**（`.map-surface`/`.floor-surface` 上的 `bindtouchstart/bindtouchmove/bindtouchend/bindtouchcancel/bindtap`）+ `lib/map/viewport.ts` 纯函数，不要再回到 gesture-handler + worklet:ongesture 方案。渲染层不变：`winX/winY/winScale` shared 变量 + `applyAnimatedStyle`（真机已验证正常）。额外收益：automator 可以 evaluate 直调事件处理器做真端到端手势验证（map automator 4.5 节的 pan/pinch/tap 模拟）。
+9. **WebView 渲染降级模式（模拟器切「当前渲染模式: WebView」）下 `applyAnimatedStyle` 只在注册时匹配一次既有节点**：setData 重建的节点（如切校区/筛选后的 `.poi-pin` 列表项）吃不到动画样式——图钉反向缩放丢失，退化为世界固定尺寸、随缩放巨大化（viewBox 最小的嘉定最夸张）。真机 Skyline 是动态匹配，不受影响。对策：每处重建图钉节点的 setData 回调里调 `refreshPinAnimatedStyle()` 重注册（map.ts；同选择器覆盖语义，Skyline 下无副作用）。验证用 automator：`selectAll(".poi-pin").boundingClientRect()` 在程序化缩放前后宽度应恒定。
+
+## 工程现状（2026-08-24：底部抽屉整卡可拖）
+
+- **拖拽命中区从 28px 把手扩到整张卡片**（用户反馈：细把手太难瞄）。归属判定是
+  **空间的**——手指落点在纵向滚动框（`.sheet-scroll`）里归列表滚动，落在别处
+  （搜索行 / 标签筛选标题行 / 「最近查看」标题行）归卡片拖动。不看 scrollTop、
+  不看时序，所以两端同一套规则、也不需要跨线程读滚动状态。纯函数在
+  `lib/map/sheet.ts`（`sheetGestureOwner` / `resolveSheetDragOwner` /
+  `snapSheetModeWithVelocity` / `dampSheetTop` / `shouldClosePoiOnRelease` /
+  `sheetDragVelocity`），Web 端镜像在 `src/components/sheet/sheetGesture.ts`，
+  用例同一组（`tests/miniprogram-map-sheet.test.mjs` + `tests/sheet-gesture.test.mjs`，
+  后者还断言两端常量一致 + 三处接线都在）。
+- **home 档列表照常滚**（用户明确选的方案）：抬档得抓卡片上半部分或点全屏钮。
+  代价是 home 档下上滑滚列表而不抬档，收益是最近查看 6 条在 home 档就能翻完。
+- **results / poi 档保留「滚到顶继续下拉 = 降档 / 关详情」出口**（iOS 习惯；这两档
+  列表占九成面积，纯空间规则下降档就只剩把手）。实现上零成本：滚到顶后继续下拉在
+  scroll-view 内部是无效动作，冒泡上来的 touchmove 直接驱动抽屉，**不需要打断任何
+  原生滚动**——这是该方案在小程序侧能成立的根本原因。`bounces="{{false}}"` 必须加，
+  否则 iOS 橡皮筋会吃掉到顶后的下拉。
+- **`sheetScrollAreaHitAt` 存时间戳而不是布尔**：Skyline 下 scroll-view 的 touchstart
+  是否冒泡到祖先**未经真机确认**（坑 #8 系）。若不冒泡，`.sheet-shell` 的处理器就没有
+  机会消费清零，布尔标记会漏到下一轮触摸、把之后**每次**整卡拖动都误判成列表滚动
+  （功能静默失效）。时间窗（200ms）只在同一轮触摸内有效，最坏是本轮判定失准，不会粘住。
+- **松手落档补速度**：整卡可拖之后手势变短变快（不再瞄准把手），只看位移投影会
+  「甩了一下没换档」。速度取最后两个采样点（全程平均会把中途的犹豫算进去）；
+  `|v| > 0.5px/ms` 无条件走相邻档，否则按 150ms 外推再取最近档。poi 关闭条件同步
+  加了速度分支。越界从硬 clamp 改阻尼（×0.3）。
+- **抢到手势的副作用**：置 `sheetTapSuppress`（被 `openResultRow`/`openRecentRow`/
+  `onSearchFilterTap` 开头的 `consumeSheetTap()` 消费，避免拖完误开 POI）、
+  `wx.hideKeyboard()`（results 档带着键盘拖卡片会错位）、起点重置到当前位置
+  （判定用掉的 8px 不算进位移）。降档时 `resetSheetScroll()` 把列表滚回顶部
+  （`scroll-top` 在 0/0.5 间交替——传相同值不会重新滚动）。
+- **`measureSheetScrollable()`**：内容没溢出的框（最近查看只一两条）不该吃手势，
+  此时整卡可拖。在 configureSheet 的 setData 回调 + refreshRecents/refreshSearchRows
+  之后实测，异步无妨（早于用户下一次触摸）。
+- **真机待验三条**：① scroll-view 的 touchstart 是否冒泡到 `.sheet-shell`（不冒泡则
+  「非滚动区整卡可拖」失效，退路是非最高档时盖透明捕获层，但那层会吃掉 tap 得手动
+  转发，属最后手段）；② results/poi 档滚到顶下拉降档是否顺；③ 甩动阈值手感。
+  采样脚本复用 `tmp/map-test/sheet-anim-sample.mjs`（evaluate 直调
+  `onSheetTouchStart/Move/End` 序列，断言 sheetY 轨迹单调、落点正确）。
 
 ## 工程现状（2026-08-12：用户定位 dot / 定位按钮）
 
@@ -250,9 +291,11 @@
       失败都 try/catch 静默降级为不显示**（loadOperations/refreshEventOverlay 两道防线）。
     - 显示：面/线轮廓画进一张透明 SVG 写 USER_DATA_PATH 临时文件，同尺寸同定位
       <image> 盖底图（与楼宇高亮同一招，applyEventOverlayImage；描边随缩放变粗，
-      不同于 Web 端屏幕恒定描边）；每个 overlay item 另出一个 severity 三色「!」
-      圆点 marker——**复用 `.poi-pin` 类吃现有 applyAnimatedStyle 反向缩放**，
-      新增 marker 不碰手势 worklet 体系。
+      不同于 Web 端屏幕恒定描边）；图钉只给点状「事件位置」出（`eventMarkerItems`
+      过滤，区域/路径不再叠质心图钉——轮廓本身整块可点，对齐 Web 端）；
+      颜色取 `eventColor(event)`（管理端可自选 color 列，0028；未设置回落 severity
+      三色，与 Web 端 MapEventOverlay 同口径）；marker **复用 `.poi-pin` 类吃现有
+      applyAnimatedStyle 反向缩放**，新增 marker 不碰手势 worklet 体系。
     - 交互：handleTapAt 命中优先级 **POI 图钉 → 事件锚点 → 事件区域 → 楼宇**（与 Web 端
       「POI 在 overlay 之上」一致；曾把事件放最前，结果宝山「测试」图钉与事件
       锚点相邻时 tap 被事件劫持，automator 4 节直接翻车）→ 点事件出底部摘要卡
@@ -293,6 +336,13 @@
 - `lib/map/markers.ts`：`buildMarkers`（点 POI 图钉，含 visibility 策略）/
   `buildBuildingShapes`（楼宇 footprint 命中几何，按 sourceElementId 绑 `parseSvgFeatures`
   产物）/`hitTest`（容差内最近图钉优先，嵌套 footprint 取 bbox 最小）。
+  **管理端图钉档位（2026-08-23）**：`MapMarker.scale` 来自 manifest——地点/设施/商户
+  读 content 的 `marker.size`，校车站点读 `marker_size` 列（0026，站点无 content 通道；
+  worker 只在非标准档才把它输出进 manifest，保护旧版客户端的 exactObject 白名单）。
+  档位系数小 0.72/标准 1/大 1.35，与 Web 端 src/lib/map/markerTiers.ts 同口径；
+  worklet 反向缩放是统一通道给不了 per-marker 系数，所以 `markerPinStyles(scale)`
+  把 44/32/22/2 基准换算成四个节点的内联 style（pin 的 left/top/transform-origin
+  也要跟着缩放），页面 recomputeMarkers 里挂上。
 - `pages/map/map`：地图页。关键做法：
   - **底图用 `<image>` 直连 Worker SVG asset URL**（`/api/public/maps/:id/asset`，
     与 `config.apiBaseUrl` 同源）。Skyline 下网络 SVG 可正常渲染（已截图验证）；
@@ -332,7 +382,16 @@
   + 「上下车点」四行（上车/下车 × 预约/非预约，同类多线按 stopId 合并去重，
   某类无线路则该行不出）+ 班次预览弹层（`buildLinePreview` 本地构建，无二次请求）。
 
-- `pages/webview/webview`：通用外链容器（web-view + 复制链接降级），其他页面打开外链直接复用
+- **2026-08-24 校车预约入口下架**：页头「预约网站 ›」与预览弹层「预约此班次」全部移除，
+  `vcard.shu.edu.cn` 也从 webview 白名单摘掉。三条独立死因（详见 `pages/shuttle/shuttle.ts`
+  顶部注释）：① 该域名不是我们的，配业务域名要往它根目录传校验文件；② 个人主体配不了
+  业务域名，`web-view` 整体不可用；③ `jumpToOrder` 依赖公众号网页授权，小程序 web-view
+  不携带该会话。**webview 白名单只能放已配成业务域名的域名**——否则用户卡在微信的
+  「不支持打开非业务域名」原生错误页上，`binderror` 未必触发，连本页的复制链接降级都摸不到。
+  线路级 `bookingUrl` 在 API / 后台 / Web 端保留不动，只是小程序不再消费。
+
+- `pages/webview/webview`：通用外链容器（web-view + 复制链接降级），其他页面打开外链直接复用。
+  当前白名单只有 `config.webBaseUrl`（本站），暂无调用方
 - `lib/api.ts`：API client 封装（`apiGet` JSON / `apiGetText` 原文，后者给 SVG 底图用）；`config.ts`：全局配置
 - `data/`：数据快照的 `.ts` 模块范式（离线兜底数据照此办理）
 - `typings/shims.d.ts`：TS 声明补丁
@@ -354,7 +413,8 @@
   `map-asset-<mapVersionId>`（SVG 原文）。releaseId 变化清旧 `release-*`；`map-asset-*` 跨 release 复用。
   写入失败（超容量）静默降级为不缓存，见 loader.ts 头注释
 - `pages/debug/debug`：Skyline 临时调试页（release 版本/三校区/POI 总数/设施类型），
-  装配摘要放在 `data.report` 供 automator evaluate 读取；profile 页「调试信息」菜单进入
+  装配摘要放在 `data.report` 供 automator evaluate 读取。公测起 profile 页「调试信息」
+  入口已移除（2026-08-24），页面仍注册在 app.json，开发期可用 devtools/automator 直开
 
 ## 工程现状（Part 6：底部 Tab，对齐 Web 端）
 
@@ -383,7 +443,7 @@
   81×81 PNG，普通/选中两态），改图标或配色后重跑即可，产物在 `images/tabs/`、`images/menu/`。
 - `pages/offcampus/offcampus`：占位页，对齐 Web 端 OffCampusPage（功能还在更新当中）。
 - `pages/profile/profile`：Web ProfilePage 的子集——最近查看（条数，switchTab 回地图）、
-  关于 SHUMap、调试信息；页脚数据版本走 `loadReleaseWithCache().version`。
+  关于 SHUMap；页脚数据版本走 `loadReleaseWithCache().version`。（公测前已移除调试信息入口）
 - **tab 页之间/进入 tab 页必须 `wx.switchTab`**（navigateTo 打不开 tab 页）；
   ~~页面视口自动不含 tab 栏高度~~ **纠正（2026-08-07 实证）：`position: fixed; bottom: 0`
   的浮层参照的是含 tab 栏的完整窗口，自定义 tabBar 会盖住底部约 64px+安全区**——

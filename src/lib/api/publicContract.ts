@@ -103,7 +103,7 @@ function eventLocation(value: unknown, field: string): OperationalEventLocation 
 
 function event(value: unknown, field: string): OperationalEvent {
   const row = exactObject(value, field, [
-    "id", "eventType", "severity", "editorialStatus", "operationalStatus", "title", "description",
+    "id", "eventType", "severity", "color", "editorialStatus", "operationalStatus", "title", "description",
     "startsAt", "expectedEndsAt", "autoExpireAt", "resolvedAt", "lastVerifiedAt", "createdAt", "updatedAt",
     "targets", "updates", "locations",
   ]);
@@ -111,6 +111,7 @@ function event(value: unknown, field: string): OperationalEvent {
     id: requiredString(row.id, `${field}.id`),
     eventType: oneOf(row.eventType, `${field}.eventType`, EVENT_TYPES),
     severity: oneOf(row.severity, `${field}.severity`, EVENT_SEVERITIES),
+    color: nullableString(row.color, `${field}.color`),
     editorialStatus: oneOf(row.editorialStatus, `${field}.editorialStatus`, ["approved"] as const),
     operationalStatus: oneOf(row.operationalStatus, `${field}.operationalStatus`, EVENT_STATUSES),
     title: requiredString(row.title, `${field}.title`),

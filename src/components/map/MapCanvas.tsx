@@ -65,15 +65,34 @@ export function viewportToWindow(
   };
 }
 
+/**
+ * 单轴平移约束：允许区间以「viewBox 在该轴居中」为中心，两侧各留同样的余量。
+ *
+ * 窗口比 viewBox 小（放大态）时，这与旧式 [-pad, viewBox-window+pad] 完全等价 ——
+ * 那个区间本来就对称于 (viewBox-window)/2。
+ *
+ * 窗口比 viewBox 大（最小缩放档，短轴装不满容器）时才有区别：旧式把上界写成
+ * max(0, viewBox-window)+pad = pad，区间 [-pad, pad] 的中心是 0，也就是把
+ * viewBox 顶边钉在容器顶边，于是空白全被挤到下方 —— 延长/宝山最小缩放时下面
+ * 那一大片可拖动空白、上面却没有，就是这么来的。现在中心取 (viewBox-window)/2
+ * （真正的居中），上下左右留白相等。
+ */
+function clampAxis(value: number, windowSize: number, viewBoxSize: number, pad: number) {
+  // 放大态：保持老式 [-pad, 余量+pad] 的**原样算式**。它已经对称于余量/2，改写成
+  // 「中心 ± 半余量」在数学上等价，但浮点上会差出 1e-14，把钉住边界值的测试搞坏。
+  if (windowSize <= viewBoxSize) {
+    return clamp(value, -pad, viewBoxSize - windowSize + pad);
+  }
+  // 最小缩放态（窗口比 viewBox 大）：viewBox 在该轴居中，两侧各留 pad。
+  const center = (viewBoxSize - windowSize) / 2;
+  return clamp(value, center - pad, center + pad);
+}
+
 export function clampWindow(window: ViewWindow, viewBox: Size, edgePaddingRatio: number) {
-  const padX = viewBox.width * edgePaddingRatio;
-  const padY = viewBox.height * edgePaddingRatio;
-  const maxX = Math.max(0, viewBox.width - window.width) + padX;
-  const maxY = Math.max(0, viewBox.height - window.height) + padY;
   return {
     ...window,
-    x: clamp(window.x, -padX, maxX),
-    y: clamp(window.y, -padY, maxY),
+    x: clampAxis(window.x, window.width, viewBox.width, viewBox.width * edgePaddingRatio),
+    y: clampAxis(window.y, window.height, viewBox.height, viewBox.height * edgePaddingRatio),
   };
 }
 

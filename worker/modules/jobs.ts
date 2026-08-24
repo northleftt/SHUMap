@@ -209,9 +209,9 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
   const features = await importedFeatures(content, mapVersionId);
   if (!features.length) throw new ImportValidationError("Map SVG contains no addressable features");
   const coordinateSpace = parseSvgViewBox(content);
-  const previousVersion = await first<{ id: string }>(
+  const previousVersion = await first<{ id: string; coordinateSpaceJson: string }>(
     env.DB,
-    `select id from map_versions
+    `select id,coordinate_space_json as coordinateSpaceJson from map_versions
       where coalesce(campus_id,'')=coalesce(?,'') and coalesce(floor_id,'')=coalesce(?,'')
         and lifecycle_status in ('ready','published','archived')
       order by created_at desc,id desc limit 1`,
@@ -318,11 +318,11 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
     }
   }
   // 换底图后，仍停留在旧坐标系的手工标注（设施点/影响区等 svg_viewbox 非 footprint 锚点）
-  // 不会随导入迁移——列进 result_json，由管理端任务卡片提示人工重新选点（见 MapsPage）。
-  const anchorReview = payload.campusId
-    ? await all<{ id: string; role: string; entityType: string; entityId: string; entityName: string | null }>(
+  // 默认不随导入迁移——列进 result_json，由管理端任务卡片提示人工重新选点（见 MapsPage）。
+  const anchorReviewRows = payload.campusId
+    ? await all<{ id: string; role: string; entityType: string; entityId: string; entityName: string | null; mapVersionId: string | null }>(
       env.DB,
-      `select la.id,la.role,el.entity_type as entityType,el.entity_id as entityId,
+      `select la.id,la.role,el.entity_type as entityType,el.entity_id as entityId,la.map_version_id as mapVersionId,
               coalesce((select pn.name from place_names pn
                          where pn.place_id=el.entity_id and el.entity_type='place' and pn.name_type='primary' limit 1),
                        (select ft.name from facility_instances fi
@@ -336,18 +336,51 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
       [payload.campusId, mapVersionId],
     )
     : [];
+  // 画布坐标系没变（coordinate_space_json 逐字节一致 = 同一 viewBox）时旧坐标逐点有效：
+  // 仍指向旧版本的锚点直接改挂新版本；未绑版本的 campus 级标注也不需复核。只有画布
+  // 真有平移/缩放才维持人工重新选点。
+  let anchorAutoMigrated: typeof anchorReviewRows = [];
+  let anchorReview = anchorReviewRows;
+  if (payload.campusId && anchorReviewRows.length > 0) {
+    const newSpaceJson = jsonString(coordinateSpace);
+    const oldVersionIds = [...new Set(anchorReviewRows.map((row) => row.mapVersionId).filter((id): id is string => id !== null))];
+    const sameSpaceVersions = new Set(
+      oldVersionIds.length
+        ? (await all<{ id: string }>(
+          env.DB,
+          `select id from map_versions where id in (${oldVersionIds.map(() => "?").join(",")}) and coordinate_space_json=?`,
+          [...oldVersionIds, newSpaceJson],
+        )).map((row) => row.id)
+        : [],
+    );
+    const migrated = new Set(
+      anchorReviewRows
+        .filter((row) => row.mapVersionId !== null && sameSpaceVersions.has(row.mapVersionId))
+        .map((row) => row.id),
+    );
+    const canvasUnchanged = previousVersion?.coordinateSpaceJson === newSpaceJson;
+    anchorAutoMigrated = anchorReviewRows.filter((row) => migrated.has(row.id) || (canvasUnchanged && row.mapVersionId === null));
+    anchorReview = anchorReviewRows.filter((row) => !anchorAutoMigrated.includes(row));
+    for (const row of anchorReviewRows) {
+      if (!migrated.has(row.id)) continue;
+      statements.push(env.DB.prepare("update location_anchors set map_version_id=?,updated_at=? where id=?")
+        .bind(mapVersionId, now, row.id));
+    }
+  }
+  const anchorReviewJson = (rows: typeof anchorReviewRows) => rows.map((row) => ({
+    anchorId: row.id,
+    role: row.role,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    entityName: row.entityName,
+  }));
   statements.push(env.DB.prepare("update jobs set status='succeeded',result_json=?,finished_at=? where id=?")
     .bind(jsonString({
       mapAssetId,
       mapVersionId,
       featureCount: features.length,
-      anchorReview: anchorReview.map((row) => ({
-        anchorId: row.id,
-        role: row.role,
-        entityType: row.entityType,
-        entityId: row.entityId,
-        entityName: row.entityName,
-      })),
+      anchorReview: anchorReviewJson(anchorReview),
+      anchorAutoMigrated: anchorReviewJson(anchorAutoMigrated),
     }), now, job.id));
   await env.DB.batch(statements);
 }

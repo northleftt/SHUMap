@@ -137,7 +137,12 @@ export function MapPage() {
   };
   const topForMode = (mode: MapSheetMode) => containerHeight - tabBar - visibleHeights[mode];
 
-  const { dragOffset, handlePointerDown } = useSheetDrag<MapSheetMode>({
+  // 抽屉抢到手势后抑制随后的列表行点击（拖完卡片不该误开 POI），松手下一帧解除。
+  const sheetDragClaimedRef = useRef(false);
+  // 降档时把列表滚回顶部：可见带缩短而列表还停在中间，看起来像坏了。
+  const sheetScrollResetRef = useRef<(() => void) | null>(null);
+
+  const { dragOffset, dragging, sheetRef, handlePointerDown, handleKeyDown } = useSheetDrag<MapSheetMode>({
     mode: state.sheetMode,
     topForMode,
     allowedModes: (mode) => {
@@ -146,7 +151,28 @@ export function MapPage() {
     },
     onModeChange: (mode) => state.setSheetMode(mode),
     onClose: state.sheetMode === "poi" ? state.closePoi : undefined,
+    onClaim: () => {
+      sheetDragClaimedRef.current = true;
+      // results 档带着键盘拖卡片会错位，抢到手势就收键盘
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    },
+    onDropToLowerMode: () => sheetScrollResetRef.current?.(),
   });
+
+  /** 列表行点击守卫：本轮手势被抽屉拖拽吃掉时作废（对齐小程序端 consumeSheetTap）。 */
+  const consumeSheetDragClick = () => {
+    if (!sheetDragClaimedRef.current) return false;
+    sheetDragClaimedRef.current = false;
+    return true;
+  };
+  useEffect(() => {
+    if (dragging) return;
+    // 松手后下一帧解除抑制（click 在 touchend 之后派发，同帧解除会漏放行）
+    const timer = window.setTimeout(() => {
+      sheetDragClaimedRef.current = false;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [dragging]);
 
   const sheetTop = topForMode(state.sheetMode) + dragOffset;
 
@@ -528,14 +554,36 @@ export function MapPage() {
           </button>
         ) : null}
 
-        {/* 底部抽屉（移动端） */}
+        {/* 底部抽屉（移动端）。2026-08-24：整卡可拖——手势监听挂在 section 上
+            （sheetRef），归属按落点判定：落在标了 data-sheet-scroll 的纵向滚动框里
+            归列表，落在搜索行/标签筛选/标题行等处归卡片，见 useSheetDrag。
+            拖拽期间 touch-action 置 none，避免原生滚动与我们抢同一手势。 */}
         {isMobile ? (
-          <section className="absolute inset-x-0 z-30" style={{ top: sheetTop, bottom: tabBar }}>
-            {/* 拖拽把手 */}
+          <section
+            ref={sheetRef}
+            className="absolute inset-x-0 z-30"
+            style={{ top: sheetTop, bottom: tabBar, touchAction: dragging ? "none" : "pan-y" }}
+          >
+            {/* 拖拽把手：整卡可拖之后它只是视觉提示 + 无条件归抽屉的命中区
+                （data-sheet-handle）；键盘可用上下方向键换档（a11y）。 */}
             <div className="pointer-events-none absolute inset-x-0 -top-6 z-40 flex justify-center">
               <div
+                data-sheet-handle
+                role="slider"
+                tabIndex={0}
+                aria-label="调整卡片高度"
+                aria-valuetext={
+                  state.sheetMode === "collapsed"
+                    ? "已收起"
+                    : state.sheetMode === "results"
+                      ? "已展开到全屏"
+                      : state.sheetMode === "poi"
+                        ? "地点详情"
+                        : "默认高度"
+                }
                 className="pointer-events-auto flex h-7 w-24 cursor-grab items-center justify-center touch-none"
                 onPointerDown={handlePointerDown}
+                onKeyDown={handleKeyDown}
               >
                 <span className="block h-1 w-10 rounded-full bg-white/70 shadow-sm" />
               </div>
@@ -547,7 +595,14 @@ export function MapPage() {
                   <SearchInput value={state.query} onChange={state.handleQueryChange} onFocus={state.handleQueryFocus} />
                 </div>
               ) : state.sheetMode === "poi" && state.selectedPoi ? (
-                <div className="h-full overflow-y-auto">
+                <div
+                  data-sheet-scroll
+                  className="h-full overflow-y-auto"
+                  style={{ overscrollBehavior: "contain" }}
+                  ref={(node) => {
+                    sheetScrollResetRef.current = node ? () => { node.scrollTop = 0; } : null;
+                  }}
+                >
                   {/* 内容自适应测量容器：高度 = 自然内容高度，poi 档抽屉按它定可见高度 */}
                   <div ref={poiMeasureRef} className="pt-2">
                     <PoiDetailSheet
@@ -576,7 +631,14 @@ export function MapPage() {
                     onFilterToggle={state.handleFilterToggle}
                     onClearFilters={state.clearFilters}
                     onOpenAllFilters={() => setLayerPanelOpen(true)}
-                    onResultClick={(poiKey) => state.openPoi(poiKey, "search_result")}
+                    onResultClick={(poiKey) => {
+                      // 本轮手势被抽屉拖拽吃掉时作废（拖完卡片不该误开 POI）
+                      if (consumeSheetDragClick()) return;
+                      state.openPoi(poiKey, "search_result");
+                    }}
+                    scrollAreaRef={(node) => {
+                      sheetScrollResetRef.current = node ? () => { node.scrollTop = 0; } : null;
+                    }}
                   />
                 </div>
               )}

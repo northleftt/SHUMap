@@ -162,6 +162,8 @@ export interface TransitStop {
   code: string | null;
   name: string;
   status: "active";
+  /** 管理端图钉系数（0026 三档 / 0027 起 0.5~2.0 连续值）；标准系数不进 manifest，缺省即 1。 */
+  marker_size?: number;
   created_at: string;
   updated_at: string;
 }
@@ -391,9 +393,19 @@ export interface CampusLine {
   journeys: CampusJourney[];
 }
 
+/** 日型标签的取值，来自服务日历的 day_type（0025 迁移）。 */
+export type PublicDayType = "weekday" | "weekend" | "holiday" | "winter_break" | "summer_break";
+
 export interface CampusLinesResponse {
   date: string;
   timezone: string;
+  /**
+   * 当日日型，由**管理端的服务日历**决定（worker 的 resolveDayType）。
+   * 客户端不要再自己算：曾经算在前端、数据源是 data/academic-calendar.json 那份
+   * 手写草稿，与班次归属所依据的 service_calendars 没有任何连通，会出现「页面说
+   * 今天是假日、但假日班次一个都不出」。
+   */
+  dayType: PublicDayType;
   from: TransitEndpointInfo;
   to: TransitEndpointInfo;
   lines: CampusLine[];
@@ -450,6 +462,8 @@ export interface OperationalEvent {
   id: string;
   eventType: "maintenance" | "activity" | "closure" | "notice";
   severity: "info" | "warning" | "critical";
+  /** 地图标注颜色（#rrggbb）；null = 按 severity 默认色。 */
+  color: string | null;
   editorialStatus: "approved";
   operationalStatus: "scheduled" | "active" | "resolved" | "cancelled" | "expired";
   title: string;

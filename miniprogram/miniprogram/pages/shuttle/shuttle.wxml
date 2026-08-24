@@ -1,9 +1,11 @@
 <!-- M3 校车时刻表：对标 Web 端 src/pages/shuttle/ShuttlePage.tsx -->
 <scroll-view scroll-y class="page" enhanced show-scrollbar="{{false}}" style="padding-top: {{statusBarHeight}}px">
-  <!-- 头部：标题 + 预约网站入口 -->
+  <!-- 头部。预约入口已下架：vcard.shu.edu.cn 不是本站域名，配不了业务域名，
+       且该页面依赖公众号网页授权，web-view 里打不开（详见 shuttle.ts 顶部注释）。
+       「如何坐车？」只在乘车指南已发布且有正文时才出现（guideEntryVisible）。 -->
   <view class="header">
     <text class="title">校车时刻表</text>
-    <view class="booking-link" bindtap="openBookingSite">预约网站 ›</view>
+    <view wx:if="{{guideEntryVisible}}" class="guide-link" bindtap="openRideGuide">如何坐车？</view>
   </view>
 
   <!-- 校区选择卡：从/到校区端点 + 交换 + 日期 -->
@@ -106,7 +108,6 @@
               data-stop-id="{{stop.stopId}}"
               bindtap="openStopOnMap"
             >
-              <text class="stop-row-pin">📍</text>
               <text class="stop-row-name">{{stop.name}}</text>
               <text wx:if="{{stop.canMap}}" class="stop-row-action">查看地图 ›</text>
             </view>
@@ -119,60 +120,68 @@
   <view class="page-footer-space"></view>
 </scroll-view>
 
-<!-- 班次预览弹层（M7） -->
+<!-- 班次预览弹层（M7）。
+     一个发车时刻可能同时有非预约车与预约车（时刻网格里就是「预 非」那一格），
+     所以内容是 previewTrips 列表：非预约在上、预约在下。标题不再写「班车」这种
+     废字，直接给时刻 + 方向；乘车方式与预计全程用时落到每趟自己那一段。 -->
 <view wx:if="{{previewVisible}}" class="sheet-mask" bindtap="closePreview">
   <view class="sheet" catchtap="noop">
     <view class="sheet-header">
       <view class="sheet-title-block">
-        <view class="sheet-title">{{previewTime}} 班车</view>
-        <view class="sheet-meta">{{previewMeta}}</view>
+        <view class="sheet-title">
+          {{previewTime}}<text wx:if="{{previewRoute}}" class="sheet-title-route">{{previewRoute}}</text>
+        </view>
       </view>
       <view class="sheet-close" bindtap="closePreview">✕</view>
     </view>
 
-    <view wx:if="{{previewOffline}}" class="sheet-offline">离线快照数据，暂无停靠站点信息</view>
+    <scroll-view scroll-y class="sheet-scroll" enhanced show-scrollbar="{{false}}">
+      <view wx:for="{{previewTrips}}" wx:for-item="trip" wx:key="tripId" class="trip {{trip.showBorder ? 'trip-border' : ''}}">
+        <view class="trip-meta">{{trip.meta}}</view>
 
-    <!-- 站点时间线 -->
-    <view wx:if="{{previewBoarding}}" class="timeline">
-      <view class="timeline-row">
-        <view class="timeline-rail">
-          <view class="dot dot-boarding"></view>
-          <view wx:if="{{previewAlighting.length > 0}}" class="rail-line"></view>
-        </view>
-        <view class="timeline-body timeline-body-nav">
-          <view class="timeline-copy">
-            <view class="timeline-name">{{previewBoarding.name}} · 上车</view>
-            <view class="timeline-time">{{previewBoarding.timeText}}</view>
-          </view>
-          <view
-            wx:if="{{previewBoarding.canNavigate}}"
-            class="timeline-nav"
-            data-stop-id="{{previewBoarding.stopId}}"
-            bindtap="openStopNavigation"
-          >导航</view>
-        </view>
-      </view>
-      <view wx:if="{{previewAlighting.length > 0}}" class="timeline-row">
-        <view class="timeline-rail">
-          <view class="dot dot-alighting"></view>
-        </view>
-        <view class="timeline-body">
-          <view wx:for="{{previewAlighting}}" wx:key="stopId" class="alighting-item {{index > 0 ? 'alighting-gap' : ''}}">
-            <view class="timeline-copy">
-              <view class="timeline-name">{{item.name}} · {{item.roleText}}</view>
-              <view wx:if="{{item.timeText}}" class="timeline-time">{{item.timeText}}</view>
+        <view wx:if="{{trip.offline}}" class="sheet-offline">暂无停靠站点信息</view>
+
+        <!-- 站点时间线 -->
+        <view wx:if="{{trip.boarding}}" class="timeline">
+          <view class="timeline-row">
+            <view class="timeline-rail">
+              <view class="dot dot-boarding"></view>
+              <view wx:if="{{trip.alighting.length > 0}}" class="rail-line"></view>
             </view>
-            <view
-              wx:if="{{item.canNavigate}}"
-              class="timeline-nav"
-              data-stop-id="{{item.stopId}}"
-              bindtap="openStopNavigation"
-            >导航</view>
+            <view class="timeline-body timeline-body-nav">
+              <view class="timeline-copy">
+                <view class="timeline-name">{{trip.boarding.name}} · 上车</view>
+                <view class="timeline-time">{{trip.boarding.timeText}}</view>
+              </view>
+              <view
+                wx:if="{{trip.boarding.canNavigate}}"
+                class="timeline-nav"
+                data-stop-id="{{trip.boarding.stopId}}"
+                bindtap="openStopNavigation"
+              >导航</view>
+            </view>
+          </view>
+          <view wx:if="{{trip.alighting.length > 0}}" class="timeline-row">
+            <view class="timeline-rail">
+              <view class="dot dot-alighting"></view>
+            </view>
+            <view class="timeline-body">
+              <view wx:for="{{trip.alighting}}" wx:key="stopId" class="alighting-item {{index > 0 ? 'alighting-gap' : ''}}">
+                <view class="timeline-copy">
+                  <view class="timeline-name">{{item.name}} · {{item.roleText}}</view>
+                  <view wx:if="{{item.timeText}}" class="timeline-time">{{item.timeText}}</view>
+                </view>
+                <view
+                  wx:if="{{item.canNavigate}}"
+                  class="timeline-nav"
+                  data-stop-id="{{item.stopId}}"
+                  bindtap="openStopNavigation"
+                >导航</view>
+              </view>
+            </view>
           </view>
         </view>
       </view>
-    </view>
-
-    <button wx:if="{{previewIsReservation}}" class="book-btn" bindtap="bookPreviewTrip">预约此班次</button>
+    </scroll-view>
   </view>
 </view>

@@ -23,6 +23,7 @@ function operationFixture() {
       id: "event_1",
       eventType: "maintenance",
       severity: "warning",
+      color: null,
       editorialStatus: "approved",
       operationalStatus: "active",
       title: "道路维修",
@@ -87,6 +88,13 @@ test("operational event parser rejects unknown enum values", () => {
     () => parseOperationalEventsResponse(value),
     /eventType must be one of maintenance, activity, closure, notice/,
   );
+});
+
+test("operational event parser passes through a custom marker color", () => {
+  const value = operationFixture();
+  value.items[0].color = "#7c3aed";
+  const parsed = parseOperationalEventsResponse(value);
+  assert.equal(parsed.items[0].color, "#7c3aed");
 });
 
 test("operational event parser requires geometry to match its location role", () => {

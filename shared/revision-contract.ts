@@ -54,12 +54,23 @@ export interface PlaceFact {
   value: string;
 }
 
+/**
+ * 管理端控制的地图图钉大小系数（0.5~2.0 连续值，0027 起；此前为三档枚举
+ * small/standard/large，存量值由客户端按原系数读出）。挂在 content.marker 下
+ * （content 顶层允许多余键，修订校验与 manifest 契约都不用动）；缺省视为 1。
+ * 系数口径见 src/lib/map/markerTiers.ts。
+ */
+export interface MarkerDisplay {
+  size?: number;
+}
+
 export interface PlaceContent extends JsonObject {
   detail: JsonObject & {
     facts: PlaceFact[];
     media: RevisionMediaItem[];
   };
   address?: string;
+  marker?: MarkerDisplay;
 }
 
 export interface PlaceBuildingStructure {
@@ -92,6 +103,7 @@ export interface FacilityContent extends JsonObject {
   fee?: string;
   locationDescription?: string;
   note?: string;
+  marker?: MarkerDisplay;
 }
 
 export interface FacilityStructure {
@@ -124,6 +136,7 @@ export interface MerchantContent extends JsonObject {
   stallCode?: string;
   summary?: string;
   menu?: MerchantMenuItemWrite[];
+  marker?: MarkerDisplay;
 }
 
 export interface MerchantStructure {

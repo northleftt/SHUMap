@@ -268,4 +268,102 @@ if (snapshotLines) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 8. 同一发车时刻的多趟班次（journeysAtTime）
+//
+// 时刻网格把同一时刻的预约与非预约合并成一格（「预 非」两个角标），点开必须
+// 两班都给出来。以前是 find(...) 只取先命中的那一班，摊平顺序里非预约常在前，
+// 于是预约车在界面上没有任何入口 —— 这一段就是钉住那个回归。
+// ---------------------------------------------------------------------------
+const freeLine = {
+  ...apiLine,
+  routeId: "route_free",
+  bookingPolicy: "not_required",
+  journeys: [{ ...apiLine.journeys[0], tripId: "trip_free" }],
+};
+const bookedLine = {
+  ...apiLine,
+  routeId: "route_booked",
+  bookingPolicy: "required",
+  bookingUrl: "https://example.test/book",
+  journeys: [{ ...apiLine.journeys[0], tripId: "trip_booked" }],
+};
+
+// 预约线在前传入，验证顺序由 journeysAtTime 决定而不是由入参顺序决定
+const mixedFlat = schedule.flattenLineJourneys([bookedLine, freeLine]);
+const atSeven = schedule.journeysAtTime(mixedFlat, "07:00");
+assert.equal(atSeven.length, 2, "同一时刻的两班车都要出现，不能只取一班");
+assert.equal(atSeven[0].isReservation, false, "非预约在上");
+assert.equal(atSeven[1].isReservation, true, "预约在下");
+assert.equal(atSeven[1].line.bookingUrl, "https://example.test/book",
+  "每趟要能取回自己线路的预约地址（两趟的预约入口不能串味）");
+
+// 时刻网格那一格确实标成 mixed，与上面两班一一对应
+assert.deepEqual(schedule.mergeSchedulesByTime(mixedFlat), [{ departureTime: "07:00", status: "mixed" }]);
+
+// 只有一班时照常返回一条；没有该时刻时返回空数组（调用方据此不开弹层）
+assert.equal(schedule.journeysAtTime(schedule.flattenLineJourneys([freeLine]), "07:00").length, 1);
+assert.deepEqual(schedule.journeysAtTime(mixedFlat, "23:59"), []);
+
+// ---------------------------------------------------------------------------
+// 9. 站点 → 地图 POI 键（mapPoiKeyForStop）与导航终点（navigationPointForStop）
+//
+// 两条都曾经整体失效，且失效方式相似：拿错了「站点在发布数据里的身份」。
+//   · 地图深链原先用 stop.place_id，而 11 个站点里 10 个 place_id 是 null，
+//     于是全部落到 `campus:` 分支——那个深链只切校区、不开详情，正是
+//     「点上下车点回到地图却没打开 POI」；
+//   · 导航原先要求 isPrimary===1，而站点的 primary 名额被候车点占着，
+//     navigation_target 必然是 0，于是「导航」入口从未出现过。
+// ---------------------------------------------------------------------------
+const canvasPoint = {
+  entityType: "transit_stop",
+  entityId: "stop_baoshan",
+  role: "boarding_point",
+  isPrimary: 1,
+  geometry_type: "Point",
+  geometry_json: '{"type":"Point","coordinates":[300,400]}',
+  crs: "svg_viewbox",
+  location_hint: null,
+};
+const navTarget = {
+  entityType: "transit_stop",
+  entityId: "stop_baoshan",
+  role: "navigation_target",
+  // 关键：候车点占着 primary，导航终点必然是 0
+  isPrimary: 0,
+  geometry_type: "Point",
+  geometry_json: '{"type":"Point","coordinates":[121.39,31.31]}',
+  crs: "GCJ02",
+  location_hint: "宝山-北门",
+};
+const mappedStop = { id: "stop_baoshan", place_id: null, campus_id: "campus_baoshan", name: "宝山-北门" };
+
+assert.equal(
+  schedule.mapPoiKeyForStop(mappedStop, [canvasPoint, navTarget]),
+  "transit_stop:stop_baoshan",
+  "有画布点位的站点，地图身份是 transit_stop:<id>（不是它绑的地点）",
+);
+assert.deepEqual(
+  schedule.navigationPointForStop(mappedStop, [canvasPoint, navTarget]),
+  { longitude: 121.39, latitude: 31.31, displayName: "宝山-北门" },
+  "isPrimary=0 的 navigation_target 必须被采信，否则导航入口全部消失",
+);
+
+// 借绑定地点上图的站点（嘉定北门那种）：键仍是 transit_stop:<id>
+const borrowedStop = { id: "stop_jiading", place_id: "place_gate", campus_id: "campus_jiading", name: "嘉定北门" };
+assert.equal(
+  schedule.mapPoiKeyForStop(borrowedStop, [{ ...canvasPoint, entityType: "place", entityId: "place_gate" }]),
+  "transit_stop:stop_jiading",
+);
+
+// 只有 GCJ02 坐标、没有画布点位（陈太公寓）：地图上确实没有 POI 可开，
+// 如实返回 null，让调用方不要给出可点入口（而不是给一个只切校区的假入口）。
+const offMapStop = { id: "stop_chentai", place_id: null, campus_id: null, name: "陈太公寓" };
+assert.equal(schedule.mapPoiKeyForStop(offMapStop, [{ ...navTarget, entityId: "stop_chentai" }]), null);
+// 但它照样能导航（GCJ02 点位是有的）
+assert.deepEqual(
+  schedule.navigationPointForStop(offMapStop, [{ ...navTarget, entityId: "stop_chentai", location_hint: "陈太公寓" }]),
+  { longitude: 121.39, latitude: 31.31, displayName: "陈太公寓" },
+);
+
 console.log("miniprogram-shuttle: all assertions passed");
