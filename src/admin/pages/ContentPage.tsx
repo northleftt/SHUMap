@@ -142,6 +142,7 @@ export function ContentPage() {
     updatedAt: string;
     to: string;
     retire: (() => Promise<unknown>) | null;
+    activate: (() => Promise<unknown>) | null;
     remove: (() => Promise<unknown>) | null;
   }> =
     tab === "places"
@@ -155,6 +156,7 @@ export function ContentPage() {
           updatedAt: p.updatedAt,
           to: `/admin/content/places/${p.id}`,
           retire: () => admin.updatePlaceLifecycle(p.id, "retired"),
+          activate: () => admin.updatePlaceLifecycle(p.id, "active"),
           remove: () => admin.deletePlace(p.id),
         }))
       : tab === "facilities"
@@ -168,6 +170,7 @@ export function ContentPage() {
             updatedAt: String(f.lastVerifiedAt ?? ""),
             to: `/admin/content/facilities/${f.id}`,
             retire: () => admin.updateFacilityLifecycle(f.id, "retired"),
+            activate: () => admin.updateFacilityLifecycle(f.id, "active"),
             remove: () => admin.deleteFacility(f.id),
           }))
         : data.merchants.map((m) => ({
@@ -180,6 +183,7 @@ export function ContentPage() {
             updatedAt: String(m.updatedAt ?? ""),
             to: `/admin/content/merchants/${m.id}`,
             retire: () => admin.updateMerchantLifecycle(m.id, "retired"),
+            activate: () => admin.updateMerchantLifecycle(m.id, "active"),
             remove: null,
           }));
 
@@ -271,11 +275,20 @@ export function ContentPage() {
                     </Link>
                     {/* 停用是首选：它保留历史与审计线索，而删除会把修订一起级联掉。
                         所以删除只在旁边、只对没人引用过的数据生效（否则后端回 409）。 */}
-                    {canWrite && row.retire ? (
+                    {canWrite && retired && row.activate ? (
                       <GhostButton
-                        disabled={busy || retired}
+                        disabled={busy}
+                        onClick={() => void runAction(row.id, `已启用「${row.name}」`, row.activate!)}
+                        title="重新上架到地图与搜索，轮廓与位置一并恢复"
+                      >
+                        启用
+                      </GhostButton>
+                    ) : null}
+                    {canWrite && !retired && row.retire ? (
+                      <GhostButton
+                        disabled={busy}
                         onClick={() => void runAction(row.id, `已停用「${row.name}」`, row.retire!)}
-                        title={retired ? "已经是停用状态" : "从地图与搜索里下架，保留数据与历史"}
+                        title="从地图与搜索里下架，保留数据与历史"
                       >
                         停用
                       </GhostButton>

@@ -163,6 +163,30 @@ export async function retireEntityLocations(env: Env, entityType: EntityLocation
   );
 }
 
+/**
+ * 把最近一次停用关掉的绑定重新打开。已经有有效绑定（停用后又审过一版位置）
+ * 就不动：再打开会撞 idx_entity_locations_one_primary / one_active_footprint。
+ */
+export async function restoreEntityLocations(env: Env, entityType: EntityLocationType, entityId: string): Promise<void> {
+  const live = await first<{ count: number }>(
+    env.DB,
+    "select count(*) as count from entity_locations where entity_type=? and entity_id=? and valid_to is null",
+    [entityType, entityId],
+  );
+  if ((live?.count ?? 0) > 0) return;
+  const latest = await first<{ validTo: string | null }>(
+    env.DB,
+    "select max(valid_to) as validTo from entity_locations where entity_type=? and entity_id=?",
+    [entityType, entityId],
+  );
+  if (!latest?.validTo) return;
+  await run(
+    env.DB,
+    "update entity_locations set valid_to=null where entity_type=? and entity_id=? and valid_to=?",
+    [entityType, entityId, latest.validTo],
+  );
+}
+
 function validateInput(input: RevisionLocationInput): void {
   if (!ROLES.includes(input.role)) throw new HttpError(400, "validation_error", "Invalid location role");
   if (!PRECISIONS.includes(input.precisionLevel)) {

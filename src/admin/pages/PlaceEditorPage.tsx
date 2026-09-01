@@ -83,7 +83,17 @@ interface PlaceEditorRevision {
 interface PlaceEditorData {
   response: PlaceDetailResponse;
   revision: PlaceEditorRevision;
+  lifecycleStatus: admin.PlaceLifecycle;
 }
+
+const PLACE_LIFECYCLES = ["planned", "active", "temporarily_closed", "retired"] as const;
+
+const PLACE_LIFECYCLE_LABELS: Record<admin.PlaceLifecycle, string> = {
+  planned: "筹建中",
+  active: "启用",
+  temporarily_closed: "暂时关闭",
+  retired: "已停用",
+};
 
 /** 表单固定展示的四条信息；其余自定义条目原样保留。 */
 const FACT_LABELS = ["开放时间", "联系电话", "所属单位", "进入方式"] as const;
@@ -135,6 +145,7 @@ function parsePlaceEditorData(response: PlaceDetailResponse): PlaceEditorData {
     .map((location, index) => locationDraftFromApi(objectValue(location, `place_revisions.structure_json.locations[${index}]`), index));
   return {
     response,
+    lifecycleStatus: oneOf(place.lifecycle_status, "places.lifecycle_status", PLACE_LIFECYCLES),
     revision: {
       displayName: requiredString(place.display_name, "place_revisions.display_name"),
       summary: nullableString(place.summary, "place_revisions.summary") ?? "",
@@ -196,11 +207,16 @@ export function PlaceEditorPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [locationDrafts, setLocationDrafts] = useState<LocationDraft[]>([]);
+  const [lifecycleStatus, setLifecycleStatus] = useState<admin.PlaceLifecycle>("active");
+  const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [lifecycleNotice, setLifecycleNotice] = useState("");
+  const [lifecycleError, setLifecycleError] = useState("");
 
   // 用当前修订初始化表单
   useEffect(() => {
     if (detail.state.status !== "ready" || detail.state.data === null) return;
     const revision = detail.state.data.revision;
+    setLifecycleStatus(detail.state.data.lifecycleStatus);
     setName(revision.displayName);
     setKindId(revision.kindId);
     setCampusId(revision.campusId);
@@ -337,6 +353,25 @@ export function PlaceEditorPage() {
       setError(errorMessage(err, "保存失败"));
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * 生命周期即时生效，不进修订流：楼今天封闭就得今天从地图上拿掉，等审核就晚了。
+   * 停用会失效位置绑定；重新启用时后端把轮廓绑回去，不必等下一次修订审核。
+   */
+  async function applyLifecycle(next: admin.PlaceLifecycle) {
+    setLifecycleBusy(true);
+    setLifecycleError("");
+    setLifecycleNotice("");
+    try {
+      await admin.updatePlaceLifecycle(id, next);
+      setLifecycleStatus(next);
+      setLifecycleNotice(`已改为「${PLACE_LIFECYCLE_LABELS[next]}」`);
+    } catch (err) {
+      setLifecycleError(errorMessage(err, "修改地点状态失败"));
+    } finally {
+      setLifecycleBusy(false);
     }
   }
 
@@ -519,6 +554,29 @@ export function PlaceEditorPage() {
           spaces={meta.state.data.spaces}
           value={locationDrafts}
         />
+
+        {isNew ? null : (
+          <Panel title="地点状态">
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {PLACE_LIFECYCLES.map((status) => (
+                  <GhostButton
+                    disabled={lifecycleBusy || status === lifecycleStatus}
+                    key={status}
+                    onClick={() => void applyLifecycle(status)}
+                  >
+                    {status === lifecycleStatus ? `当前：${PLACE_LIFECYCLE_LABELS[status]}` : PLACE_LIFECYCLE_LABELS[status]}
+                  </GhostButton>
+                ))}
+              </div>
+              <ErrorBanner message={lifecycleError} />
+              {lifecycleNotice ? <InfoNote tone="info">{lifecycleNotice}</InfoNote> : null}
+              <p className="text-label text-sub">
+                「已停用」的地点不再进入发布产物，前台地图与搜索都看不到；重新选「启用」即可恢复，楼宇轮廓会一并回到地图上。
+              </p>
+            </div>
+          </Panel>
+        )}
 
         {!isNew ? (
           <Panel title="修订历史" padded={false}>

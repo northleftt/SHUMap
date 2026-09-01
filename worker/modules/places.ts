@@ -6,7 +6,7 @@ import { HttpError, json, noContent, readJson } from "../lib/http";
 import { exactObject, isoNow, jsonString, makeId, oneOf, sha256 } from "../lib/values";
 import { normalizePlaceRevision, validatePlaceRevision } from "../lib/revision-contracts";
 import { audit } from "./audit";
-import { listEntityLocations, retireEntityLocations } from "./locations";
+import { listEntityLocations, restoreEntityLocations, retireEntityLocations } from "./locations";
 
 const PLACE_LIFECYCLES = ["planned", "active", "temporarily_closed", "retired"] as const;
 
@@ -200,7 +200,8 @@ function usageTotal(usage: PlaceUsage): number {
  *
  * 改成 retired 时顺手把位置绑定失效：发布查询已经按 lifecycle 过滤，但
  * entity_locations 是独立的时间轴，留着会让「停用的地点还占着一个 footprint 图形」
- * 这类唯一索引冲突在下一次编辑时才炸出来。
+ * 这类唯一索引冲突在下一次编辑时才炸出来。从 retired 改回去时要把最近一次
+ * 停用关掉的绑定重新打开，否则楼宇没有 footprint，下一版发布会直接校验失败。
  */
 export async function updatePlaceLifecycle(
   request: Request,
@@ -222,6 +223,7 @@ export async function updatePlaceLifecycle(
     .bind(lifecycleStatus, lifecycleStatus === "retired" ? now : null, now, placeId)
     .run();
   if (lifecycleStatus === "retired") await retireEntityLocations(env, "place", placeId);
+  else if (before.lifecycle_status === "retired") await restoreEntityLocations(env, "place", placeId);
   await audit(env, principal, "place.lifecycle.update", "place", placeId, requestId, before, { lifecycleStatus });
   return json({ id: placeId, lifecycleStatus });
 }

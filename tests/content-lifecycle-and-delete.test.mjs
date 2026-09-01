@@ -78,10 +78,40 @@ test("both handlers count references and refuse released entities", () => {
 test("retiring an entity also retires its location bindings", () => {
   const places = read("worker/modules/places.ts");
   const facilities = read("worker/modules/facilities.ts");
+  const locations = read("worker/modules/locations.ts");
   // entity_locations 是独立时间轴，不跟着 lifecycle 走。留着会让唯一索引
   // （idx_entity_locations_one_primary / one_active_footprint）在下次编辑时才炸。
   assert.match(places, /retireEntityLocations\(env, "place", placeId\)/);
   assert.match(facilities, /retireEntityLocations\(env, "facility", facilityId\)/);
+  // 重新启用必须把最近一次停用关掉的绑定打开，否则楼宇没有 footprint，
+  // 下一版发布会卡在「必须恰好一个 footprint」。
+  assert.match(locations, /export async function restoreEntityLocations/);
+  assert.match(places, /else if \(before.lifecycle_status === "retired"\) await restoreEntityLocations\(env, "place", placeId\)/);
+  assert.match(facilities, /else if \(before.lifecycle_status === "retired"\) await restoreEntityLocations\(env, "facility", facilityId\)/);
+});
+
+test("reopening the last retired location bindings does not hit uniqueness", () => {
+  const db = database();
+  db.exec(SEED);
+  db.exec(`
+    insert into location_anchors(
+      id,campus_id,role,geometry_type,geometry_json,crs,precision_level,verification_status,created_at,updated_at
+    ) values(
+      'anchor_restore','campus_baoshan','primary_display',
+      'Point','{"type":"Point","coordinates":[121.4,31.3]}','GCJ02','exact','verified','2026-08-01','2026-08-01'
+    );
+    insert into entity_locations(id,entity_type,entity_id,anchor_id,role,is_primary,valid_from,valid_to,created_at)
+      values('eloc_restore','place','place_parent','anchor_restore','primary_display',1,'2026-08-01',null,'2026-08-01');
+  `);
+  db.exec("update entity_locations set valid_to='2026-08-20' where id='eloc_restore'");
+  assert.equal(
+    db.prepare("select valid_to as validTo from entity_locations where id='eloc_restore'").get().validTo,
+    "2026-08-20",
+  );
+  db.exec("update entity_locations set valid_to=null where id='eloc_restore'");
+  const row = db.prepare("select valid_to as validTo from entity_locations where id='eloc_restore'").get();
+  assert.equal(row.validTo, null);
+  db.close();
 });
 
 test("deleting an entity clears its anchors rather than orphaning them", () => {
@@ -119,6 +149,10 @@ test("the admin list surfaces lifecycle and offers retire before delete", () => 
   assert.match(page, /<LifecyclePill status=\{row\.lifecycle\}/);
   assert.match(page, /停用/);
   assert.match(page, /window\.confirm/);
+  // 停用不是终点：列表和地点编辑器都要能改回启用，否则楼宇下架后只能新建。
+  assert.match(page, /启用/);
+  assert.match(page, /updatePlaceLifecycle\(p\.id, "active"\)/);
+  assert.match(read("src/admin/pages/PlaceEditorPage.tsx"), /updatePlaceLifecycle\(id, next\)/);
   // 409 的机器码要翻成能照着做的话。
   assert.match(page, /place_in_use:/);
   assert.match(page, /facility_released:/);

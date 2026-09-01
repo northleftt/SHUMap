@@ -5,7 +5,7 @@ import { HttpError, json, noContent, readJson } from "../lib/http";
 import { exactObject, isoNow, jsonString, makeId, oneOf, sha256 } from "../lib/values";
 import { normalizeFacilityRevision, validateFacilityRevision } from "../lib/revision-contracts";
 import { audit } from "./audit";
-import { listEntityLocations, retireEntityLocations } from "./locations";
+import { listEntityLocations, restoreEntityLocations, retireEntityLocations } from "./locations";
 
 /** facility_instances 只有三档，没有 temporarily_closed —— 设施「暂时不能用」是
  *  operational_status 的事（实时接口即时生效），与生命周期分开。 */
@@ -171,7 +171,9 @@ export async function updateFacilityLifecycle(
     .run();
   // 停用后位置绑定一并失效：发布查询按 lifecycle 过滤，但 entity_locations 是独立
   // 时间轴，留着会让「已停用的设施还占着一个主位置」在下次编辑时才炸出来。
+  // 重新启用时把最近一次停用关掉的绑定打开，否则设施上不了地图。
   if (lifecycleStatus === "retired") await retireEntityLocations(env, "facility", facilityId);
+  else if (before.lifecycle_status === "retired") await restoreEntityLocations(env, "facility", facilityId);
   await audit(env, principal, "facility.lifecycle.update", "facility", facilityId, requestId, before, { lifecycleStatus });
   return json({ id: facilityId, lifecycleStatus });
 }
