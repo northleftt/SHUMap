@@ -286,8 +286,17 @@ const completeTrip = {
   ],
 };
 
-test("trip contracts require explicit booking fields and typed stop times", async () => {
-  for (const missing of ["bookingPolicy", "bookingUrl"]) {
+test("trip contracts accept omitted bookingPolicy but require other booking fields and typed stop times", async () => {
+  // bookingPolicy 自 0024 起是线路级属性，前端不再随班次提交：缺省必须放行
+  //（曾是必填，把管理端「添加班次」打成一律 400），bookingUrl 等其余字段仍必填。
+  {
+    const { env } = environment();
+    const withoutPolicy = { ...completeTrip };
+    delete withoutPolicy.bookingPolicy;
+    const response = await handlers.createTrip(request(withoutPolicy), env, principal, "request_no_policy");
+    assert.equal(response.status, 201);
+  }
+  for (const missing of ["bookingUrl"]) {
     const { env } = environment();
     const incomplete = { ...completeTrip };
     delete incomplete[missing];

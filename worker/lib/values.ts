@@ -57,9 +57,14 @@ export function objectValue(value: unknown, field: string): Record<string, unkno
   return value as Record<string, unknown>;
 }
 
-export function exactObject(value: unknown, field: string, fields: readonly string[]): Record<string, unknown> {
+export function exactObject(
+  value: unknown,
+  field: string,
+  fields: readonly string[],
+  optionalFields: readonly string[] = [],
+): Record<string, unknown> {
   const object = objectValue(value, field);
-  const allowed = new Set(fields);
+  const allowed = new Set([...fields, ...optionalFields]);
   for (const key of Object.keys(object)) {
     if (!allowed.has(key)) throw new HttpError(400, "validation_error", `${field}.${key} is not supported`);
   }

@@ -704,15 +704,16 @@ export async function deleteCalendar(
 }
 
 export async function createTrip(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = exactObject(await readJson<unknown>(request), "transitTrip", [
-    "patternId",
-    "serviceCalendarId",
-    "publicLabel",
-    "bookingPolicy",
-    "bookingUrl",
-    "sourceId",
-    "stopTimes",
-  ]);
+  // bookingPolicy 放进可选位：0024 起预约与否是线路级属性，前端不再随班次提交它，
+  // 这里收下只是为了向后兼容（落库一律以所属线路为准，见下方 route 查询）。
+  // 此前它待在必填列表里，导致管理端「添加班次」一律 400 —— 0024 之后的存量班次
+  // 都是脚本导入的，这个破口直到第一次手工加班次才暴露。
+  const body = exactObject(
+    await readJson<unknown>(request),
+    "transitTrip",
+    ["patternId", "serviceCalendarId", "publicLabel", "bookingUrl", "sourceId", "stopTimes"],
+    ["bookingPolicy"],
+  );
   const patternId = requiredString(body.patternId, "patternId", 100);
   const calendarId = requiredString(body.serviceCalendarId, "serviceCalendarId", 100);
   const sourceId = optionalString(body.sourceId, "sourceId", 100);
