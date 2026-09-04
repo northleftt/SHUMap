@@ -17,6 +17,7 @@ import { LoadingState } from "../../components/ui/EmptyState";
 import { SeverityIcon, severityOf } from "../../components/ui/SeverityBanner";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useOperations } from "../../lib/hooks/useOperations";
+import { facilityIconKeyMap } from "../../lib/facilityIcons";
 import { markerScaleValue, useMarkerScale } from "../../lib/map/markerScale";
 import type { CampusKey } from "../../lib/types";
 import { CampusSwitcher } from "./CampusSwitcher";
@@ -75,6 +76,14 @@ export function MapPage() {
       )
       : [],
     [operations, state.campus?.id],
+  );
+  /* 楼内设施的图标要以管理员在后台选的 icon_key 为准。设施数据里只有 typeCode，
+     所以从 manifest 的 facilityTypes 建一张编码 → iconKey 的表传给详情卡。
+     不传的话详情卡只能「按编码猜」，那只对出厂九类成立（见 facilityIcons 的
+     FACILITY_TYPE_CODE_ICON_KEYS），后台新建的类型一律掉到通用图钉。 */
+  const facilityIconKeys = useMemo(
+    () => (state.releaseData ? facilityIconKeyMap(state.releaseData.manifest.facilityTypes) : null),
+    [state.releaseData],
   );
   const eventById = (id: string | null) =>
     id ? (overlayItems.find((item) => item.event.id === id)?.event ?? null) : null;
@@ -522,6 +531,7 @@ export function MapPage() {
                 building={state.selectedPoi}
                 events={operations.status === "ready" ? operations.activeEvents : null}
                 facilityStatus={state.facilityStatus}
+                iconKeyByTypeCode={facilityIconKeys}
                 initialMerchantId={state.selectedMerchantId}
               />
             </div>
@@ -609,6 +619,7 @@ export function MapPage() {
                       building={state.selectedPoi}
                       events={operations.status === "ready" ? operations.activeEvents : null}
                       facilityStatus={state.facilityStatus}
+                      iconKeyByTypeCode={facilityIconKeys}
                       initialMerchantId={state.selectedMerchantId}
                     />
                   </div>

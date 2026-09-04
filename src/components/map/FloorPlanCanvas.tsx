@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { parseSvgViewBox, type SvgViewBox } from "../../../shared/svg-geometry.mjs";
 import { fetchMapAssetSvg } from "../../lib/api/public";
-import { facilityIcon } from "../../lib/facilityIcons";
+import { FacilityGlyph } from "../../lib/facilityIcons";
 import { sanitizeSvg } from "../../lib/svg/sanitize";
 import { EmptyState, LoadingState } from "../ui/EmptyState";
 
@@ -26,6 +26,14 @@ export interface FloorPlanAnchor {
   y: number;
   label: string;
   typeCode: string;
+  /**
+   * 管理员在后台给这个设施类型选的 icon_key（含自定义图标的 custom- 键）。
+   *
+   * 为什么不在这里按 typeCode 自己查：这个组件手上没有 release manifest，而
+   * typeCode → 图标的猜测只对出厂九类成立（见 facilityIcons 的
+   * FACILITY_TYPE_CODE_ICON_KEYS）。由调用方解析好传进来，后台新建的类型才能显示对。
+   */
+  iconKey: string | null;
 }
 
 type Size = { width: number; height: number };
@@ -357,7 +365,6 @@ export function FloorPlanCanvas({
         const left = (anchor.x - viewWindow.x) * scaleX;
         const top = (anchor.y - viewWindow.y) * scaleY;
         if (left < -40 || top < -40 || left > container.width + 40 || top > container.height + 40) return null;
-        const Icon = facilityIcon(anchor.typeCode);
         const active = anchor.facilityId === selectedFacilityId;
         return (
           <button
@@ -375,7 +382,7 @@ export function FloorPlanCanvas({
             onClick={() => onSelectFacility(active ? null : anchor.facilityId)}
             type="button"
           >
-            <Icon size={16} />
+            <FacilityGlyph iconKey={anchor.iconKey} ink={active ? "white" : "primary"} size={16} />
           </button>
         );
       })}

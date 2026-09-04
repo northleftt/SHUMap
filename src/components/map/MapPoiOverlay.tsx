@@ -1,5 +1,5 @@
 import { Store } from "lucide-react";
-import { facilityIconByKey } from "../../lib/facilityIcons";
+import { FacilityGlyphSvg } from "../../lib/facilityIcons";
 import { markerUnit } from "../../lib/map/markerScale";
 import type { MapPoi } from "../../lib/types";
 import type { MapViewWindow } from "./MapCanvas";
@@ -34,7 +34,6 @@ export function MapPoiOverlay({
       {pois.map((poi) => {
         if (!poi.markerPoint) return null;
         const selected = poi.poiKey === selectedPoiKey;
-        const Icon = poi.entityType === "merchant" ? Store : facilityIconByKey(poi.markerIconKey);
         // 管理端档位（content.marker.size）乘在公共基准上，只对这一个图钉生效。
         const poiUnit = unit * (poi.markerScale || 1);
         const iconSize = poiUnit * 1.08;
@@ -62,15 +61,26 @@ export function MapPoiOverlay({
               stroke="#1e80c1"
               strokeWidth={poiUnit * (selected ? 0.13 : 0.09)}
             />
-            <Icon
-              color={selected ? "#ffffff" : "#1e80c1"}
-              height={iconSize}
-              pointerEvents="none"
-              strokeWidth={2.2}
-              width={iconSize}
-              x={x - iconSize / 2}
-              y={y - iconSize / 2}
-            />
+            {poi.entityType === "merchant" ? (
+              <Store
+                color={selected ? "#ffffff" : "#1e80c1"}
+                height={iconSize}
+                pointerEvents="none"
+                strokeWidth={2.2}
+                width={iconSize}
+                x={x - iconSize / 2}
+                y={y - iconSize / 2}
+              />
+            ) : (
+              <FacilityGlyphSvg
+                color={selected ? "#ffffff" : "#1e80c1"}
+                iconKey={poi.markerIconKey}
+                ink={selected ? "white" : "primary"}
+                size={iconSize}
+                x={x}
+                y={y}
+              />
+            )}
           </g>
         );
       })}

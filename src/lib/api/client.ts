@@ -50,10 +50,27 @@ interface RequestOptions {
 
 const ADMIN_DATA_CHANGED_EVENT = "shumap:admin-data-changed";
 let pendingAdminChange = false;
+/*
+ * 这些路径的写操作不广播 admin-data-changed。
+ *
+ * 判据是「它只往对象存储塞字节，不改任何列表页读到的数据」。广播会让所有
+ * useAsyncData 重新拉数据、期间回到 loading 态，于是正在编辑的组件被卸载重挂，
+ * 未保存的本地草稿全部丢失。
+ *
+ * guide/assets 是 2026-08-25 补进来的：上传乘车指南插图时，广播把 ShuttleGuidePanel
+ * 整个重挂，刚加的图片块（连同其他没保存的块）一起消失 —— 表现为「图片传不上去」，
+ * 其实字节已经进了 R2，只是引用它的那一块被回滚掉了。
+ *
+ * facility-icons 同理：上传自定义设施图标发生在「新增设施类型」表单里，广播会把
+ * 正在填的名称 / 编码 / 筛选按钮名一起清空。图标行本身由界面在上传成功后自行补进
+ * 本地列表（不依赖重新拉数据），所以排除掉不会让新图标显示不出来。
+ */
 const ADMIN_REFRESH_EXCLUSIONS = [
   /^\/api\/admin\/media(?:\/|$)/,
   /^\/api\/admin\/maps\/upload-intents(?:\/|$)/,
   /^\/api\/admin\/maps\/import-jobs(?:\/|$)/,
+  /^\/api\/admin\/guide\/assets(?:\/|$)/,
+  /^\/api\/admin\/facility-icons(?:\/|$)/,
 ];
 
 export function notifyAdminDataChanged(): void {

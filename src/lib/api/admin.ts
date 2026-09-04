@@ -1236,10 +1236,19 @@ export interface FacilityTypeWriteResult {
   mapFilterCategoryId: string;
 }
 
+/** 后台上传的自定义图标（0029）。iconKey 一律带 `custom-` 前缀。 */
+export interface CustomFacilityIconRow {
+  iconKey: string;
+  label: string;
+  status: string;
+}
+
 export interface FacilityTypesResponse {
   items: FacilityTypeRow[];
-  /** 可选图标 key，界面据此渲染带预览的下拉。 */
+  /** 内置图标 key，界面据此渲染带预览的选择器。 */
   iconKeys: string[];
+  /** 自定义图标，接在内置那排格子后面。含停用的，界面只把 active 的列为可选项。 */
+  customIcons: CustomFacilityIconRow[];
   categories: string[];
 }
 
@@ -1295,6 +1304,64 @@ export function deleteFacilityType(id: string): Promise<{ id: string; deleted: b
   return apiFetch<{ id: string; deleted: boolean }>(`/api/admin/facility-types/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
+}
+
+// ---------------------------------------------------------------------------
+// 自定义设施图标（0029）
+//
+// 内置图标是硬编码的（改一枚要动三处代码再发一次版），这条通道让后台直接上传
+// SVG：字节落 R2，行落 facility_icons，键存进 facility_types.icon_key。
+// ---------------------------------------------------------------------------
+
+export interface FacilityIconRow {
+  id: string;
+  iconKey: string;
+  label: string;
+  status: string;
+  byteSize: number;
+  sha256: string;
+  createdAt: string;
+  updatedAt: string;
+  /** 有多少个设施类型正在用它。>0 时删不掉。 */
+  usageCount: number;
+  metadata: Record<string, unknown>;
+}
+
+/** GET /api/admin/facility-icons — 全部自定义图标 + 各自的引用数。 */
+export function listFacilityIcons(signal?: AbortSignal): Promise<{ items: FacilityIconRow[] }> {
+  return apiFetch<{ items: FacilityIconRow[] }>("/api/admin/facility-icons", { signal });
+}
+
+/**
+ * PUT /api/admin/facility-icons/:key?label=… — 上传 / 替换一枚图标（raw SVG body）。
+ *
+ * 同键重传即替换，引用它的设施类型不用改一个字。新建必须给 label（后台图标
+ * 选择器要显示它），替换时不给就沿用原名。
+ */
+export function uploadFacilityIcon(
+  iconKey: string,
+  svg: ArrayBuffer | Blob | string,
+  label?: string,
+): Promise<{ iconKey: string; label: string; byteSize: number; status: string; metadata: Record<string, unknown> }> {
+  return apiFetch(`/api/admin/facility-icons/${encodeURIComponent(iconKey)}`, {
+    method: "PUT",
+    query: label === undefined ? undefined : { label },
+    rawBody: svg,
+    contentType: "image/svg+xml",
+  });
+}
+
+/** PATCH /api/admin/facility-icons/:key — 改名 / 停用启用。 */
+export function updateFacilityIcon(
+  iconKey: string,
+  body: { label?: string; status?: "active" | "disabled" },
+): Promise<{ iconKey: string; label: string; status: string }> {
+  return apiFetch(`/api/admin/facility-icons/${encodeURIComponent(iconKey)}`, { method: "PATCH", body });
+}
+
+/** DELETE /api/admin/facility-icons/:key — 仅在没有设施类型引用时可用。 */
+export function deleteFacilityIcon(iconKey: string): Promise<{ iconKey: string; deleted: boolean }> {
+  return apiFetch(`/api/admin/facility-icons/${encodeURIComponent(iconKey)}`, { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------

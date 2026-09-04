@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { SearchInput } from "../../components/ui/SearchInput";
-import { facilityIconByKey } from "../../lib/facilityIcons";
+import { FacilityGlyph } from "../../lib/facilityIcons";
 import { useRecents } from "../../lib/storage/recents";
 import type { MapPoi } from "../../lib/types";
 import { CampusSwitcher } from "./CampusSwitcher";
@@ -77,14 +77,16 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
           <EmptyState title="没有匹配的地点" subtitle="换个关键词或筛选条件试试" />
         ) : (
           list.map((building) => {
-            // 设施与校车站点的图标都由 markerIconKey 决定（站点固定为 bus）。
-            const Icon = building.entityType === "building"
-              ? Building2
+            // 设施与校车站点的图标都由 markerIconKey 决定（站点固定为 bus）。自定义
+            // 图标（custom- 前缀）是服务端的 SVG，只能由 FacilityGlyph 渲染成 <img>，
+            // 所以这里给的是「已经画好的节点」而不是一个组件。
+            const glyph = building.entityType === "building"
+              ? <Building2 size={19} />
               : building.entityType === "merchant"
-                ? Store
+                ? <Store size={19} />
                 : building.entityType === "facility" || building.entityType === "transit_stop"
-                  ? facilityIconByKey(building.markerIconKey)
-                  : MapPin;
+                  ? <FacilityGlyph iconKey={building.markerIconKey} size={19} />
+                  : <MapPin size={19} />;
             return (
             <button
               key={building.poiKey}
@@ -95,7 +97,7 @@ export function DesktopMapPanel({ state }: { state: MapState }) {
               onClick={() => state.openPoi(building.poiKey, "search_result")}
             >
               <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-page text-sub">
-                <Icon size={19} />
+                {glyph}
               </span>
               <span className="min-w-0">
                 <span className="block truncate text-body font-semibold text-ink">{building.name}</span>

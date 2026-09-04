@@ -6,22 +6,20 @@ import { ListRow } from "../../components/ui/ListRow";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { useRecents } from "../../lib/storage/recents";
-import { facilityIconByKey } from "../../lib/facilityIcons";
+import { FacilityGlyph } from "../../lib/facilityIcons";
 import type { FilterKey, MapPoi } from "../../lib/types";
 import type { MapSearchStatus } from "./useMapPageState";
 
 function PlaceSquareIcon({ poi }: { poi: MapPoi }) {
-  // 设施与校车站点的图标都由 markerIconKey 决定（站点固定为 bus）。
-  const Icon = poi.entityType === "building"
-    ? Building2
-    : poi.entityType === "merchant"
-      ? Store
-      : poi.entityType === "facility" || poi.entityType === "transit_stop"
-        ? facilityIconByKey(poi.markerIconKey)
-        : MapPin;
+  // 设施与校车站点的图标都由 markerIconKey 决定（站点固定为 bus）。自定义图标
+  // （custom- 前缀）由 FacilityGlyph 渲染成 <img>，所以这一支不能只取 lucide 组件。
+  const glyph = poi.entityType === "facility" || poi.entityType === "transit_stop"
+    ? <FacilityGlyph iconKey={poi.markerIconKey} size={19} />
+    : null;
+  const Icon = poi.entityType === "building" ? Building2 : poi.entityType === "merchant" ? Store : MapPin;
   return (
     <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary-container text-primary">
-      <Icon size={19} />
+      {glyph ?? <Icon size={19} />}
     </span>
   );
 }

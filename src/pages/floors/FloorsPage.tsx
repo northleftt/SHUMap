@@ -7,7 +7,12 @@ import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { ImagePreview } from "../../components/ui/ImagePreview";
 import type { PublicPlaceFacility, PublicPlaceFloor, ReleaseManifest } from "../../lib/api/types";
-import { facilityDotColor, facilityIcon } from "../../lib/facilityIcons";
+import {
+  FacilityGlyph,
+  facilityDotColor,
+  facilityIconKeyMap,
+  resolveFacilityIconKey,
+} from "../../lib/facilityIcons";
 import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
 import { facilityAnchorsForFloor, floorMapVersionsByFloor } from "../../lib/release/floorPlans";
 import { releaseFacilitiesForPlace } from "../../lib/release/mapData";
@@ -185,6 +190,13 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
     [floorFacilities, activeType],
   );
 
+  /* 图标以管理员在后台给类型选的 icon_key 为准。
+     此前这一页用 facilityIcon(typeCode)，那个函数拿「类型编码」去撞图标键，只有出厂
+     九类（靠手写映射）能对上，后台新建的类型一律掉到通用图钉 —— 管理员选了什么都
+     不影响这一页。设施数据（PublicPlaceFacility）里没有 iconKey，所以从 manifest
+     的 facilityTypes 按编码查。 */
+  const iconKeyByTypeCode = useMemo(() => facilityIconKeyMap(manifest.facilityTypes), [manifest]);
+
   /** 徽章 = 锚点 ⋈ 本层可见设施；锚点数据缺失时为空数组（只渲染图纸）。 */
   const planAnchors = useMemo<FloorPlanAnchor[]>(() => {
     if (!floorPlan || !selectedFloorId) return [];
@@ -200,10 +212,11 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           y: anchor.y,
           label: facility.displayName || facility.typeName,
           typeCode: facility.typeCode,
+          iconKey: resolveFacilityIconKey(facility.typeCode, iconKeyByTypeCode),
         } satisfies FloorPlanAnchor;
       })
       .filter((anchor): anchor is FloorPlanAnchor => anchor !== null);
-  }, [floorPlan, manifest, selectedFloorId, visibleFacilities]);
+  }, [floorPlan, iconKeyByTypeCode, manifest, selectedFloorId, visibleFacilities]);
 
   const selectedFacility = useMemo(
     () => visibleFacilities.find((facility) => facility.id === selectedFacilityId) ?? null,
@@ -224,7 +237,9 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
   const kindLabel = place.kindName;
   const selectedFloor = floors.find((floor) => floor.id === selectedFloorId) ?? null;
   const floorPhotos = selectedFloor ? floorMediaOf(placeContent, selectedFloor.levelCode) : [];
-  const SelectedIcon = selectedFacility ? facilityIcon(selectedFacility.typeCode) : null;
+  const selectedIconKey = selectedFacility
+    ? resolveFacilityIconKey(selectedFacility.typeCode, iconKeyByTypeCode)
+    : null;
   const selectedFacilityStatusLabel = selectedFacility && facilityStatus.status === "ready"
     ? facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, selectedFacility.id))
     : null;
@@ -378,7 +393,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                   ) : null}
                   <div className="flex items-center gap-3">
                     <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-container text-primary">
-                      {SelectedIcon ? <SelectedIcon size={16} /> : null}
+                      {selectedFacility ? <FacilityGlyph iconKey={selectedIconKey} size={16} /> : null}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-body font-semibold text-ink">

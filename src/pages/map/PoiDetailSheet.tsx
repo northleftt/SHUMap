@@ -6,7 +6,7 @@ import { IconBadge } from "../../components/ui/IconBadge";
 import { ImagePreview } from "../../components/ui/ImagePreview";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SeverityBanner, severityOf } from "../../components/ui/SeverityBanner";
-import { facilityIcon } from "../../lib/facilityIcons";
+import { FacilityGlyph, resolveFacilityIconKey } from "../../lib/facilityIcons";
 import { facilityStatusLabel, resolveFacilityStatus } from "../../lib/hooks/useFacilityStatus";
 import { MapAppSheet, type MapTarget } from "../../lib/nav";
 import { useFavorites } from "../../lib/storage/favorites";
@@ -24,11 +24,20 @@ export function PoiDetailSheet({
   building,
   events,
   facilityStatus,
+  iconKeyByTypeCode = null,
   initialMerchantId = null,
 }: {
   building: MapPoi;
   events: OperationalEvent[] | null;
   facilityStatus: FacilityStatusState;
+  /**
+   * 设施类型编码 → 管理员选的 icon_key（由 facilityIconKeyMap 从 release manifest 建）。
+   *
+   * 楼内设施数据（PublicPlaceFacility）里只有 typeCode，没有 iconKey，所以图标只能
+   * 靠这张表查。传 null 会退回「按编码猜」，那只对出厂九类成立 —— 后台新建的类型
+   * 会掉到通用图钉，管理员选了什么都不生效。调用方拿得到 manifest 就该传进来。
+   */
+  iconKeyByTypeCode?: ReadonlyMap<string, string | null> | null;
   /** 深链/搜索命中商户时直接展开该商户视图。 */
   initialMerchantId?: string | null;
 }) {
@@ -203,14 +212,18 @@ export function PoiDetailSheet({
           ) : facilityStatus.status === "ready" ? (
             <div className="scrollbar-hidden mt-3 flex gap-4 overflow-x-auto pb-1">
               {facilities.map((facility) => {
-                const Icon = facilityIcon(facility.typeCode);
                 // 不可用的设施在指引里就标出来，免得点进楼层页才发现。
                 const statusLabel = facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, facility.id));
                 const name = facility.displayName || facility.typeName;
                 return (
                   <IconBadge
                     key={facility.id}
-                    icon={<Icon size={16} />}
+                    icon={
+                      <FacilityGlyph
+                        iconKey={resolveFacilityIconKey(facility.typeCode, iconKeyByTypeCode)}
+                        size={16}
+                      />
+                    }
                     label={statusLabel ? `${name}（${statusLabel}）` : name}
                   />
                 );

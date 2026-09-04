@@ -5,6 +5,7 @@ import { HttpError, json, readJson } from "../lib/http";
 import { allocateMapFilterKey } from "../lib/taxonomy";
 import { isoNow, makeId, objectValue, oneOf, optionalNumber, optionalString, parseJsonObject, requiredString } from "../lib/values";
 import { audit } from "./audit";
+import { isCustomIconKey } from "./facility-icons";
 
 // ---------------------------------------------------------------------------
 // 设施类型（标签）维护。facility_types 是引用表，facility_instances.facility_type_id
@@ -170,7 +171,7 @@ function booleanFlag(value: unknown, field: string): boolean {
  * 没有修订时退回类型名；楼宇名同理走 place_revisions，草稿地点也能显示出来。
  */
 export async function listFacilityTypes(env: Env): Promise<Response> {
-  const [types, instances] = await Promise.all([
+  const [types, instances, customIcons] = await Promise.all([
     all<FacilityTypeRow>(
       env.DB,
       `select t.id,t.code,t.name,t.category,t.icon_key as iconKey,t.status,
@@ -225,6 +226,10 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
          left join indoor_spaces sp on sp.id=f.indoor_space_id
         order by t.name,placeName,fl.level_order,displayName`,
     ),
+    all<{ iconKey: string; label: string; status: string }>(
+      env.DB,
+      "select icon_key as iconKey,label,status from facility_icons order by created_at desc",
+    ),
   ]);
 
   return json({
@@ -240,6 +245,14 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
       };
     }),
     iconKeys: SUPPORTED_ICON_KEYS,
+    // 后台上传的图标（0029）。界面把它接在 iconKeys 那排格子后面，所以这里连
+    // 中文名一起给——内置键的中文名在 src/lib/facilityIcons.tsx 里写着，自定义键
+    // 的只存在库里。停用的也回，但标了 status，界面只把 active 的列进可选项。
+    customIcons: customIcons.map((icon) => ({
+      iconKey: icon.iconKey,
+      label: icon.label,
+      status: icon.status,
+    })),
     visibilityKeys: EDITABLE_VISIBILITY_KEYS,
     categories: CATEGORIES,
   });
@@ -272,7 +285,7 @@ export async function createFacilityType(
   const category = body.category === undefined || body.category === null || body.category === ""
     ? "other"
     : oneOf(body.category, "category", CATEGORIES);
-  const iconKey = normalizeIconKey(body.iconKey);
+  const iconKey = await normalizeIconKey(env, body.iconKey);
   const verificationIntervalDays = normalizeInterval(body.verificationIntervalDays);
   const filterLabel = body.filterLabel === undefined ? name : requiredString(body.filterLabel, "filterLabel", 80);
   const filterSortOrder = body.filterSortOrder === undefined
@@ -378,7 +391,7 @@ export async function updateFacilityType(
   }
   const name = body.name === undefined ? null : requiredString(body.name, "name", 50);
   const category = body.category === undefined ? null : oneOf(body.category, "category", CATEGORIES);
-  const iconKey = body.iconKey === undefined ? undefined : normalizeIconKey(body.iconKey);
+  const iconKey = body.iconKey === undefined ? undefined : await normalizeIconKey(env, body.iconKey);
   const status = body.status === undefined ? null : oneOf<FacilityTypeStatus>(body.status, "status", STATUSES);
   const verificationIntervalDays = body.verificationIntervalDays === undefined ? undefined : normalizeInterval(body.verificationIntervalDays);
   // 补丁式合并：只覆盖请求里给到的开关，buildingSummary / floorDefault 这些界面上
@@ -572,13 +585,34 @@ async function instanceCount(env: Env, id: string): Promise<number> {
   return row.count;
 }
 
-function normalizeIconKey(value: unknown): string | null {
+/**
+ * icon_key 的合法取值 = 内置清单 ∪ 启用中的自定义图标（facility_icons，见 0029）。
+ *
+ * 自定义键一律带 `custom-` 前缀，客户端据此分流（内置走各端图标表，自定义去
+ * GET /api/public/facility-icons/:key 取图）。只认 status='active' 的：停用的图标
+ * 不再作为新建选项，但已经引用它的类型照常显示——与本文件 disable-vs-delete 同一套语义。
+ *
+ * 要查库所以变成了 async。别退回「只要带 custom- 前缀就放行」的写法：那样能存进
+ * 一个不存在的键，前台拿到 404 后只会画通用图钉，而后台看起来是设置成功的。
+ */
+async function normalizeIconKey(env: Env, value: unknown): Promise<string | null> {
   const raw = optionalString(value, "iconKey", 50);
   if (raw === null) return null;
-  if (!(SUPPORTED_ICON_KEYS as readonly string[]).includes(raw)) {
-    throw new HttpError(400, "unsupported_icon_key", `iconKey must be one of: ${SUPPORTED_ICON_KEYS.join(", ")}`);
+  if ((SUPPORTED_ICON_KEYS as readonly string[]).includes(raw)) return raw;
+  if (isCustomIconKey(raw)) {
+    const custom = await first<{ iconKey: string }>(
+      env.DB,
+      "select icon_key as iconKey from facility_icons where icon_key=? and status='active'",
+      [raw],
+    );
+    if (custom) return raw;
+    throw new HttpError(
+      400,
+      "unsupported_icon_key",
+      `自定义图标 ${raw} 不存在或已停用。请先在图标库里上传它，或换一枚图标。`,
+    );
   }
-  return raw;
+  throw new HttpError(400, "unsupported_icon_key", `iconKey must be one of: ${SUPPORTED_ICON_KEYS.join(", ")}`);
 }
 
 function normalizeInterval(value: unknown): number | null {

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import type {
+  CustomFacilityIconRow,
   FacilityTypeInstanceRow,
   FacilityTypeRow,
   MapFilterGroupRow,
@@ -11,7 +12,7 @@ import type {
   PlaceKindRow,
 } from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
-import { facilityIconByKey, facilityIconKeyLabel } from "../../lib/facilityIcons";
+import { FacilityGlyph, facilityIconKeyLabel } from "../../lib/facilityIcons";
 import { useAuth } from "../AuthContext";
 import {
   Chip,
@@ -118,52 +119,225 @@ const VISIBILITY_SWITCHES = [
   },
 ];
 
-function IconPreview({ iconKey, size = 18 }: { iconKey: string | null; size?: number }) {
-  const Icon = facilityIconByKey(iconKey);
+function IconPreview({
+  iconKey,
+  size = 18,
+  label,
+}: {
+  iconKey: string | null;
+  size?: number;
+  /** 自定义图标的中文名（内置图标从 FACILITY_ICON_KEY_LABELS 取，不用传）。 */
+  label?: string;
+}) {
   return (
-    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-container text-primary">
-      <Icon size={size} />
+    <span
+      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-container text-primary"
+      title={label}
+    >
+      <FacilityGlyph iconKey={iconKey} size={size} />
     </span>
   );
 }
 
-/** 图标选择：点一下就换，左边实时显示当前选中的样子。 */
+/**
+ * 图标选择：点一下就换，左边实时显示当前选中的样子。
+ *
+ * 两排格子：内置图标（硬编码 23 枚）+ 后台上传的自定义图标（0029）。分两排而不是
+ * 混在一起，因为它们能做的事不同——自定义的可以删、可以停用，内置的不能。
+ */
 function IconChooser({
   value,
   iconKeys,
+  customIcons,
+  canEdit,
   onChange,
+  onUploaded,
 }: {
   value: string;
   iconKeys: string[];
+  customIcons: CustomFacilityIconRow[];
+  canEdit: boolean;
   onChange: (value: string) => void;
+  /** 上传成功：把新图标并进本地列表并选中它（不重新拉数据，见 ADMIN_REFRESH_EXCLUSIONS）。 */
+  onUploaded: (icon: CustomFacilityIconRow) => void;
 }) {
+  const [uploading, setUploading] = useState(false);
+  // 停用的图标不作为可选项，但如果当前类型正用着它，仍要显示出来（否则界面上看不到自己选的是什么）。
+  const selectable = customIcons.filter((icon) => icon.status === "active" || icon.iconKey === value);
+  const currentCustom = customIcons.find((icon) => icon.iconKey === value) ?? null;
+  const currentLabel = currentCustom ? currentCustom.label : facilityIconKeyLabel(value);
+
+  function cell(key: string, label: string, active: boolean) {
+    return (
+      <button
+        aria-label={label}
+        aria-pressed={active}
+        className={`grid h-8 w-8 place-items-center rounded-lg border transition-colors ${
+          active ? "border-primary bg-primary-container text-primary" : "border-line text-sub hover:text-ink"
+        }`}
+        key={key}
+        onClick={() => onChange(key)}
+        title={label}
+        type="button"
+      >
+        <FacilityGlyph iconKey={key} size={16} />
+      </button>
+    );
+  }
+
   return (
     <div>
       <span className="mb-1.5 block text-label text-sub">图标</span>
       <div className="flex items-center gap-2.5">
-        <IconPreview iconKey={value || null} />
-        <span className="text-aux text-sub">{facilityIconKeyLabel(value)}</span>
+        <IconPreview iconKey={value || null} label={currentCustom?.label} />
+        <span className="text-aux text-sub">
+          {currentLabel}
+          {currentCustom ? <span className="ml-1.5 text-label text-primary">自定义</span> : null}
+          {currentCustom && currentCustom.status !== "active"
+            ? <span className="ml-1.5 text-label text-warning">已停用</span>
+            : null}
+        </span>
       </div>
+
       <div className="mt-2.5 flex flex-wrap gap-1.5">
-        {iconKeys.map((key) => {
-          const Icon = facilityIconByKey(key);
-          const active = key === value;
-          return (
-            <button
-              aria-label={facilityIconKeyLabel(key)}
-              aria-pressed={active}
-              className={`grid h-8 w-8 place-items-center rounded-lg border transition-colors ${
-                active ? "border-primary bg-primary-container text-primary" : "border-line text-sub hover:text-ink"
-              }`}
-              key={key}
-              onClick={() => onChange(key)}
-              title={facilityIconKeyLabel(key)}
-              type="button"
-            >
-              <Icon size={16} />
-            </button>
-          );
-        })}
+        {iconKeys.map((key) => cell(key, facilityIconKeyLabel(key), key === value))}
+      </div>
+
+      {selectable.length > 0 || canEdit ? (
+        <div className="mt-3">
+          <span className="mb-1.5 block text-label text-sub">
+            自定义图标{selectable.length > 0 ? ` · ${selectable.length} 枚` : ""}
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {selectable.map((icon) => cell(icon.iconKey, icon.label, icon.iconKey === value))}
+            {canEdit ? (
+              <button
+                aria-label="上传新图标"
+                className="grid h-8 w-8 place-items-center rounded-lg border border-dashed border-line text-sub transition-colors hover:border-primary hover:text-primary"
+                onClick={() => setUploading((open) => !open)}
+                title="上传新图标"
+                type="button"
+              >
+                <Plus size={15} />
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {uploading ? (
+        <IconUploader
+          onClose={() => setUploading(false)}
+          onUploaded={(icon) => {
+            onUploaded(icon);
+            onChange(icon.iconKey);
+            setUploading(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * 上传一枚自定义图标（0029）。
+ *
+ * 要求写在界面上而不只写在文档里：服务端对颜色和 viewBox 是拒收而非自动改写
+ * （改写要穷举所有写法，漏一个就产出一枚颜色改不掉的图标），所以上传者必须在
+ * 动手之前就知道该怎么导出。
+ */
+function IconUploader({
+  onClose,
+  onUploaded,
+}: {
+  onClose: () => void;
+  onUploaded: (icon: CustomFacilityIconRow) => void;
+}) {
+  const [label, setLabel] = useState("");
+  const [slug, setSlug] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const iconKey = `custom-${slug.trim()}`;
+  const slugOk = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug.trim()) && iconKey.length <= 50;
+  const ready = label.trim().length > 0 && slugOk && file !== null;
+
+  async function submit() {
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    try {
+      const svg = await file.text();
+      const result = await admin.uploadFacilityIcon(iconKey, svg, label.trim());
+      onUploaded({ iconKey: result.iconKey, label: result.label, status: result.status });
+    } catch (err) {
+      setError(labelError(err, "上传失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-line bg-page p-3.5">
+      <div className="flex items-center justify-between">
+        <span className="text-body font-semibold text-ink">上传自定义图标</span>
+        <button
+          aria-label="收起"
+          className="grid h-7 w-7 place-items-center rounded-lg text-sub hover:text-ink"
+          onClick={onClose}
+          type="button"
+        >
+          <X size={15} />
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        <Field label="图标名称" onChange={setLabel} placeholder="如 直饮水机" value={label} />
+        <Field
+          label="英文编码（自动加 custom- 前缀）"
+          onChange={(value) => setSlug(value.toLowerCase())}
+          placeholder="如 water-dispenser"
+          value={slug}
+        />
+      </div>
+      {slug.trim() && !slugOk ? (
+        <p className="mt-2 text-aux text-warning">
+          编码只能用小写字母、数字和连字符（不能以连字符开头或结尾），加上 custom- 前缀后不超过 50 个字符。
+        </p>
+      ) : slug.trim() ? (
+        <p className="mt-2 text-label text-sub">将保存为 <code className="text-primary">{iconKey}</code></p>
+      ) : null}
+
+      <div className="mt-3">
+        <span className="mb-1.5 block text-label text-sub">SVG 文件</span>
+        <input
+          accept=".svg,image/svg+xml"
+          className="block w-full text-aux text-sub file:mr-3 file:rounded-lg file:border-0 file:bg-primary-container file:px-3 file:py-2 file:text-aux file:font-semibold file:text-primary"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          type="file"
+        />
+      </div>
+
+      <div className="mt-3">
+        <InfoNote>
+          <span className="font-semibold">图标要求</span>（不满足会被拒收，并告诉你哪一条）：
+          <br />· 单色描边、不填充，线宽 2，24×24 视图（与内置图标同一套 lucide 风格）
+          <br />· 必须带 viewBox，建议 <code>0 0 24 24</code>
+          <br />· 颜色只能写 <code>currentColor</code> 或 <code>none</code>：图钉有两态（未选中是白底蓝图标、
+          选中是蓝底白图标），写死色值就没法上第二种色。也因此不能用渐变、图案或 <code>&lt;style&gt;</code> 样式块
+          <br />· 不要放文字：地图上只画 22px，字读不出来
+          <br />· 不含 <code>&lt;script&gt;</code>、on* 事件属性、外部引用
+          <br />· 单文件不超过 64KB
+        </InfoNote>
+      </div>
+
+      {error ? <div className="mt-3"><ErrorBanner message={error} /></div> : null}
+      <div className="mt-3 flex gap-2">
+        <PrimaryButton disabled={!ready || busy} onClick={() => void submit()}>
+          {busy ? "上传中…" : "上传图标"}
+        </PrimaryButton>
+        <GhostButton disabled={busy} onClick={onClose}>取消</GhostButton>
       </div>
     </div>
   );
@@ -545,13 +719,20 @@ function PlaceKindCard({
 function FacilityTypeForm({
   editing,
   iconKeys,
+  customIcons,
+  canEdit,
   onClose,
   onSaved,
+  onIconUploaded,
 }: {
   editing: FacilityTypeRow | null;
   iconKeys: string[];
+  customIcons: CustomFacilityIconRow[];
+  canEdit: boolean;
   onClose: () => void;
   onSaved: (message: string) => void;
+  /** 上传成功后把新图标并进页面级列表（本表单不重新拉数据，见 ADMIN_REFRESH_EXCLUSIONS）。 */
+  onIconUploaded: (icon: CustomFacilityIconRow) => void;
 }) {
   const [code, setCode] = useState(editing?.code ?? "");
   const [name, setName] = useState(editing?.name ?? "");
@@ -636,7 +817,14 @@ function FacilityTypeForm({
         <Field label="建议复核间隔（天，可留空）" onChange={setInterval} placeholder="如 90" value={interval} />
       </div>
       <div className="mt-4 max-w-lg">
-        <IconChooser iconKeys={iconKeys} onChange={setIconKey} value={iconKey} />
+        <IconChooser
+          canEdit={canEdit}
+          customIcons={customIcons}
+          iconKeys={iconKeys}
+          onChange={setIconKey}
+          onUploaded={onIconUploaded}
+          value={iconKey}
+        />
       </div>
       <p className="mt-3 text-label text-sub">
         {editing
@@ -973,6 +1161,14 @@ export function TaxonomyPage() {
   const [creatingType, setCreatingType] = useState(false);
   const [editingType, setEditingType] = useState<FacilityTypeRow | null>(null);
   const [typeFilter, setTypeFilter] = useState("all");
+  /*
+   * 刚上传、但接口数据还没重新拉过的图标。
+   *
+   * 上传走的是被 ADMIN_REFRESH_EXCLUSIONS 排除的路径（否则广播会把正在填的表单
+   * 清空），所以列表不会自动更新 —— 新图标由这里兜住，让它立刻能在选择器里选中。
+   * 按 key 去重合并，下次 reload 拿到正式数据后不会出现两份。
+   */
+  const [uploadedIcons, setUploadedIcons] = useState<CustomFacilityIconRow[]>([]);
 
   if (state.status === "loading") return <LoadingState label="加载分类…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
@@ -996,6 +1192,13 @@ export function TaxonomyPage() {
     return true;
   });
   const unmappedKinds = filters.placeKinds.filter((kind) => kind.categoryId === null);
+  // 接口数据优先：reload 之后同一个键以服务端那份为准，刚上传的那份自动让位。
+  const customIcons = [
+    ...facilityTypes.customIcons,
+    ...uploadedIcons.filter(
+      (icon) => !facilityTypes.customIcons.some((row) => row.iconKey === icon.iconKey),
+    ),
+  ];
 
   return (
     <div className="space-y-4">
@@ -1045,9 +1248,12 @@ export function TaxonomyPage() {
       {/* 设施类型 */}
       {creatingType || editingType ? (
         <FacilityTypeForm
+          canEdit={canEdit}
+          customIcons={customIcons}
           editing={editingType}
           iconKeys={facilityTypes.iconKeys}
           onClose={() => { setCreatingType(false); setEditingType(null); }}
+          onIconUploaded={(icon) => setUploadedIcons((list) => [...list.filter((row) => row.iconKey !== icon.iconKey), icon])}
           onSaved={afterChange}
         />
       ) : null}

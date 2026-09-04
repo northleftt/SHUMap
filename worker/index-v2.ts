@@ -5,6 +5,13 @@ import { handleBootstrap, handleLogin, handleLogout, handleSession, optionalSess
 import { recordAnalyticsEvent } from "./modules/analytics";
 import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCollectionTask } from "./modules/collections";
 import { createFacilityHandler, createFacilityRevisionHandler, deleteFacility, getFacility, listFacilities, publicFacilityStatus, updateFacilityLifecycle } from "./modules/facilities";
+import {
+  deleteFacilityIcon,
+  getPublicFacilityIcon,
+  listFacilityIcons,
+  updateFacilityIcon,
+  uploadFacilityIcon,
+} from "./modules/facility-icons";
 import { createFacilityType, deleteFacilityType, listFacilityTypes, listPublicFacilityTypes, updateFacilityType } from "./modules/facility-types";
 import { processQueue } from "./modules/jobs";
 import { enqueueMapImport, createMapUploadIntent, listMapFeatures, listMapImportJobs, listMapVersions, uploadMapContent } from "./modules/maps";
@@ -153,6 +160,12 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   }
   if (method === "GET" && path === "/api/public/facility-types") return listPublicFacilityTypes(env);
   if (method === "GET" && path === "/api/public/facility-status") return publicFacilityStatus(env);
+  // 自定义设施图标（后台上传的 SVG）。?ink=primary|white 决定上色，
+  // 对应图钉未选中 / 选中两态；两端都从这里取图。
+  const publicFacilityIcon = match(path, "/api/public/facility-icons/:key");
+  if (method === "GET" && publicFacilityIcon) {
+    return getPublicFacilityIcon(request, env, publicFacilityIcon.key);
+  }
   if (method === "GET" && path === "/api/public/collection-tasks") {
     const principal = await requireSession(request, env, "collect:data");
     return listCollectionTasks(request, env, principal);
@@ -337,6 +350,26 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "DELETE" && facilityType) {
     principal = await requireSession(request, env, "write:content");
     return deleteFacilityType(env, principal, facilityType.id, requestId);
+  }
+
+  // 自定义设施图标。按 icon_key 寻址（那个键要存进 facility_types.icon_key），
+  // 所以用 PUT /:key 而不是 POST —— 同键重传即替换，引用它的类型不用改一个字。
+  if (method === "GET" && path === "/api/admin/facility-icons") {
+    await requireSession(request, env, "read:admin");
+    return listFacilityIcons(env);
+  }
+  const facilityIcon = match(path, "/api/admin/facility-icons/:key");
+  if (method === "PUT" && facilityIcon) {
+    principal = await requireSession(request, env, "write:content");
+    return uploadFacilityIcon(request, env, principal, facilityIcon.key, requestId);
+  }
+  if (method === "PATCH" && facilityIcon) {
+    principal = await requireSession(request, env, "write:content");
+    return updateFacilityIcon(request, env, principal, facilityIcon.key, requestId);
+  }
+  if (method === "DELETE" && facilityIcon) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteFacilityIcon(env, principal, facilityIcon.key, requestId);
   }
 
   if (method === "GET" && path === "/api/admin/merchants") {

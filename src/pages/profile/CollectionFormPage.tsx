@@ -6,7 +6,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SheetModal } from "../../components/ui/SheetModal";
 import { listPublicFacilityTypes } from "../../lib/api/public";
-import { facilityIcon } from "../../lib/facilityIcons";
+import { FacilityGlyph, facilityIconKeyMap, resolveFacilityIconKey } from "../../lib/facilityIcons";
 import { usePhotoUploads } from "../../lib/photos/usePhotoUploads";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import type { LoadedRelease } from "../../lib/release/mapData";
@@ -29,6 +29,15 @@ interface FacilityTypeOption {
   code: string;
   label: string;
   status: "active" | "disabled";
+  /**
+   * 管理员给这个类型选的 icon_key（含自定义图标的 custom- 键）。
+   *
+   * 这一页不必去 release manifest 里查：GET /api/public/facility-types 本身就带
+   * iconKey，而这个 hook 已经在读它了。此前图标走 facilityIcon(typeCode)，那是拿
+   * 「类型编码」去撞图标键，只有出厂九类（靠手写映射）能对上，后台新建的类型一律
+   * 掉到通用图钉。
+   */
+  iconKey: string | null;
 }
 
 type FacilityTypeOptionsState =
@@ -54,6 +63,7 @@ function useFacilityTypeOptions() {
           code: item.code,
           label: item.name,
           status: item.status,
+          iconKey: item.iconKey,
         }));
         setState({ status: "ready", options: facilityTypeCache });
       })
@@ -77,7 +87,27 @@ function useFacilityTypeOptions() {
     [state],
   );
 
-  return { ...state, labelFor };
+  /*
+   * 编码 → 管理员选的 icon_key。
+   *
+   * 此前这一页用 facilityIcon(typeCode)，那个函数拿「类型编码」去撞图标键，只有出厂
+   * 九类（靠手写映射）能对上，后台新建的类型一律掉到通用图钉。这里不必绕 release
+   * manifest —— 本页的类型表本来就来自 GET /api/public/facility-types，那个响应里
+   * 就带 iconKey，顺手取出来即可。
+   *
+   * 与 labelFor 不同，这里不对未知编码抛错：图标只是装饰，缺了退通用标记就行，
+   * 不该因此炸掉整个采集表单（名称缺失才是真的数据问题，那条仍然抛）。
+   */
+  const iconKeyByTypeCode = useMemo(
+    () => (state.status === "ready" ? facilityIconKeyMap(state.options) : null),
+    [state],
+  );
+  const iconKeyFor = useCallback(
+    (code: string): string | null => resolveFacilityIconKey(code, iconKeyByTypeCode),
+    [iconKeyByTypeCode],
+  );
+
+  return { ...state, labelFor, iconKeyFor };
 }
 
 let facilitySeq = 0;
@@ -163,6 +193,7 @@ function FloorDetailModal({
   typeOptionsStatus,
   typeOptionsMessage,
   typeLabelFor,
+  typeIconKeyFor,
 }: {
   floor: CollectedFloor | null;
   onSave: (floor: CollectedFloor) => void;
@@ -171,6 +202,8 @@ function FloorDetailModal({
   typeOptionsStatus: FacilityTypeOptionsState["status"];
   typeOptionsMessage: string | null;
   typeLabelFor: (code: string) => string;
+  /** 编码 → 管理员选的 icon_key（含自定义图标的 custom- 键）。 */
+  typeIconKeyFor: (code: string) => string | null;
 }) {
   const [draft, setDraft] = useState<CollectedFloor | null>(floor);
   const [addingType, setAddingType] = useState(false);
@@ -220,12 +253,14 @@ function FloorDetailModal({
         />
 
         <div className="mt-4">
-          {draft.facilities.map((facility, index) => {
-            const Icon = facilityIcon(facility.typeCode);
-            return (
+          {draft.facilities.map((facility, index) => (
               <div key={facility.id} className={`py-3 ${index > 0 ? "border-t border-line" : ""}`}>
                 <div className="flex items-center gap-2.5">
-                  <Icon size={17} className="shrink-0 text-primary" />
+                  <FacilityGlyph
+                    className="shrink-0 text-primary"
+                    iconKey={typeIconKeyFor(facility.typeCode)}
+                    size={17}
+                  />
                   <span className="flex-1 text-body font-semibold text-ink">
                     {facility.name || typeLabelFor(facility.typeCode)}
                   </span>
@@ -250,8 +285,7 @@ function FloorDetailModal({
                   onChange={(event) => updateFacility(facility.id, { locationText: event.target.value })}
                 />
               </div>
-            );
-          })}
+          ))}
         </div>
 
         {addingType ? (
@@ -351,6 +385,7 @@ function ReadyCollectionFormPage({ release }: { release: LoadedRelease }) {
   const { getTask, saveDraft, submitCollection, error } = useCollectionTasks();
   const typeOptionsState = useFacilityTypeOptions();
   const typeLabelFor = typeOptionsState.labelFor;
+  const typeIconKeyFor = typeOptionsState.iconKeyFor;
 
   const building = useMemo(
     () => release.buildings.find((b) => b.poiKey === buildingId) ?? null,
@@ -587,6 +622,7 @@ function ReadyCollectionFormPage({ release }: { release: LoadedRelease }) {
             floors: task.floors.map((item) => (item.id === floor.id ? floor : item)),
           })
         }
+        typeIconKeyFor={typeIconKeyFor}
         typeLabelFor={typeLabelFor}
         typeOptions={typeOptionsState.options.filter((option) => option.status === "active")}
         typeOptionsMessage={null}
