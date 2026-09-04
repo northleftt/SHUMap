@@ -169,7 +169,10 @@ Page({
       this.closeImageViewer();
       return;
     }
-    wx.navigateBack();
+    // 本页是自定义导航，栈底也会画出「返回」。从分享 / 扫码直接进指南时
+    // 栈里没有上一页，navigateBack 会失败、按钮点了没反应。出口一律是地图
+    // tab：从首页横幅进来也是回地图，不跟页面栈走。
+    wx.switchTab({ url: "/pages/map/map" });
   },
 
   async load() {

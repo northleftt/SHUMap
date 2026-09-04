@@ -11,26 +11,54 @@ page {
   box-sizing: border-box;
 }
 
-/* 头部 */
+/* 头部。整行左对齐，不用 justify-content: space-between —— 本行落在微信胶囊按钮
+   （右上角「···」与「×」）的纵向区间里，任何右对齐的元素都会和它重合。 */
 .header {
   display: flex;
   align-items: flex-end;
-  justify-content: space-between;
   padding: 48rpx 0 24rpx;
 }
 
 .title {
+  flex: none;
   font-size: 44rpx;
   font-weight: 600;
   color: #0f172a;
 }
 
-/* 「如何坐车？」入口：灰色小字，与大标题基线对齐（.header 是 align-items: flex-end）。
-   不做成按钮/主题蓝：它是补充说明的入口，不该跟页面主操作抢注意力。 */
+/* 「如何坐车」入口：圆圈问号 + 灰色小字，紧贴大标题右侧。
+   加圆圈问号是因为纯灰字读起来像说明文字而不是可点的东西——图标给出「这能点」的信号，
+   但仍不做成按钮/主题蓝：它是补充说明的入口，不该跟页面主操作抢注意力。
+   flex-direction 必须显式写 row：Skyline 下 view 默认是 column（见本文件 .stop-row-stops）。 */
 .guide-link {
+  flex: none;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-left: 20rpx;
+  padding-bottom: 8rpx;
+}
+
+/* 圆圈用 border 画而不是用 ❓/🛈 这类字符：emoji 自带彩色，压不成与文字同一个灰。
+   box-sizing: border-box 让 28rpx 是外径（含描边），否则实际会大 4rpx。 */
+.guide-icon {
+  width: 28rpx;
+  height: 28rpx;
+  box-sizing: border-box;
+  margin-right: 8rpx;
+  border: 2rpx solid #94a3b8;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20rpx;
+  line-height: 1;
+  color: #94a3b8;
+}
+
+.guide-text {
   font-size: 26rpx;
   color: #94a3b8;
-  padding-bottom: 8rpx;
 }
 
 /* 校区选择卡 */

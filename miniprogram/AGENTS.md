@@ -390,8 +390,15 @@
   「不支持打开非业务域名」原生错误页上，`binderror` 未必触发，连本页的复制链接降级都摸不到。
   线路级 `bookingUrl` 在 API / 后台 / Web 端保留不动，只是小程序不再消费。
 
-- **2026-08-24 校车乘坐指南（「如何坐车？」）**：校车页标题右侧的灰色小字入口 →
+- **2026-08-24 校车乘坐指南（「如何坐车」）**：入口是**紧贴大标题右侧**的「圆圈问号 + 灰色小字」 →
   `pages/shuttle-guide/shuttle-guide`（默认渲染器 + 原生导航栏，不用 Skyline——本页只是竖排文章）。
+  两条视觉约束都踩过坑，`tests/shuttle-ride-guide.test.mjs` 各钉了一条：
+  ① **头部不能用 `justify-content: space-between`**——那一行落在微信胶囊按钮（右上角「···」「×」）
+  的纵向区间里，任何右对齐元素都会被压在胶囊底下；标题与入口都要 `flex: none` 才不互相挤。
+  ② 圆圈用 `border` + `border-radius: 50%` 画、里面放 ASCII `?`，**不用 emoji 问号**：emoji 自带
+  彩色，压不成与文字同一个灰。圆圈描边 / 问号 / 文字三者同色（测试比的是色值相等而非写死的
+  `#94a3b8`，将来整体调灰度时漏改一处仍会被抓到）。纯灰字曾读起来像说明文字而不是可点的东西，
+  图标是那个「这能点」的信号。
   内容**复用 guide_documents**，slug=`shuttle-ride`，公共读端 `GET /api/public/guide/shuttle-ride`，
   与返校指南（`freshman-transit`）共用同一套端点与草稿→送审→发布→回滚流水线，
   所以**零迁移、零新端点**。代价是要满足 guide 模块的 `assertContentShape`：
@@ -404,6 +411,13 @@
   图片走 `kind=figure_png`（PNG/JPEG，服务端按魔术字节嗅探），**不做 `<key>-png` 派生**：
   那是返校指南 SVG 图示的补丁，这份从一开始就是位图入库。
   管理端编辑器：`src/admin/components/ShuttleGuidePanel.tsx`，挂在「校车时刻」页第五个 tab。
+  ⚠️ 编辑器里的**未保存草稿只活在组件 state 里**，所以两条防线缺一不可（2026-08-25 修）：
+  ① `/api/admin/guide/assets` 必须在 `ADMIN_REFRESH_EXCLUSIONS` 里——`apiFetch` 对任何
+  非 GET 的 `/api/admin/` 请求都会广播 `admin-data-changed`，广播会让所有 `useAsyncData`
+  回到 loading 态，正在编辑的子树被卸载重挂，刚加的块全没；
+  ② 面板自己要留住上一次成功数据（同 `TransitPage` 的 `lastTransit`），因为广播可能由
+  **别的**组件的写操作触发，光靠 ① 挡不住。当时的现象是「图片传不上去」，其实字节已进 R2，
+  只是引用它的那一块被回滚了。回归钉在 `tests/shuttle-ride-guide.test.mjs`。
 
 - `pages/webview/webview`：通用外链容器（web-view + 复制链接降级），其他页面打开外链直接复用。
   当前白名单只有 `config.webBaseUrl`（本站），暂无调用方

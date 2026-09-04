@@ -98,10 +98,19 @@ function moved<T>(items: T[], from: number, to: number): T[] {
 export function ShuttleGuidePanel() {
   const list = useAsyncData((signal) => admin.listGuideDocuments(signal), []);
 
-  if (list.state.status === "error") return <ErrorBanner message={list.state.message} />;
-  if (list.state.status !== "ready") return <LoadingState label="加载乘坐指南…" />;
+  // 刷新期间继续渲染上一次的成功数据。useAsyncData 一 reload 就把状态打回 loading，
+  // 若此时直接渲染 LoadingState，下面整棵子树会被卸载重挂，编辑器里没保存的块全没了
+  // （同 TransitPage 的 lastTransit）。而 reload 可能由任何一次 admin 写操作广播触发，
+  // 不只是本面板自己发起的。
+  const [lastList, setLastList] = useState<admin.ListResponse<admin.GuideDocumentRow> | null>(null);
+  useEffect(() => {
+    if (list.state.status === "ready") setLastList(list.state.data);
+  }, [list.state]);
 
-  const row = list.state.data.items.find((item) => item.slug === SHUTTLE_GUIDE_SLUG) ?? null;
+  if (list.state.status === "error" && lastList === null) return <ErrorBanner message={list.state.message} />;
+  if (lastList === null) return <LoadingState label="加载乘坐指南…" />;
+
+  const row = lastList.items.find((item) => item.slug === SHUTTLE_GUIDE_SLUG) ?? null;
   if (!row) return <CreateDocument onCreated={list.reload} />;
   return <DocumentEditor reloadList={list.reload} row={row} />;
 }
@@ -150,13 +159,21 @@ function CreateDocument({ onCreated }: { onCreated: () => void }) {
 function DocumentEditor({ row, reloadList }: { row: admin.GuideDocumentRow; reloadList: () => void }) {
   const detail = useAsyncData((signal) => admin.getGuideDocument(row.id, signal), [row.id]);
 
-  if (detail.state.status === "error") return <ErrorBanner message={detail.state.message} />;
-  if (detail.state.status !== "ready") return <LoadingState label="加载乘坐指南…" />;
+  // 同上：刷新期间留住上一次的成功数据，别让 ReadyEditor 卸载重挂。
+  const [lastDetail, setLastDetail] = useState<admin.GuideDocumentDetail | null>(null);
+  useEffect(() => {
+    if (detail.state.status === "ready") setLastDetail(detail.state.data);
+  }, [detail.state]);
+
+  if (detail.state.status === "error" && lastDetail === null) return <ErrorBanner message={detail.state.message} />;
+  if (lastDetail === null) return <LoadingState label="加载乘坐指南…" />;
 
   return (
     <ReadyEditor
-      detail={detail.state.data}
-      key={detail.state.data.working?.id ?? "none"}
+      detail={lastDetail}
+      /* key 只在「换了另一版」时变：保存 / 发布后服务端内容才是权威，此时重挂是对的
+         （刚提交的内容与服务端一致）。上传图片不产生新版本，所以 key 不变、不重挂。 */
+      key={lastDetail.working?.id ?? "none"}
       reload={() => {
         detail.reload();
         reloadList();

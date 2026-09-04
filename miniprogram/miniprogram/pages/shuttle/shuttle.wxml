@@ -2,10 +2,14 @@
 <scroll-view scroll-y class="page" enhanced show-scrollbar="{{false}}" style="padding-top: {{statusBarHeight}}px">
   <!-- 头部。预约入口已下架：vcard.shu.edu.cn 不是本站域名，配不了业务域名，
        且该页面依赖公众号网页授权，web-view 里打不开（详见 shuttle.ts 顶部注释）。
-       「如何坐车？」只在乘车指南已发布且有正文时才出现（guideEntryVisible）。 -->
+       「如何坐车？」只在乘车指南已发布且有正文时才出现（guideEntryVisible），
+       且必须紧贴标题左侧成组——本行落在微信胶囊按钮的纵向区间里，靠右会与它重合。 -->
   <view class="header">
     <text class="title">校车时刻表</text>
-    <view wx:if="{{guideEntryVisible}}" class="guide-link" bindtap="openRideGuide">如何坐车？</view>
+    <view wx:if="{{guideEntryVisible}}" class="guide-link" bindtap="openRideGuide">
+      <view class="guide-icon">?</view>
+      <text class="guide-text">如何坐车</text>
+    </view>
   </view>
 
   <!-- 校区选择卡：从/到校区端点 + 交换 + 日期 -->

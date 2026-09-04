@@ -503,6 +503,12 @@ const content = guide.normalizeGuideContent(fixture.content);
   assert.match(guideWxml, /枢纽指引/, "应渲染 guideFigures 区块");
   assert.match(guideWxml, /rich-text/, "备注应用 rich-text 渲染");
   assert.match(guideSource, /preprocessRemarkHtml/);
+  assert.match(guideSource, /wx\.switchTab\(\{\s*url:\s*"\/pages\/map\/map"\s*\}\)/, "指南返回应落到地图首页");
+  assert.doesNotMatch(
+    guideSource,
+    /wx\.navigateBack\(/,
+    "指南返回不能走页面栈：分享直达时没有上一页",
+  );
   assert.match(guideWxml, /bindtap="previewGuideImage"/, "枢纽简图/实景照应能点开大图");
   assert.match(guideWxml, /class="img-viewer"/, "应有全屏看图层");
   assert.match(guideSource, /onViewerTouchStart/, "看图层应接 JS 触摸手势");
