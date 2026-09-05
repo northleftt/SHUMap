@@ -122,6 +122,7 @@ function manifestFixture() {
       levelOrder: 1,
       displayName: "一层",
       isPublic: 1,
+      imageUrl: null,
     }],
     facilityTypes: [{
       id: "facility_type_printer",

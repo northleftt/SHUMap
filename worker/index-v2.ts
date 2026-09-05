@@ -39,8 +39,8 @@ import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRel
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, getSubmissionStatus, listSubmissions, reviewSubmission } from "./modules/submissions";
 import { createOrganization, deleteOrganization, listOrganizations, updateOrganization } from "./modules/organizations";
-import { deleteFloor, getFloorDetail, listFloorsForBuilding, updateFloorPlanStatus } from "./modules/floors";
-import { createDataSource, createFloor, createSpace, listCampusesAndSpaces, listReferenceData, updateFloor } from "./modules/spaces";
+import { createFloor, deleteFloor, getFloorDetail, listFloorsForBuilding, updateFloor, uploadFloorImage } from "./modules/floors";
+import { createDataSource, listCampusesAndSpaces, listReferenceData } from "./modules/spaces";
 import { createUser, listUsers, updateUser } from "./modules/users";
 import {
   createMapFilter,
@@ -218,7 +218,7 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
     await requireSession(request, env, "read:admin");
     return listCampusesAndSpaces(env);
   }
-  // 楼层与楼层图管理。读用 read:admin，写用 write:maps（与校区图一致）。
+  // 楼层管理。读用 read:admin，写用 write:maps（与校区图一致）。
   // 列表 / 详情把该层的设施、商户、锚点反查出来，因此楼层页与内容管理天然同步。
   if (method === "GET" && path === "/api/admin/floors") {
     await requireSession(request, env, "read:admin");
@@ -227,6 +227,12 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "POST" && path === "/api/admin/floors") {
     principal = await requireSession(request, env, "write:maps");
     return createFloor(request, env, principal, requestId);
+  }
+  // 楼层平面图就是一张图片：PUT 上传即替换（0032 起，替代旧的 SVG 导入链路）。
+  const floorImage = match(path, "/api/admin/floors/:id/image");
+  if (method === "PUT" && floorImage) {
+    principal = await requireSession(request, env, "write:maps");
+    return uploadFloorImage(request, env, principal, floorImage.id, requestId);
   }
   const floor = match(path, "/api/admin/floors/:id");
   if (method === "GET" && floor) {
@@ -240,15 +246,6 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "DELETE" && floor) {
     principal = await requireSession(request, env, "write:maps");
     return deleteFloor(env, principal, floor.id, requestId);
-  }
-  const floorPlanStatus = match(path, "/api/admin/floor-plans/:id/status");
-  if (method === "PATCH" && floorPlanStatus) {
-    principal = await requireSession(request, env, "write:maps");
-    return updateFloorPlanStatus(request, env, principal, floorPlanStatus.id, requestId);
-  }
-  if (method === "POST" && path === "/api/admin/spaces") {
-    principal = await requireSession(request, env, "write:maps");
-    return createSpace(request, env, principal, requestId);
   }
   if (method === "GET" && path === "/api/admin/reference-data") {
     await requireSession(request, env, "read:admin");

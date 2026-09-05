@@ -203,7 +203,7 @@ function merchant(value: unknown, field: string): ReleaseMerchant {
 }
 
 function floor(value: unknown, field: string): ReleaseFloor {
-  const row = exactObject(value, field, ["id", "buildingPlaceId", "levelCode", "levelOrder", "displayName", "isPublic"]);
+  const row = exactObject(value, field, ["id", "buildingPlaceId", "levelCode", "levelOrder", "displayName", "isPublic", "imageUrl"]);
   return {
     id: requiredString(row.id, `${field}.id`),
     buildingPlaceId: requiredString(row.buildingPlaceId, `${field}.buildingPlaceId`),
@@ -211,6 +211,7 @@ function floor(value: unknown, field: string): ReleaseFloor {
     levelOrder: finiteNumber(row.levelOrder, `${field}.levelOrder`),
     displayName: requiredString(row.displayName, `${field}.displayName`),
     isPublic: integerFlag(row.isPublic, `${field}.isPublic`),
+    imageUrl: nullableString(row.imageUrl, `${field}.imageUrl`),
   };
 }
 

@@ -31,5 +31,5 @@ export interface SessionPrincipal {
 
 export interface QueueJobMessage {
   jobId: string;
-  jobType: "map_import" | "floor_import";
+  jobType: "map_import";
 }

@@ -1,20 +1,14 @@
 import { LayoutList, Map as MapIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { FloorPlanCanvas, type FloorPlanAnchor } from "../../components/map/FloorPlanCanvas";
+import { FloorImageViewer } from "../../components/map/FloorImageViewer";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { ImagePreview } from "../../components/ui/ImagePreview";
 import type { PublicPlaceFacility, PublicPlaceFloor, ReleaseManifest } from "../../lib/api/types";
-import {
-  FacilityGlyph,
-  facilityDotColor,
-  facilityIconKeyMap,
-  resolveFacilityIconKey,
-} from "../../lib/facilityIcons";
+import { facilityDotColor } from "../../lib/facilityIcons";
 import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
-import { facilityAnchorsForFloor, floorMapVersionsByFloor } from "../../lib/release/floorPlans";
 import { releaseFacilitiesForPlace } from "../../lib/release/mapData";
 import { useRelease } from "../../lib/release/ReleaseContext";
 // 类目中文名只维护一份（此前这里有一张同样写错前缀的副本）。
@@ -76,7 +70,7 @@ function floorLabel(floor: PublicPlaceFloor): string {
   return floor.displayName.trim();
 }
 
-/** 楼层列表：只认 release manifest 的 floors（发布态的权威骨架）。 */
+/** 楼层列表：只认 release manifest 的 floors（发布态的权威骨架），imageUrl 是该层平面图位图。 */
 function resolveFloors(manifest: ReleaseManifest, placeId: string): PublicPlaceFloor[] {
   return manifest.floors
     .filter((floor) => floor.buildingPlaceId === placeId && floor.isPublic !== 0)
@@ -85,6 +79,7 @@ function resolveFloors(manifest: ReleaseManifest, placeId: string): PublicPlaceF
       levelCode: floor.levelCode,
       levelOrder: floor.levelOrder,
       displayName: floor.displayName,
+      imageUrl: floor.imageUrl,
     }))
     .sort((a, b) => a.levelOrder - b.levelOrder);
 }
@@ -121,11 +116,10 @@ type ViewMode = "list" | "plan";
 /**
  * M4/M5 楼层设施：列表版 + 平面图版。
  *
- * 楼宇、楼层、设施骨架与平面图底图/锚点全部来自 active release manifest
- * （places[] / floors[] / facilities[] / facilityTypes[] / maps[] / locations[]），
- * 底图 SVG 走 GET /api/public/maps/:mapVersionId/asset。设施的运营状态另走
- * GET /api/public/facility-status 实时覆盖。当前楼层没有已发布图纸时平面图入口
- * 隐藏，页面退回列表版，不报错。
+ * 楼宇、楼层、设施骨架全部来自 active release manifest（places[] / floors[] /
+ * facilities[] / facilityTypes[]），平面图是每层一张位图（floors[].imageUrl →
+ * /api/public/media/<id>）。设施的运营状态另走 GET /api/public/facility-status
+ * 实时覆盖。当前楼层没有上传平面图时平面图入口隐藏，页面退回列表版，不报错。
  */
 export function FloorsPage() {
   const { placeId = "" } = useParams();
@@ -154,7 +148,6 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
   const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
   // 运营状态盖在快照基线上，读取失败时在列表上方明确提示。
   const facilityStatus = useFacilityStatus();
 
@@ -164,13 +157,20 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
   );
   const floors = useMemo(() => resolveFloors(manifest, placeId), [manifest, placeId]);
   const facilities = useMemo(() => releaseFacilitiesForPlace(manifest, placeId), [manifest, placeId]);
-  const planByFloor = useMemo(() => floorMapVersionsByFloor(manifest), [manifest]);
+  // 有平面图位图的楼层：平面图入口与角标都以 imageUrl 为准
+  const imageByFloor = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const floor of floors) {
+      if (floor.imageUrl) map.set(floor.id, floor.imageUrl);
+    }
+    return map;
+  }, [floors]);
 
   // 默认选中一层（levelOrder 最小且非地下）
   const selectedFloorId = activeFloorId ?? floors[0]?.id ?? null;
-  const floorPlan = selectedFloorId ? planByFloor.get(selectedFloorId) ?? null : null;
-  // 该楼层无已发布图纸 → 平面图入口隐藏，内容回退列表版。
-  const effectiveMode: ViewMode = floorPlan ? viewMode : "list";
+  const floorImageUrl = selectedFloorId ? imageByFloor.get(selectedFloorId) ?? null : null;
+  // 该楼层无平面图 → 平面图入口隐藏，内容回退列表版。
+  const effectiveMode: ViewMode = floorImageUrl ? viewMode : "list";
 
   const floorFacilities = useMemo(() => {
     if (!selectedFloorId) return facilities;
@@ -190,39 +190,6 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
     [floorFacilities, activeType],
   );
 
-  /* 图标以管理员在后台给类型选的 icon_key 为准。
-     此前这一页用 facilityIcon(typeCode)，那个函数拿「类型编码」去撞图标键，只有出厂
-     九类（靠手写映射）能对上，后台新建的类型一律掉到通用图钉 —— 管理员选了什么都
-     不影响这一页。设施数据（PublicPlaceFacility）里没有 iconKey，所以从 manifest
-     的 facilityTypes 按编码查。 */
-  const iconKeyByTypeCode = useMemo(() => facilityIconKeyMap(manifest.facilityTypes), [manifest]);
-
-  /** 徽章 = 锚点 ⋈ 本层可见设施；锚点数据缺失时为空数组（只渲染图纸）。 */
-  const planAnchors = useMemo<FloorPlanAnchor[]>(() => {
-    if (!floorPlan || !selectedFloorId) return [];
-    const byId = new Map(visibleFacilities.map((facility) => [facility.id, facility]));
-    return facilityAnchorsForFloor(manifest, selectedFloorId, floorPlan.id)
-      .map((anchor) => {
-        const facility = byId.get(anchor.facilityId);
-        if (!facility) return null;
-        return {
-          id: anchor.id,
-          facilityId: anchor.facilityId,
-          x: anchor.x,
-          y: anchor.y,
-          label: facility.displayName || facility.typeName,
-          typeCode: facility.typeCode,
-          iconKey: resolveFacilityIconKey(facility.typeCode, iconKeyByTypeCode),
-        } satisfies FloorPlanAnchor;
-      })
-      .filter((anchor): anchor is FloorPlanAnchor => anchor !== null);
-  }, [floorPlan, iconKeyByTypeCode, manifest, selectedFloorId, visibleFacilities]);
-
-  const selectedFacility = useMemo(
-    () => visibleFacilities.find((facility) => facility.id === selectedFacilityId) ?? null,
-    [visibleFacilities, selectedFacilityId],
-  );
-
   if (!place) {
     return (
       <div className="h-full bg-page px-5 pt-16">
@@ -237,18 +204,10 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
   const kindLabel = place.kindName;
   const selectedFloor = floors.find((floor) => floor.id === selectedFloorId) ?? null;
   const floorPhotos = selectedFloor ? floorMediaOf(placeContent, selectedFloor.levelCode) : [];
-  const selectedIconKey = selectedFacility
-    ? resolveFacilityIconKey(selectedFacility.typeCode, iconKeyByTypeCode)
-    : null;
-  const selectedFacilityStatusLabel = selectedFacility && facilityStatus.status === "ready"
-    ? facilityStatusLabel(resolveFacilityStatus(facilityStatus.statuses, selectedFacility.id))
-    : null;
-  const selectedFacilityPhoto = selectedFacility ? facilityMedia(selectedFacility)[0] : null;
 
   function switchFloor(floorId: string) {
     setActiveFloorId(floorId);
     setActiveType(null);
-    setSelectedFacilityId(null);
   }
 
   return (
@@ -258,7 +217,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           title={`${place.displayName} · 楼层设施`}
           subtitle={floors.length > 0 ? `${kindLabel} · 共 ${floors.length} 层` : kindLabel}
           right={
-            floorPlan ? (
+            floorImageUrl ? (
               <div className="flex shrink-0 overflow-hidden rounded-full bg-page p-0.5">
                 {(
                   [
@@ -301,7 +260,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                   >
                     {floorLabel(floor)}
                     {/* 有平面图的楼层加角标，切层前就能看出哪层有图 */}
-                    {planByFloor.has(floor.id) ? (
+                    {imageByFloor.has(floor.id) ? (
                       <span
                         className={`absolute right-1 top-1 h-1.5 w-1.5 rounded-full ${
                           active ? "bg-white" : "bg-primary"
@@ -350,7 +309,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           {/* 设施类别 chips（横滑，两态共用） */}
           {typeChips.length > 0 ? (
             <ChipRow className="shrink-0 px-4 pt-3">
-              <Chip active={activeType === null} variant="outline" onClick={() => { setActiveType(null); setSelectedFacilityId(null); }}>
+              <Chip active={activeType === null} variant="outline" onClick={() => setActiveType(null)}>
                 全部
               </Chip>
               {typeChips.map(([code, name]) => (
@@ -358,7 +317,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                   key={code}
                   active={activeType === code}
                   variant="outline"
-                  onClick={() => { setActiveType(code); setSelectedFacilityId(null); }}
+                  onClick={() => setActiveType(code)}
                 >
                   {name}
                 </Chip>
@@ -366,57 +325,12 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
             </ChipRow>
           ) : null}
 
-          {effectiveMode === "plan" && floorPlan ? (
+          {effectiveMode === "plan" && floorImageUrl ? (
             <div className="relative mx-4 mb-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-2xl bg-surface shadow-card">
-              <FloorPlanCanvas
-                anchors={planAnchors}
-                mapVersionId={floorPlan.id}
-                onSelectFacility={setSelectedFacilityId}
-                selectedFacilityId={selectedFacilityId}
+              <FloorImageViewer
+                alt={`${place.displayName}${selectedFloor ? ` · ${floorLabel(selectedFloor)}` : ""} 平面图`}
+                src={floorImageUrl}
               />
-              {/* 无锚点数据时只渲染图纸，并说明原因，避免看起来像加载失败 */}
-              {planAnchors.length === 0 ? (
-                <div className="pointer-events-none absolute left-3 right-3 top-3 rounded-xl bg-surface/90 px-3 py-2 text-aux text-sub shadow-card">
-                  该楼层图纸暂无设施标注，可切换到列表查看 {floorFacilities.length} 项设施
-                </div>
-              ) : null}
-              {/* 点徽章弹小卡 */}
-              {selectedFacility ? (
-                <div className="absolute bottom-3 left-3 right-16 rounded-2xl bg-surface px-4 py-3 shadow-card">
-                  {selectedFacilityPhoto ? (
-                    <ImagePreview
-                      alt={selectedFacilityPhoto.alt || selectedFacility.displayName || selectedFacility.typeName}
-                      buttonClassName="mb-2 h-24 w-full rounded-xl"
-                      imageClassName="h-full w-full object-cover"
-                      src={selectedFacilityPhoto.url}
-                    />
-                  ) : null}
-                  <div className="flex items-center gap-3">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-primary-container text-primary">
-                      {selectedFacility ? <FacilityGlyph iconKey={selectedIconKey} size={16} /> : null}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-body font-semibold text-ink">
-                        {selectedFacility.displayName || selectedFacility.typeName}
-                      </div>
-                      <div className="truncate text-aux text-sub">
-                        {locationDescription(selectedFacility) || selectedFacility.typeName}
-                      </div>
-                      {selectedFacilityStatusLabel ? (
-                        <div className="mt-0.5 text-label text-warning">{selectedFacilityStatusLabel}</div>
-                      ) : null}
-                    </div>
-                    <button
-                      aria-label="关闭"
-                      className="shrink-0 text-sub"
-                      onClick={() => setSelectedFacilityId(null)}
-                      type="button"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-              ) : null}
             </div>
           ) : (
             /* 设施列表 */
@@ -435,9 +349,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                   return (
                     <div
                       key={facility.id}
-                      className={`flex items-center gap-3 px-4 py-3.5 ${index > 0 ? "border-t border-line" : ""} ${
-                        facility.id === selectedFacilityId ? "bg-primary-container" : ""
-                      }`}
+                      className={`flex items-center gap-3 px-4 py-3.5 ${index > 0 ? "border-t border-line" : ""}`}
                     >
                       <span
                         className="h-2.5 w-2.5 shrink-0 rounded-full"

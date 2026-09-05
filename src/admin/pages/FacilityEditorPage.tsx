@@ -68,7 +68,6 @@ interface FacilityEditorRevision {
   facilityTypeId: string;
   hostPlaceId: string;
   floorId: string;
-  indoorSpaceId: string;
   quantity: number | null;
   operationalStatus: FacilityOperationalStatus;
   serviceHours: string;
@@ -93,7 +92,6 @@ function parseFacilityEditorRevision(response: FacilityDetailResponse): Facility
     facilityTypeId: requiredString(structure.facilityTypeId, "facility_revisions.structure_json.facilityTypeId"),
     hostPlaceId: nullableString(structure.hostPlaceId, "facility_revisions.structure_json.hostPlaceId") ?? "",
     floorId: nullableString(structure.floorId, "facility_revisions.structure_json.floorId") ?? "",
-    indoorSpaceId: nullableString(structure.indoorSpaceId, "facility_revisions.structure_json.indoorSpaceId") ?? "",
     quantity: nullablePositiveInteger(structure.quantity, "facility_revisions.structure_json.quantity"),
     operationalStatus: oneOf(
       structure.operationalStatus,
@@ -146,7 +144,6 @@ export function FacilityEditorPage() {
   const [typeId, setTypeId] = useState("");
   const [hostPlaceId, setHostPlaceId] = useState("");
   const [floorId, setFloorId] = useState("");
-  const [indoorSpaceId, setIndoorSpaceId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [operationalStatus, setOperationalStatus] = useState<FacilityOperationalStatus>("unknown");
   const [hours, setHours] = useState("");
@@ -177,7 +174,6 @@ export function FacilityEditorPage() {
     setTypeId(editor.facilityTypeId);
     setHostPlaceId(editor.hostPlaceId);
     setFloorId(editor.floorId);
-    setIndoorSpaceId(editor.indoorSpaceId);
     setQuantity(editor.quantity === null ? "" : String(editor.quantity));
     setOperationalStatus(editor.operationalStatus);
     setHours(editor.serviceHours);
@@ -197,7 +193,6 @@ export function FacilityEditorPage() {
   const editor = data.editor;
   const reviewLocked = editor?.editorialStatus === "in_review";
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
-  const indoorSpaces = data.spaces.spaces.filter((space) => !floorId || space.floorId === floorId);
   const existingAnchor = locationDrafts.find((location) => location.role === "service_position");
   // 楼外设施没有宿主楼宇，校区只能来自设施自己选的校区图；挂在楼里时跟随楼宇。
   const hostCampusId = hostPlaceId
@@ -233,7 +228,6 @@ export function FacilityEditorPage() {
             facilityTypeId: typeId,
             hostPlaceId: hostPlaceId || null,
             floorId: floorId || null,
-            indoorSpaceId: indoorSpaceId || null,
             quantity: parsedQuantity,
             operationalStatus,
             locations: locationDrafts.map(locationInput),
@@ -250,7 +244,6 @@ export function FacilityEditorPage() {
             facilityTypeId: typeId,
             hostPlaceId: hostPlaceId || null,
             floorId: floorId || null,
-            indoorSpaceId: indoorSpaceId || null,
             quantity: parsedQuantity,
             operationalStatus,
             locations: locationDrafts.map(locationInput),
@@ -292,24 +285,17 @@ export function FacilityEditorPage() {
               />
               <SelectField
                 label="所属楼宇"
-                onChange={(v) => { setHostPlaceId(v); setFloorId(""); setIndoorSpaceId(""); }}
+                onChange={(v) => { setHostPlaceId(v); setFloorId(""); }}
                 options={data.places.map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
                 placeholder="选择楼宇"
                 value={hostPlaceId}
               />
               <SelectField
                 label="楼层"
-                onChange={(value) => { setFloorId(value); setIndoorSpaceId(""); }}
+                onChange={(value) => { setFloorId(value); }}
                 options={floors.map((f) => ({ value: f.id, label: f.displayName }))}
                 placeholder={hostPlaceId ? (floors.length ? "选择楼层" : "该楼宇暂无楼层") : "先选楼宇"}
                 value={floorId}
-              />
-              <SelectField
-                label="室内空间"
-                onChange={setIndoorSpaceId}
-                options={indoorSpaces.map((space) => ({ value: space.id, label: space.displayName }))}
-                placeholder={floorId ? "不指定" : "先选楼层"}
-                value={indoorSpaceId}
               />
               <Field label="数量" onChange={setQuantity} placeholder="如 2" type="number" value={quantity} />
             </div>
@@ -358,7 +344,6 @@ export function FacilityEditorPage() {
           disabled={reviewLocked}
           existingAnchor={existingAnchor}
           floorId={floorId}
-          indoorSpaceId={indoorSpaceId}
           mapVersions={data.maps}
           onChange={(next) => {
             setLocationDrafts((rows) => {
@@ -419,7 +404,6 @@ function ServicePositionPanel({
   buildingPlaceId,
   disabled,
   floorId,
-  indoorSpaceId,
   mapVersions,
   existingAnchor,
   onChange,
@@ -427,7 +411,6 @@ function ServicePositionPanel({
   buildingPlaceId: string;
   disabled: boolean;
   floorId: string;
-  indoorSpaceId: string;
   mapVersions: admin.MapVersionRow[];
   existingAnchor: LocationDraft | undefined;
   onChange: (value: LocationDraft | null) => void;
@@ -513,7 +496,6 @@ function ServicePositionPanel({
       campusId: null,
       buildingPlaceId: buildingPlaceId || null,
       floorId,
-      indoorSpaceId: indoorSpaceId || null,
       role: "service_position",
       isPrimary: existingAnchor?.isPrimary ?? true,
       geometryType: nextPoint ? "Point" : null,

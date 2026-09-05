@@ -14,6 +14,7 @@ import {
   normalizePlaceContent,
 } from "../lib/revision-contracts";
 import { normalizeSearchText } from "./places";
+import { publicMediaPath } from "./media";
 
 interface ReleaseRequest {
   version: string;
@@ -53,7 +54,6 @@ interface FacilityCandidate {
   facilityTypeId: string;
   hostPlaceId: string | null;
   floorId: string | null;
-  indoorSpaceId: string | null;
   operationalStatus: "available" | "partially_available" | "unavailable" | "unknown";
   quantity: number | null;
   revisionId: string;
@@ -70,7 +70,6 @@ interface MerchantCandidate {
   organizationId: string | null;
   hostPlaceId: string | null;
   floorId: string | null;
-  indoorSpaceId: string | null;
   revisionId: string;
   displayName: string;
   businessType: string | null;
@@ -199,7 +198,8 @@ export function releaseLocation(location: LocationCandidate): ReleaseLocation {
     campus_id: location.campus_id,
     building_place_id: location.building_place_id,
     floor_id: location.floor_id,
-    indoor_space_id: location.indoor_space_id,
+    // indoor_spaces 已删表（0034）；manifest 键仅为兼容已发布客户端而保留，恒为 null。
+    indoor_space_id: null,
     geometry_type: location.geometry_type,
     geometry_json: location.geometry_json,
     crs: location.crs,
@@ -247,6 +247,15 @@ interface FloorCandidate {
   levelOrder: number;
   displayName: string;
   isPublic: number;
+  imageMediaId: string | null;
+}
+
+/**
+ * manifest.floors 的对外形状。楼内平面图是每层一张图片（0032 起）：
+ * image_media_id 投影成公共读路径，没上传过图的楼层为 null，客户端按「无图」处理。
+ */
+interface ReleaseFloor extends Omit<FloorCandidate, "imageMediaId"> {
+  imageUrl: string | null;
 }
 
 interface FacilityTypeCandidate {
@@ -265,12 +274,16 @@ interface ReleasePlace extends Omit<PlaceCandidate, "isBuilding" | "contentJson"
 }
 
 interface ReleaseFacility extends Omit<FacilityCandidate, "serviceHoursJson" | "contentJson" | "visibilityPolicyJson"> {
+  /** indoor_spaces 已删表（0034），键仅为兼容已发布小程序的白名单而保留，恒为 null。 */
+  indoorSpaceId: null;
   serviceHours: { text: string } | null;
   content: FacilityContent;
   visibilityPolicy: Record<string, unknown>;
 }
 
 interface ReleaseMerchant extends Omit<MerchantCandidate, "openingHoursJson" | "contactJson" | "contentJson"> {
+  /** 同 ReleaseFacility.indoorSpaceId。 */
+  indoorSpaceId: null;
   openingHours: { text: string } | null;
   contact: { phone: string } | null;
   content: MerchantContent;
@@ -311,7 +324,7 @@ export interface ReleaseManifest {
   maps: ReleaseMap[];
   /** 快照字段集合（见 releaseLocation）；不是取位置的查询行。 */
   locations: ReleaseLocation[];
-  floors: FloorCandidate[];
+  floors: ReleaseFloor[];
   facilityTypes: FacilityTypeCandidate[];
   mapFilters: ReleaseMapFilter[];
   // marker_size 只在非标准系数（≠1）才进快照（见 buildCandidate 的 stops 映射注释），所以可选。
@@ -352,6 +365,7 @@ function releaseFacility(facility: FacilityCandidate): ReleaseFacility {
   );
   return {
     ...fields,
+    indoorSpaceId: null,
     serviceHours: serviceHours as { text: string } | null,
     content: normalizeFacilityContent(
       parseJsonObject(contentJson, `facility ${facility.id} contentJson`),
@@ -367,6 +381,7 @@ function releaseMerchant(merchant: MerchantCandidate): ReleaseMerchant {
   const { openingHoursJson, contactJson, contentJson, ...fields } = merchant;
   return {
     ...fields,
+    indoorSpaceId: null,
     openingHours: singleTextObject(
       openingHoursJson,
       `merchant ${merchant.id} openingHoursJson`,
@@ -428,12 +443,15 @@ function rollbackRequest(value: unknown): { reason: string | null } {
   return { reason: requestNullableString(body.reason, "reason", 2_000) };
 }
 
+// 默认发布只选校区图：每个 campus 取最新的 ready 或 published 版本。
+// 楼层图自 0032 起不再走 map_versions（每层一张图片挂在 floors.image_media_id），
+// 存量的 floor 图纸版本留在库里给历史 release 引用，但不再进入新 release。
 const DEFAULT_MAP_VERSION_QUERY = `select mv.*,ma.checksum,me.object_key as assetKey,me.byte_size as assetByteSize,
        me.sha256 as assetSha256,me.status as assetStatus,me.bucket_scope as assetBucketScope,
        c.code as campusCode,c.name as campusName
   from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id
   left join campuses c on c.id=mv.campus_id
- where mv.lifecycle_status in ('ready','published')
+ where mv.floor_id is null and mv.lifecycle_status in ('ready','published')
    and mv.id=(select mv2.id from map_versions mv2
                where mv2.lifecycle_status in ('ready','published')
                  and coalesce(mv2.campus_id,'')=coalesce(mv.campus_id,'')
@@ -590,12 +608,12 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
       from places p join place_kinds pk on pk.id=p.kind_id left join buildings b on b.place_id=p.id
       join place_revisions r on r.id=p.current_revision_id
       where p.lifecycle_status<>'retired' and p.approval_pending=0 and r.editorial_status='approved'`),
-    all<FacilityCandidate>(env.DB, `select f.id,f.facility_type_id as facilityTypeId,f.host_place_id as hostPlaceId,f.floor_id as floorId,f.indoor_space_id as indoorSpaceId,
+    all<FacilityCandidate>(env.DB, `select f.id,f.facility_type_id as facilityTypeId,f.host_place_id as hostPlaceId,f.floor_id as floorId,
       f.operational_status as operationalStatus,f.quantity,r.id as revisionId,r.display_name as displayName,r.service_hours_json as serviceHoursJson,
       r.content_json as contentJson,r.content_hash as contentHash,t.visibility_policy_json as visibilityPolicyJson,t.status as facilityTypeStatus
       from facility_instances f join facility_revisions r on r.id=f.current_revision_id join facility_types t on t.id=f.facility_type_id
       where f.lifecycle_status='active' and f.approval_pending=0 and r.editorial_status='approved'`),
-    all<MerchantCandidate>(env.DB, `select m.id,m.organization_id as organizationId,m.host_place_id as hostPlaceId,m.floor_id as floorId,m.indoor_space_id as indoorSpaceId,
+    all<MerchantCandidate>(env.DB, `select m.id,m.organization_id as organizationId,m.host_place_id as hostPlaceId,m.floor_id as floorId,
       r.id as revisionId,r.display_name as displayName,r.business_type as businessType,r.opening_hours_json as openingHoursJson,r.contact_json as contactJson,
       r.content_json as contentJson,r.content_hash as contentHash
       from merchant_outlets m join merchant_revisions r on r.id=m.current_revision_id where m.lifecycle_status<>'retired' and m.approval_pending=0 and r.editorial_status='approved'`),
@@ -605,9 +623,8 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
               c.code as campusCode,c.name as campusName
           from map_versions mv join map_assets ma on ma.id=mv.map_asset_id join media_assets me on me.id=ma.media_asset_id
           left join campuses c on c.id=mv.campus_id
-         where mv.id in (${requestedMapVersionIds.map(() => "?").join(",")}) and mv.lifecycle_status in ('ready','published')`, requestedMapVersionIds)
-      // 默认发布：每个 campus / floor 取最新的 ready 或 published 版本。
-      // 导入产出的版本是 'ready'（jobs.ts），只有发布激活才会把它们提升为 'published'。
+         where mv.id in (${requestedMapVersionIds.map(() => "?").join(",")}) and mv.floor_id is null and mv.lifecycle_status in ('ready','published')`, requestedMapVersionIds)
+      // 默认发布只选校区图（见 DEFAULT_MAP_VERSION_QUERY 注释）。
       : all<MapCandidate>(env.DB, DEFAULT_MAP_VERSION_QUERY),
     // 快照只留站点：站点带几何，是地图数据。线路/班次/时刻/日历改点即生效，
     // 由 GET /api/public/transit/journeys 与 /transit/trips/:tripId/stops 实时下发。
@@ -650,11 +667,17 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
   // 这里发布的那一份只是基线。
   const [allFloors, facilityTypes, mapFilters] = await Promise.all([
     all<FloorCandidate>(env.DB, `select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
-      display_name as displayName,is_public as isPublic from floors where lifecycle_status='active' order by building_place_id,level_order`),
+      display_name as displayName,is_public as isPublic,image_media_id as imageMediaId
+      from floors where lifecycle_status='active' order by building_place_id,level_order`),
     all<FacilityTypeCandidate>(env.DB, "select id,code,name,category,icon_key as iconKey,status from facility_types order by category,name"),
     loadReleaseMapFilters(env),
   ]);
-  const floors = allFloors.filter((floor) => candidateIds.place.has(floor.buildingPlaceId));
+  const floors = allFloors
+    .filter((floor) => candidateIds.place.has(floor.buildingPlaceId))
+    .map((floor): ReleaseFloor => {
+      const { imageMediaId, ...fields } = floor;
+      return { ...fields, imageUrl: imageMediaId ? publicMediaPath(imageMediaId) : null };
+    });
 
   const aliasRows = await all<{ placeId: string; name: string }>(
     env.DB,
@@ -872,16 +895,11 @@ function validateCandidate(
     mapBindingIssues.push(mapBindingIssue(location, candidate.maps, entityNames));
   };
   const campusMapCount = new Map<string, number>();
-  const floorMapCount = new Map<string, number>();
   for (const map of candidate.maps) {
     if (map.campus_id) campusMapCount.set(map.campus_id, (campusMapCount.get(map.campus_id) ?? 0) + 1);
-    if (map.floor_id) floorMapCount.set(map.floor_id, (floorMapCount.get(map.floor_id) ?? 0) + 1);
   }
   for (const [campusId, count] of campusMapCount) {
     if (count !== 1) errors.push(`Campus ${campusId} must have exactly one map version in this release`);
-  }
-  for (const [floorId, count] of floorMapCount) {
-    if (count !== 1) errors.push(`Floor ${floorId} must have exactly one map version in this release`);
   }
   const placeIds = new Set(candidate.places.map((place) => place.id));
   const placeCampusById = new Map(candidate.places.map((place) => [place.id, place.campusId]));
@@ -896,8 +914,7 @@ function validateCandidate(
       && location.entityId === stop.id
       && location.geometry_type === "Point"
       && location.crs === CANVAS_CRS
-      && location.floor_id === null
-      && location.indoor_space_id === null);
+      && location.floor_id === null);
     if (!pin) continue;
     const campusId = pin.campus_id
       ?? stop.campus_id
@@ -1004,7 +1021,7 @@ export function buildSearchDocuments(
   facilities: ReleaseFacility[],
   merchants: ReleaseMerchant[],
   locations: LocationCandidate[],
-  floors: FloorCandidate[] = [],
+  floors: Array<Pick<FloorCandidate, "id" | "buildingPlaceId">> = [],
 ): SearchDocumentCandidate[] {
   const locationsByEntity = new Map<string, LocationCandidate[]>();
   for (const location of locations) {
@@ -1286,7 +1303,7 @@ export async function pendingReleaseChanges(env: Env): Promise<Response> {
       "select id as entityId,name as displayName,updated_at as updatedAt from transit_stops where status='active' order by name,id",
     ),
     all<{ entityId: string; displayName: string }>(env.DB, `select mv.id as entityId,mv.version_label as displayName
-       from map_versions mv where mv.lifecycle_status in ('ready','published')
+       from map_versions mv where mv.floor_id is null and mv.lifecycle_status in ('ready','published')
         and mv.id=(select mv2.id from map_versions mv2
                     where mv2.lifecycle_status in ('ready','published')
                       and coalesce(mv2.campus_id,'')=coalesce(mv.campus_id,'')

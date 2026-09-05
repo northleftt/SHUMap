@@ -176,7 +176,7 @@ function geometryValue(value: unknown, field: string, geometryType: GeometryType
 
 export function normalizeLocationInput(value: unknown, field: string): RevisionLocationInput {
   const location = exactOptionalRecord(value, field, [
-    "campusId", "buildingPlaceId", "floorId", "indoorSpaceId", "role", "geometryType", "geometry", "crs",
+    "campusId", "buildingPlaceId", "floorId", "role", "geometryType", "geometry", "crs",
     "mapVersionId", "mapFeatureId", "locationHint", "precisionLevel", "accuracyMeters", "sourceId", "validFrom",
     "validTo", "isPrimary",
   ]);
@@ -186,7 +186,6 @@ export function normalizeLocationInput(value: unknown, field: string): RevisionL
   const campusId = optionalNullableText(location, "campusId", `${field}.campusId`, 100);
   const buildingPlaceId = optionalNullableText(location, "buildingPlaceId", `${field}.buildingPlaceId`, 100);
   const floorId = optionalNullableText(location, "floorId", `${field}.floorId`, 100);
-  const indoorSpaceId = optionalNullableText(location, "indoorSpaceId", `${field}.indoorSpaceId`, 100);
   const role = enumValue(location.role, `${field}.role`, LOCATION_ROLES);
   const geometryType = enumValue(location.geometryType, `${field}.geometryType`, GEOMETRY_TYPES);
   const geometry = geometryValue(location.geometry, `${field}.geometry`, geometryType);
@@ -198,10 +197,9 @@ export function normalizeLocationInput(value: unknown, field: string): RevisionL
   const validFrom = optionalNullableText(location, "validFrom", `${field}.validFrom`, 100);
   const validTo = optionalNullableText(location, "validTo", `${field}.validTo`, 100);
   if (floorId && !buildingPlaceId) validation(`${field}.floorId requires buildingPlaceId`);
-  if (indoorSpaceId && !floorId) validation(`${field}.indoorSpaceId requires floorId`);
   if (mapFeatureId && !mapVersionId) validation(`${field}.mapFeatureId requires mapVersionId`);
   if (geometry && !crs && !mapVersionId) validation(`${field}.geometry requires crs or mapVersionId`);
-  if (!buildingPlaceId && !floorId && !indoorSpaceId && !mapFeatureId && !geometry) {
+  if (!buildingPlaceId && !floorId && !mapFeatureId && !geometry) {
     validation(`${field} must identify a spatial parent, map feature, or geometry`);
   }
   if (role === "navigation_target") {
@@ -220,7 +218,6 @@ export function normalizeLocationInput(value: unknown, field: string): RevisionL
     campusId,
     buildingPlaceId,
     floorId,
-    indoorSpaceId,
     role,
     geometryType,
     geometry,
@@ -357,13 +354,12 @@ function placeStructureValue(value: unknown, field: string): PlaceStructure {
 
 function facilityStructureValue(value: unknown, field: string): FacilityStructure {
   const structure = exactRecord(value, field, [
-    "facilityTypeId", "hostPlaceId", "floorId", "indoorSpaceId", "quantity", "operationalStatus", "locations",
+    "facilityTypeId", "hostPlaceId", "floorId", "quantity", "operationalStatus", "locations",
   ]);
   return {
     facilityTypeId: text(structure.facilityTypeId, `${field}.facilityTypeId`, 100),
     hostPlaceId: nullableText(structure.hostPlaceId, `${field}.hostPlaceId`, 100),
     floorId: nullableText(structure.floorId, `${field}.floorId`, 100),
-    indoorSpaceId: nullableText(structure.indoorSpaceId, `${field}.indoorSpaceId`, 100),
     quantity: nullablePositiveInteger(structure.quantity, `${field}.quantity`),
     operationalStatus: enumValue(structure.operationalStatus, `${field}.operationalStatus`, OPERATIONAL_STATUSES),
     locations: normalizeLocationInputs(structure.locations, `${field}.locations`),
@@ -371,12 +367,11 @@ function facilityStructureValue(value: unknown, field: string): FacilityStructur
 }
 
 function merchantStructureValue(value: unknown, field: string): MerchantStructure {
-  const structure = exactRecord(value, field, ["organizationId", "hostPlaceId", "floorId", "indoorSpaceId", "locations"]);
+  const structure = exactRecord(value, field, ["organizationId", "hostPlaceId", "floorId", "locations"]);
   return {
     organizationId: nullableText(structure.organizationId, `${field}.organizationId`, 100),
     hostPlaceId: text(structure.hostPlaceId, `${field}.hostPlaceId`, 100),
     floorId: nullableText(structure.floorId, `${field}.floorId`, 100),
-    indoorSpaceId: nullableText(structure.indoorSpaceId, `${field}.indoorSpaceId`, 100),
     locations: normalizeLocationInputs(structure.locations, `${field}.locations`),
   };
 }
@@ -470,20 +465,12 @@ async function validateHierarchy(
   env: Env,
   hostPlaceId: string | null,
   floorId: string | null,
-  indoorSpaceId: string | null,
 ): Promise<void> {
   if (floorId && !hostPlaceId) validation("floorId requires hostPlaceId");
-  if (indoorSpaceId && !floorId) validation("indoorSpaceId requires floorId");
   if (floorId) {
     const floor = await first<{ building_place_id: string }>(env.DB, "select building_place_id from floors where id=?", [floorId]);
     if (floor?.building_place_id !== hostPlaceId) {
       throw new HttpError(400, "invalid_spatial_hierarchy", "Floor does not belong to host place");
-    }
-  }
-  if (indoorSpaceId) {
-    const space = await first<{ floor_id: string }>(env.DB, "select floor_id from indoor_spaces where id=?", [indoorSpaceId]);
-    if (space?.floor_id !== floorId) {
-      throw new HttpError(400, "invalid_spatial_hierarchy", "Space does not belong to floor");
     }
   }
 }
@@ -517,7 +504,7 @@ function validatePlaceLocationContract(structure: PlaceStructure, placeId: strin
   if (footprints.length !== 1) validation("A building must have exactly one footprint location");
   const [footprint] = footprints;
   if (footprint.campusId !== structure.campusId) validation("A building footprint must use the building campus");
-  if (footprint.floorId || footprint.indoorSpaceId) validation("A building footprint cannot belong to a floor or indoor space");
+  if (footprint.floorId) validation("A building footprint cannot belong to a floor");
   if (footprint.geometry !== null || footprint.crs !== null) validation("A building footprint must use imported map feature geometry");
   if (!footprint.mapVersionId || !footprint.mapFeatureId) {
     validation("A building footprint must reference a map feature and map version");
@@ -607,10 +594,9 @@ export async function validateFacilityRevision(env: Env, revision: FacilityRevis
     assertActiveFacilityType(env, structure.facilityTypeId),
     assertExists(env.DB, "places", structure.hostPlaceId, "Host place"),
     assertExists(env.DB, "floors", structure.floorId, "Floor"),
-    assertExists(env.DB, "indoor_spaces", structure.indoorSpaceId, "Indoor space"),
     assertExists(env.DB, "data_sources", revision.sourceId, "Data source"),
   ]);
-  await validateHierarchy(env, structure.hostPlaceId, structure.floorId, structure.indoorSpaceId);
+  await validateHierarchy(env, structure.hostPlaceId, structure.floorId);
   await validateLocations(env, structure.locations);
 }
 
@@ -621,10 +607,9 @@ export async function validateMerchantRevision(env: Env, revision: MerchantRevis
     assertExists(env.DB, "organizations", structure.organizationId, "Organization"),
     assertExists(env.DB, "places", structure.hostPlaceId, "Host place"),
     assertExists(env.DB, "floors", structure.floorId, "Floor"),
-    assertExists(env.DB, "indoor_spaces", structure.indoorSpaceId, "Indoor space"),
     assertExists(env.DB, "data_sources", revision.sourceId, "Data source"),
   ]);
-  await validateHierarchy(env, structure.hostPlaceId, structure.floorId, structure.indoorSpaceId);
+  await validateHierarchy(env, structure.hostPlaceId, structure.floorId);
   await validateLocations(env, structure.locations);
 }
 

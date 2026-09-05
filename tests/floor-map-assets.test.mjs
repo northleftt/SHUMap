@@ -212,20 +212,29 @@ test("the public map asset endpoint is registered without a session gate", () =>
   assert.doesNotMatch(publicModule, /public\/media\//);
 });
 
-test("floor imports bind the map version to a floor, not a campus", () => {
+test("map imports are campus-only; floor plans are plain image uploads now", () => {
   const jobs = fs.readFileSync(path.join(root, "worker/modules/jobs.ts"), "utf8");
-  assert.match(jobs, /payload\.floorId \? "floor_svg" : "campus_svg"/);
-  assert.match(jobs, /\.bind\(mapVersionId, payload\.campusId, payload\.floorId,/);
-  assert.match(jobs, /Map import payload must identify exactly one campus or floor/);
-  assert.match(jobs, /job\.job_type === "floor_import" && payload\.floorId === null/);
+  // 0032 起队列里只剩校区图导入：payload 键白名单恰好是这三个，
+  // 带 floorId 的旧 floor_import 任务会撞白名单而确定性失败（终态，不重试）。
+  assert.match(jobs, /IMPORT_PAYLOAD_KEYS = new Set\(\["mediaAssetId", "campusId", "versionLabel"\]\)/);
+  assert.match(jobs, /unsupported field \$\{key\}/);
+  // 新 map_versions 行的 floor_id 恒为 null。
+  assert.match(jobs, /values\(\?,\?,null,\?,\?,\?,'svg_viewbox',\?,'svg-geometry-v3','ready',\?\)/);
+
+  const types = fs.readFileSync(path.join(root, "worker/domain/types.ts"), "utf8");
+  assert.match(types, /jobType: "map_import"/);
+  assert.doesNotMatch(types, /floor_import/);
 
   const maps = fs.readFileSync(path.join(root, "worker/modules/maps.ts"), "utf8");
-  // Exactly one of campusId/floorId, matching the map_versions check constraint.
-  assert.match(maps, /Exactly one of campusId or floorId is required/);
+  // campusId 必填，payload 只有三个键；上传意图白名单不再接受楼层图资产类型。
+  assert.match(maps, /requiredString\(body\.campusId, "campusId", 100\)/);
+  assert.match(maps, /const payload = \{ mediaAssetId, campusId, versionLabel \}/);
+  assert.match(maps, /const ASSET_TYPES = \["campus_svg", "geojson", "source_cad", "source_bim", "source_pdf"\]/);
 
   const mapsPage = fs.readFileSync(path.join(root, "src/admin/pages/MapsPage.tsx"), "utf8");
-  assert.match(mapsPage, /assetType: targetKind === "floor" \? "floor_svg" : "campus_svg"/);
-  assert.match(mapsPage, /floorId: targetKind === "floor" \? floorId : null/);
+  // 管理端底图页只做校区导入；楼层图改成楼层管理页的位图直传。
+  assert.match(mapsPage, /assetType: "campus_svg"/);
+  assert.doesNotMatch(mapsPage, /targetKind === "floor"/);
 });
 
 test("the map_versions check constraint still enforces campus/floor exclusivity", () => {

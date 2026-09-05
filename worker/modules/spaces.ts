@@ -1,153 +1,37 @@
+// ---------------------------------------------------------------------------
+// 参考数据只读视图。
+//
+// 楼层本身的增删改与平面图图片在 floors.ts。indoor_spaces 表已由 0034 删除
+// （0032 起楼内平面图改为每层一张图片），这里不再返回 spaces 列表。
+// ---------------------------------------------------------------------------
 import type { SessionPrincipal } from "../domain/types";
 import type { Env } from "../types/cloudflare";
-import { all, assertExists, first } from "../lib/db";
-import { HttpError, json, readJson } from "../lib/http";
+import { all, assertExists } from "../lib/db";
+import { json, readJson } from "../lib/http";
 import {
-  booleanValue,
   exactObject,
   isoNow,
   jsonString,
   makeId,
-  numberValue,
   objectValue,
   oneOf,
   optionalString,
-  partialObject,
   requiredString,
 } from "../lib/values";
 import { audit } from "./audit";
-import { canonicalLevelCode, levelDisplayName, levelOrderOf } from "./floors";
 
-const SPACE_TYPES = ["room", "zone", "corridor", "entrance", "stair", "elevator", "service_area", "other"] as const;
 const SOURCE_TYPES = ["official", "survey", "import", "community", "derived"] as const;
 const SOURCE_RELIABILITIES = ["authoritative", "reviewed", "unverified", "unknown"] as const;
 
 export async function listCampusesAndSpaces(env: Env): Promise<Response> {
-  const [campuses, buildings, floors, spaces] = await Promise.all([
+  const [campuses, buildings, floors] = await Promise.all([
     all(env.DB, "select id,code,name,timezone,status from campuses order by name"),
     all(env.DB, `select b.place_id as placeId,b.building_code as buildingCode,b.managing_organization_id as managingOrganizationId,
       b.public_access_level as publicAccessLevel,r.display_name as displayName,p.campus_id as campusId
       from buildings b join places p on p.id=b.place_id left join place_revisions r on r.id=p.current_revision_id order by r.display_name`),
     all(env.DB, "select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,display_name as displayName,is_public as isPublic,lifecycle_status as lifecycleStatus from floors order by building_place_id,level_order"),
-    all(env.DB, "select id,floor_id as floorId,parent_space_id as parentSpaceId,space_type as spaceType,stable_code as stableCode,display_name as displayName,lifecycle_status as lifecycleStatus from indoor_spaces order by floor_id,display_name"),
   ]);
-  return json({ campuses, buildings, floors, spaces });
-}
-
-/**
- * POST /api/admin/floors — 新建楼层。
- *
- * levelCode 一律规范化成 F<n> / B<n>（见 floors.ts 的 canonicalLevelCode）。
- * 这一步是 0016 迁移的教训：此处原先用 requiredString 收自由文本，于是手工建的
- * 楼层出现过 level_code='一层'，而 reviews.ts 从采集流建楼层时只产出 F1/B1，
- * 两条写入路径格式不一致，前者在用户端楼层页显示成半成品。
- *
- * levelOrder 不再信任请求体：它必须与编号一致（F3 → 3，B1 → -1），否则楼层顺序
- * 会和编号打架。同层重复由 unique(building_place_id, level_code) 兜底，这里先查
- * 一次以便回可读的 409 而不是外键错误。
- */
-export async function createFloor(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = exactObject(await readJson<unknown>(request), "floor", [
-    "buildingPlaceId",
-    "levelCode",
-    "levelOrder",
-    "displayName",
-    "isPublic",
-  ]);
-  const buildingPlaceId = requiredString(body.buildingPlaceId, "buildingPlaceId", 100);
-  await assertExists(env.DB, "buildings", buildingPlaceId, "Building");
-  const levelCode = canonicalLevelCode(body.levelCode);
-  const levelOrder = levelOrderOf(levelCode);
-  const isPublic = booleanValue(body.isPublic, "isPublic");
-  const existing = await first<{ id: string }>(
-    env.DB,
-    "select id from floors where building_place_id=? and level_code=?",
-    [buildingPlaceId, levelCode],
-  );
-  if (existing) {
-    throw new HttpError(409, "floor_exists", `这栋楼已经有 ${levelCode} 层了`);
-  }
-  // 显示名留空时按编号推导，保证与采集流建出来的楼层同一口径。
-  const displayName = optionalString(body.displayName, "displayName", 100)?.trim() || levelDisplayName(levelCode);
-  const id = makeId("floor");
-  const now = isoNow();
-  await env.DB.prepare(
-    `insert into floors(id,building_place_id,level_code,level_order,display_name,is_public,lifecycle_status,created_at,updated_at)
-     values(?,?,?,?,?,?,'active',?,?)`,
-  ).bind(
-    id,
-    buildingPlaceId,
-    levelCode,
-    levelOrder,
-    displayName,
-    isPublic ? 1 : 0,
-    now,
-    now,
-  ).run();
-  await audit(env, principal, "floor.create", "floor", id, requestId, null, { ...body, levelCode, levelOrder, displayName });
-  return json({ id, levelCode, levelOrder, displayName }, { status: 201 });
-}
-
-/**
- * PATCH /api/admin/floors/:id — 楼层显示名 / 排序 / 是否对外可见。
- *
- * 楼层不进修订流（floors 没有修订表），改动即时生效并记审计。level_code 是
- * 楼层在同一楼内的唯一键，且已被设施/锚点按 id 引用，这里不允许改。
- */
-export async function updateFloor(
-  request: Request,
-  env: Env,
-  principal: SessionPrincipal,
-  floorId: string,
-  requestId: string,
-): Promise<Response> {
-  const before = await first<Record<string, unknown>>(
-    env.DB,
-    "select id,building_place_id,level_code,level_order,display_name,is_public from floors where id=?",
-    [floorId],
-  );
-  if (!before) throw new HttpError(404, "not_found", "Floor does not exist");
-  const body = partialObject(await readJson<unknown>(request), "floorUpdate", ["displayName", "levelOrder", "isPublic"]);
-  const displayName = !Object.hasOwn(body, "displayName")
-    ? String(before.display_name)
-    : requiredString(body.displayName, "displayName", 100);
-  const levelOrder = !Object.hasOwn(body, "levelOrder")
-    ? Number(before.level_order)
-    : numberValue(body.levelOrder, "levelOrder");
-  const isPublic = !Object.hasOwn(body, "isPublic")
-    ? Number(before.is_public)
-    : booleanValue(body.isPublic, "isPublic") ? 1 : 0;
-  const now = isoNow();
-  await env.DB.prepare("update floors set display_name=?,level_order=?,is_public=?,updated_at=? where id=?")
-    .bind(displayName, levelOrder, isPublic, now, floorId).run();
-  await audit(env, principal, "floor.update", "floor", floorId, requestId, before, { displayName, levelOrder, isPublic });
-  return json({ id: floorId, displayName, levelOrder, isPublic });
-}
-
-export async function createSpace(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
-  const body = exactObject(await readJson<unknown>(request), "indoorSpace", [
-    "floorId",
-    "parentSpaceId",
-    "spaceType",
-    "stableCode",
-    "displayName",
-  ]);
-  const floorId = requiredString(body.floorId, "floorId", 100);
-  const parentSpaceId = optionalString(body.parentSpaceId, "parentSpaceId", 100);
-  await Promise.all([assertExists(env.DB, "floors", floorId, "Floor"), assertExists(env.DB, "indoor_spaces", parentSpaceId, "Parent space")]);
-  if (parentSpaceId) {
-    const parent = await first<{ floor_id: string }>(env.DB, "select floor_id from indoor_spaces where id=?", [parentSpaceId]);
-    if (parent?.floor_id !== floorId) throw new HttpError(400, "invalid_spatial_hierarchy", "Parent space belongs to another floor");
-  }
-  const spaceType = oneOf(body.spaceType, "spaceType", SPACE_TYPES);
-  const id = makeId("space");
-  const now = isoNow();
-  await env.DB.prepare(
-    `insert into indoor_spaces(id,floor_id,parent_space_id,space_type,stable_code,display_name,lifecycle_status,created_at,updated_at)
-     values(?,?,?,?,?,?,'active',?,?)`,
-  ).bind(id, floorId, parentSpaceId, spaceType, optionalString(body.stableCode, "stableCode", 100), requiredString(body.displayName, "displayName", 200), now, now).run();
-  await audit(env, principal, "space.create", "indoor_space", id, requestId, null, body);
-  return json({ id }, { status: 201 });
+  return json({ campuses, buildings, floors });
 }
 
 export async function createDataSource(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {

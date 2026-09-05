@@ -66,7 +66,7 @@ export interface ListResponse<T> {
 // Spaces / reference data
 // ---------------------------------------------------------------------------
 
-/** GET /api/admin/spaces — campuses, buildings, floors, indoor spaces. */
+/** GET /api/admin/spaces — campuses, buildings, floors. */
 export function listSpaces<T = unknown>(signal?: AbortSignal): Promise<T> {
   return apiFetch<T>("/api/admin/spaces", { signal });
 }
@@ -97,18 +97,16 @@ export function updateFloor(
   return apiFetch(`/api/admin/floors/${encodeURIComponent(floorId)}`, { method: "PATCH", body });
 }
 
-export type IndoorSpaceType = "room" | "zone" | "corridor" | "entrance" | "stair" | "elevator" | "service_area" | "other";
-
-export interface IndoorSpaceCreateInput {
-  floorId: string;
-  parentSpaceId: string | null;
-  spaceType: IndoorSpaceType;
-  stableCode: string | null;
-  displayName: string;
-}
-
-export function createSpace(body: IndoorSpaceCreateInput): Promise<{ id: string }> {
-  return apiFetch<{ id: string }>("/api/admin/spaces", { method: "POST", body });
+/** PUT /api/admin/floors/:id/image — 上传/替换楼层平面图位图（原始字节，≤8 MiB）。 */
+export function uploadFloorImage(
+  floorId: string,
+  file: File | Blob,
+  contentType: string,
+): Promise<{ id: string; imageMediaId: string; imageUrl: string }> {
+  return apiFetch<{ id: string; imageMediaId: string; imageUrl: string }>(
+    `/api/admin/floors/${encodeURIComponent(floorId)}/image`,
+    { method: "PUT", rawBody: file, contentType },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -519,7 +517,7 @@ export interface MapUploadIntentResult {
 }
 
 export function createMapUploadIntent(body: {
-  assetType: string;
+  assetType: "campus_svg";
   originalName: string;
   contentType: string;
   byteSize: number;
@@ -567,8 +565,7 @@ export function listMapFeatures(mapVersionId: string, signal?: AbortSignal): Pro
 
 export function createImportJob(body: {
   mediaAssetId: string;
-  campusId?: string | null;
-  floorId?: string | null;
+  campusId: string;
   versionLabel: string;
 }): Promise<{ id: string; status: string }> {
   return apiFetch<{ id: string; status: string }>("/api/admin/maps/import-jobs", { method: "POST", body });
@@ -618,7 +615,6 @@ export type OperationSeverity = "info" | "warning" | "critical";
 export type OperationTargetType =
   | "place"
   | "floor"
-  | "space"
   | "facility"
   | "merchant_outlet"
   | "transit_stop"
@@ -693,7 +689,6 @@ export interface OperationLocationInput {
   campusId: string | null;
   buildingPlaceId: string | null;
   floorId: string | null;
-  indoorSpaceId: string | null;
   role: OperationLocationRole;
   geometryType: GeometryType;
   geometry: Record<string, unknown>;
@@ -1176,7 +1171,6 @@ export interface FacilityTypeInstanceRow {
   floorId: string | null;
   floorName: string | null;
   floorLevelCode: string | null;
-  spaceName: string | null;
   editorialStatus: string | null;
 }
 
@@ -1369,22 +1363,15 @@ export function deleteFacilityIcon(iconKey: string): Promise<{ iconKey: string; 
 //
 // 与设施 / 商户的同步靠共享的 floor_id 外键：这些列表是**反查**出来的，所以在设施
 // 编辑器里改了楼层归属，楼层页刷新即变，不存在两处数据不一致。
+//
+// 楼层平面图不再是 SVG map_version：每层一张位图（floors.image_media_id →
+// media_assets），上传即替换，见 uploadFloorImage。
 // ---------------------------------------------------------------------------
-
-export interface FloorPlanRow {
-  id: string;
-  versionLabel: string;
-  lifecycleStatus: MapLifecycleStatus;
-  coordinateSpaceType: string;
-  createdAt: string;
-  featureCount: number;
-}
 
 /** 一层楼被引用的次数，非零则不能删除。 */
 export interface FloorUsage {
   facilities: number;
   merchants: number;
-  spaces: number;
   mapVersions: number;
   anchors: number;
 }
@@ -1397,7 +1384,10 @@ export interface FloorOverviewRow {
   displayName: string;
   isPublic: boolean;
   lifecycleStatus: string;
-  plans: FloorPlanRow[];
+  /** 平面图位图 media_assets id；未上传为 null。 */
+  imageMediaId: string | null;
+  /** 平面图位图公开地址（/api/public/media/<id>）；未上传为 null。 */
+  imageUrl: string | null;
   usage: FloorUsage;
 }
 
@@ -1406,7 +1396,7 @@ export interface FloorsOverviewResponse {
   items: FloorOverviewRow[];
 }
 
-/** GET /api/admin/floors?buildingPlaceId=… — 一栋楼的全部楼层 + 每层图纸与引用计数。 */
+/** GET /api/admin/floors?buildingPlaceId=… — 一栋楼的全部楼层 + 每层平面图与引用计数。 */
 export function listBuildingFloors(buildingPlaceId: string, signal?: AbortSignal): Promise<FloorsOverviewResponse> {
   return apiFetch<FloorsOverviewResponse>("/api/admin/floors", { query: { buildingPlaceId }, signal });
 }
@@ -1417,7 +1407,6 @@ export interface FloorFacilityRow {
   facilityTypeName: string;
   lifecycleStatus: string;
   operationalStatus: string;
-  indoorSpaceId: string | null;
   displayName: string;
   editorialStatus: string | null;
   /** 已在平面图上标出服务位置的锚点数；0 表示这个设施还没落点。 */
@@ -1427,18 +1416,9 @@ export interface FloorFacilityRow {
 export interface FloorMerchantRow {
   id: string;
   lifecycleStatus: string;
-  indoorSpaceId: string | null;
   displayName: string | null;
   businessType: string | null;
   editorialStatus: string | null;
-}
-
-export interface FloorSpaceRow {
-  id: string;
-  spaceType: string;
-  stableCode: string | null;
-  displayName: string;
-  lifecycleStatus: string;
 }
 
 export interface FloorAnchorRow {
@@ -1462,16 +1442,16 @@ export interface FloorDetailResponse {
     displayName: string;
     isPublic: boolean;
     lifecycleStatus: string;
+    imageMediaId: string | null;
+    imageUrl: string | null;
   };
-  plans: FloorPlanRow[];
   facilities: FloorFacilityRow[];
   merchants: FloorMerchantRow[];
-  spaces: FloorSpaceRow[];
   anchors: FloorAnchorRow[];
   usage: FloorUsage;
 }
 
-/** GET /api/admin/floors/:id — 单层详情：图纸 + 该层设施 / 商户 / 空间 / 锚点。 */
+/** GET /api/admin/floors/:id — 单层详情：该层设施 / 商户 / 锚点与引用计数。 */
 export function getFloorDetail(floorId: string, signal?: AbortSignal): Promise<FloorDetailResponse> {
   return apiFetch<FloorDetailResponse>(`/api/admin/floors/${encodeURIComponent(floorId)}`, { signal });
 }
@@ -1481,17 +1461,6 @@ export function deleteFloor(floorId: string): Promise<{ id: string; deleted: boo
   return apiFetch<{ id: string; deleted: boolean }>(`/api/admin/floors/${encodeURIComponent(floorId)}`, {
     method: "DELETE",
   });
-}
-
-/** PATCH /api/admin/floor-plans/:id/status — 楼层图就绪 / 归档（published 由发版流程管）。 */
-export function updateFloorPlanStatus(
-  mapVersionId: string,
-  lifecycleStatus: "ready" | "archived",
-): Promise<{ id: string; lifecycleStatus: string }> {
-  return apiFetch<{ id: string; lifecycleStatus: string }>(
-    `/api/admin/floor-plans/${encodeURIComponent(mapVersionId)}/status`,
-    { method: "PATCH", body: { lifecycleStatus } },
-  );
 }
 
 // ---------------------------------------------------------------------------

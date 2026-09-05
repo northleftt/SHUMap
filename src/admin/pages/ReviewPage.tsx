@@ -239,14 +239,12 @@ function validateStructure(kind: RevisionKind, structure: Row): void {
     requiredString(structure.facilityTypeId, `${field}.facilityTypeId`);
     nullableString(structure.hostPlaceId, `${field}.hostPlaceId`);
     nullableString(structure.floorId, `${field}.floorId`);
-    nullableString(structure.indoorSpaceId, `${field}.indoorSpaceId`);
     nullablePositiveInteger(structure.quantity, `${field}.quantity`);
     oneOf(structure.operationalStatus, `${field}.operationalStatus`, ["available", "partially_available", "unavailable", "unknown"] as const);
   } else {
     nullableString(structure.organizationId, `${field}.organizationId`);
     nullableString(structure.hostPlaceId, `${field}.hostPlaceId`);
     nullableString(structure.floorId, `${field}.floorId`);
-    nullableString(structure.indoorSpaceId, `${field}.indoorSpaceId`);
   }
   validateLocations(structure, field);
 }
@@ -328,7 +326,7 @@ export function buildDiff(
       afterContent,
       new Set([...FACILITY_CONTENT_FIELDS.map(([, key]) => key), "detail", "media"]),
     );
-    for (const [label, key] of [["设施类型", "facilityTypeId"], ["所属楼宇", "hostPlaceId"], ["楼层", "floorId"], ["室内空间", "indoorSpaceId"], ["运营状态", "operationalStatus"]] as const) {
+    for (const [label, key] of [["设施类型", "facilityTypeId"], ["所属楼宇", "hostPlaceId"], ["楼层", "floorId"], ["运营状态", "operationalStatus"]] as const) {
       pushBasic(label, text(beforeStructure[key], `facility_revisions.structure_json.${key}`), text(afterStructure[key], `facility_revisions.structure_json.${key}`));
     }
   } else {
@@ -354,7 +352,7 @@ export function buildDiff(
       afterContent,
       new Set([...MERCHANT_CONTENT_FIELDS.map(([, key]) => key), "menu", "detail", "media"]),
     );
-    for (const [label, key] of [["所属品牌", "organizationId"], ["所在地点", "hostPlaceId"], ["所在楼层", "floorId"], ["室内空间", "indoorSpaceId"]] as const) {
+    for (const [label, key] of [["所属品牌", "organizationId"], ["所在地点", "hostPlaceId"], ["所在楼层", "floorId"]] as const) {
       pushBasic(label, text(beforeStructure[key], `merchant_revisions.structure_json.${key}`), text(afterStructure[key], `merchant_revisions.structure_json.${key}`));
     }
   }

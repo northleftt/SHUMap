@@ -46,7 +46,6 @@ export interface LocationDraft {
   campusId: string;
   buildingPlaceId: string;
   floorId: string;
-  indoorSpaceId: string;
   role: LocationRole;
   locationHint: string;
   longitude: string;
@@ -69,7 +68,6 @@ export function emptyLocation(role: LocationRole = "primary_display"): LocationD
     campusId: "",
     buildingPlaceId: "",
     floorId: "",
-    indoorSpaceId: "",
     role,
     locationHint: "",
     longitude: "",
@@ -103,12 +101,11 @@ export function locationInput(row: LocationDraft): RevisionLocationInput {
   const crs = hasPoint ? NAVIGATION_CRS : row.origin?.crs ?? null;
   const precisionLevel = hasPoint
     ? "exact"
-    : row.origin?.precisionLevel ?? (row.indoorSpaceId ? "space" : row.floorId ? "floor" : row.buildingPlaceId ? "building" : "campus");
+    : row.origin?.precisionLevel ?? (row.floorId ? "floor" : row.buildingPlaceId ? "building" : "campus");
   return {
     campusId: row.campusId || null,
     buildingPlaceId: row.buildingPlaceId || null,
     floorId: row.floorId || null,
-    indoorSpaceId: row.indoorSpaceId || null,
     role: row.role,
     locationHint: row.locationHint.trim() || null,
     precisionLevel,
@@ -136,7 +133,6 @@ export function isLocationDraftBlank(row: LocationDraft): boolean {
   return !row.campusId
     && !row.buildingPlaceId
     && !row.floorId
-    && !row.indoorSpaceId
     && !row.locationHint.trim()
     && !row.longitude.trim()
     && !row.latitude.trim()
@@ -192,7 +188,6 @@ export function locationDraftFromApi(raw: Record<string, unknown>, index: number
     campusId: optionalString(raw.campusId, `locations[${index}].campusId`),
     buildingPlaceId: optionalString(raw.buildingPlaceId, `locations[${index}].buildingPlaceId`),
     floorId: optionalString(raw.floorId, `locations[${index}].floorId`),
-    indoorSpaceId: optionalString(raw.indoorSpaceId, `locations[${index}].indoorSpaceId`),
     role,
     locationHint: optionalString(raw.locationHint, `locations[${index}].locationHint`),
     longitude: editablePoint ? String((coordinates as number[])[0]) : "",
@@ -514,7 +509,6 @@ export function LocationEditor({
     {featureError ? <ErrorBanner message={featureError} /> : null}
     {value.length === 0 ? <InfoNote>还没有地图位置</InfoNote> : <div className="space-y-3">{value.map((row, index) => {
       const floors = spaces.floors.filter((floor) => !row.buildingPlaceId || floor.buildingPlaceId === row.buildingPlaceId);
-      const indoor = spaces.spaces.filter((space) => !row.floorId || space.floorId === row.floorId);
       const versionOptions = mapVersions
         .filter((version) => version.lifecycleStatus === "ready" || version.lifecycleStatus === "published")
         .filter((version) => {
@@ -641,13 +635,12 @@ export function LocationEditor({
           <SelectField
             disabled={disabled || isBuilding === true}
             label="楼宇"
-            onChange={(buildingPlaceId) => patch(index, { buildingPlaceId, floorId: "", indoorSpaceId: "" })}
+            onChange={(buildingPlaceId) => patch(index, { buildingPlaceId, floorId: "" })}
             options={spaces.buildings.map((building) => ({ value: building.placeId, label: building.displayName ?? building.placeId }))}
             placeholder={isBuilding === true ? "保存后自动绑定当前楼宇" : "不指定"}
             value={isBuilding === true ? entityPlaceId ?? "" : row.buildingPlaceId}
           />
-          <SelectField disabled={disabled} label="楼层" onChange={(floorId) => patch(index, { floorId, indoorSpaceId: "" })} options={floors.map((floor) => ({ value: floor.id, label: floor.displayName }))} placeholder="不指定" value={row.floorId} />
-          <SelectField disabled={disabled} label="室内空间" onChange={(indoorSpaceId) => patch(index, { indoorSpaceId })} options={indoor.map((space) => ({ value: space.id, label: space.displayName }))} placeholder="不指定" value={row.indoorSpaceId} />
+          <SelectField disabled={disabled} label="楼层" onChange={(floorId) => patch(index, { floorId })} options={floors.map((floor) => ({ value: floor.id, label: floor.displayName }))} placeholder="不指定" value={row.floorId} />
           <Field disabled={disabled} label="位置说明" onChange={(locationHint) => patch(index, { locationHint })} placeholder="如 北门入口" value={row.locationHint} />
           {/* 图上点过就锁住经纬度：两者都会落到同一处几何，留着能改必然有一个被静默丢弃。 */}
           {/* 人一改坐标就摘掉 derived：之后再动轮廓不会覆盖他的值。 */}

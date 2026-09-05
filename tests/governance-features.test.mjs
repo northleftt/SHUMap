@@ -99,8 +99,8 @@ test("editors submit complete reviewed structures and omit blank location rows",
   const merchant = read("src/admin/pages/MerchantEditorPage.tsx");
   assert.match(place, /parentPlaceId: parentPlaceId \|\| null/);
   assert.match(place, /filter\(\(location\) => !isLocationDraftBlank\(location\)\)/);
-  assert.match(facility, /indoorSpaceId: indoorSpaceId \|\| null,[\s\S]*?quantity: parsedQuantity,[\s\S]*?operationalStatus,[\s\S]*?locations:/);
-  assert.match(merchant, /indoorSpaceId: indoorSpaceId \|\| null,[\s\S]*?locations:/);
+  assert.match(facility, /floorId: floorId \|\| null,[\s\S]*?quantity: parsedQuantity,[\s\S]*?operationalStatus,[\s\S]*?locations:/);
+  assert.match(merchant, /floorId: floorId \|\| null,[\s\S]*?locations:/);
 });
 
 test("revision hashes cover structural data and floor media rehash keeps it", () => {

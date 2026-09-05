@@ -105,7 +105,9 @@
   overflow: hidden;
 }
 
-.floor-surface {
+/* 平面图：movable-area 填满视口；movable-view 宽 = 容器宽、高按图片宽高比实测
+   （floors.ts onPlanImageLoad），未测出时 100% 高度兜底。 */
+.plan-area {
   position: absolute;
   left: 0;
   top: 0;
@@ -113,87 +115,32 @@
   height: 100%;
 }
 
-/* world 容器：viewBox 坐标系 1 单位 = 1px，transform 由 worklet 驱动。 */
-.floor-world {
+.plan-movable-area {
+  width: 100%;
+  height: 100%;
+}
+
+.plan-movable-view {
+  width: 100%;
+}
+
+.plan-image {
+  width: 100%;
+  height: 100%;
+}
+
+/* 图纸加载中/失败覆盖层（盖在 movable-area 上，不拦截完成态手势）。 */
+.plan-cover {
   position: absolute;
   left: 0;
   top: 0;
-  transform-origin: 0 0;
-}
-
-/* 底图 SVG 按 rasterRatio 放大布局再缩回，给高倍缩放留栅格化余量。 */
-.floor-svg {
-  position: absolute;
-  left: 0;
-  top: 0;
-  transform-origin: 0 0;
-  transform: scale(0.3333);
-}
-
-.floor-badge {
-  position: absolute;
-  width: 0;
-  height: 0;
-}
-
-/* 徽章锚点在圆心：worklet 反向缩放时锚点不动。 */
-.floor-badge-inner {
-  position: absolute;
-  left: -8px;
-  top: -8px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid #ffffff;
-  background-color: #2f80ed;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transform-origin: 8px 8px;
-}
-
-.facility-card {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 20px;
-  padding: 12px 44px 12px 16px;
-  border-radius: 14px;
-  background-color: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-}
-
-.facility-card-name {
-  font-size: 16px;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.facility-card-sub {
-  margin-top: 2px;
-  font-size: 12px;
-  color: #64748b;
-}
-
-.facility-card-close {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 28px;
-  height: 28px;
-  line-height: 26px;
-  text-align: center;
-  font-size: 18px;
-  color: #9ca3af;
-}
-
-.facility-status {
-  display: inline-block;
-  margin-top: 6px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background-color: #fef3c7;
-  color: #92400e;
-  font-size: 12px;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #eef1ea;
 }
 
 .floor-list {
@@ -202,7 +149,7 @@
   top: 0;
   width: 100%;
   height: 100%;
-  /* 列表视图盖在常驻手势层上面，必须不透明 */
+  /* 列表视图需不透明底（与平面图区共用视口） */
   background-color: #eef1ea;
 }
 
