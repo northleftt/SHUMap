@@ -3,7 +3,7 @@
 // Route map: worker/index-v2.ts (routeAdmin) and worker/modules/*.
 
 import { apiFetch } from "./client";
-import type { ServiceCalendarDayType } from "../../admin/adminTypes";
+import type { FeatureFeedbackRow, ServiceCalendarDayType } from "../../admin/adminTypes";
 import type {
   FacilityRevisionWrite,
   GeometryType,
@@ -992,6 +992,11 @@ export function listSubmissions(signal?: AbortSignal): Promise<ListResponse<Admi
   return apiFetch<ListResponse<AdminSubmission>>("/api/admin/submissions", { signal });
 }
 
+/** GET /api/admin/feature-feedback — 功能评分列表（运营数据，最新 200 条）。 */
+export function listFeatureFeedback(signal?: AbortSignal): Promise<ListResponse<FeatureFeedbackRow>> {
+  return apiFetch<ListResponse<FeatureFeedbackRow>>("/api/admin/feature-feedback", { signal });
+}
+
 export function reviewSubmission(
   id: string,
   body: SubmissionReviewInput,
@@ -1656,4 +1661,36 @@ export function uploadGuideAsset(
 /** 素材键 → 公共读地址（管理端预览用同源相对路径）。 */
 export function guideAssetUrl(assetKey: string): string {
   return `/api/public/guide-assets/${encodeURIComponent(assetKey)}`;
+}
+
+// ---------------------------------------------------------------------------
+// 埋点统计
+// ---------------------------------------------------------------------------
+
+export interface AnalyticsEventTypeCount {
+  event_type: string;
+  event_count: number;
+}
+
+export interface AnalyticsDailyCount extends AnalyticsEventTypeCount {
+  day: string;
+}
+
+export interface AnalyticsTopPlace {
+  place_id: string;
+  place_name: string | null;
+  view_count: number;
+}
+
+export interface AnalyticsSummaryResponse {
+  days: number;
+  since: string;
+  totals: AnalyticsEventTypeCount[];
+  daily: AnalyticsDailyCount[];
+  topPlaces: AnalyticsTopPlace[];
+}
+
+/** GET /api/admin/analytics/summary?days= — 用户埋点事件统计（类型汇总 + 按天拆分 + POI 曝光榜）。 */
+export function getAnalyticsSummary(days: number, signal?: AbortSignal): Promise<AnalyticsSummaryResponse> {
+  return apiFetch<AnalyticsSummaryResponse>("/api/admin/analytics/summary", { query: { days }, signal });
 }

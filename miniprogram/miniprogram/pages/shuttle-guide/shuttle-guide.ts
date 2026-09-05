@@ -15,6 +15,7 @@ import {
 } from "../../lib/shuttle-guide";
 import type { ApiError } from "../../lib/api";
 import { enableShareMenus, sharePath, shareTitle } from "../../lib/share";
+import { recordPageView } from "../../lib/analytics";
 
 /** 后台没填标题时的兜底。与校车页那个入口的文案对齐。 */
 const DEFAULT_TITLE = "如何坐车";
@@ -31,6 +32,7 @@ Page({
 
   onLoad() {
     enableShareMenus();
+    recordPageView("shuttle-guide");
     this.load();
   },
 

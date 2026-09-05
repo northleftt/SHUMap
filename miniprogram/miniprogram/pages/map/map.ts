@@ -93,6 +93,7 @@ import {
   type SheetMode,
 } from "../../lib/map/sheet";
 import { apiGet, apiGetBinary } from "../../lib/api";
+import { recordAnalyticsEvent, type AnalyticsPoiSource } from "../../lib/analytics";
 import { requestErrorRetryText } from "../../lib/request-error";
 import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
 import {
@@ -544,6 +545,10 @@ Page({
     this.campusGeoBounds = [] as CampusGeoBounds[];
     /** 首次定位自动选校区只做一次（之后的轮询不再自动切，尊重用户手动切校区）。 */
     this.autoCampusSwitchDone = false;
+    // analytics 去重状态：map_view 按校区去重（setupCampus 重入不重报），
+    // search 按「校区:query」去重（同一 query 不连续重复上报）。
+    this.lastMapViewCampusKey = "";
+    this.lastSearchReportKey = "";
 
     this.boot();
     this.loadGuideEntry();
@@ -621,7 +626,7 @@ Page({
       return;
     }
     const poi = this.poiByKey.get(pending) ?? this.poiByKey.get(`place:${pending}`);
-    if (poi) this.openPoi(poi, null);
+    if (poi) this.openPoi(poi, null, "deep_link");
     // campus: 深链没有详情可关，只有真的打开了详情才记录回跳目标；
     // openDetailSheet 已先清掉残留标记，这里在 openPoi 之后再赋值。
     if (poi && returnTab.startsWith("/pages/")) this.poiReturnTab = returnTab;
@@ -845,6 +850,11 @@ Page({
     if (!this.animatedStyleApplied) {
       this.animatedStyleApplied = true;
       this.applyMapAnimatedStyles();
+    }
+    // 校区每次激活上报一次 map_view（重入同一校区不重复报；对齐 Web 端 campus 变化 effect）。
+    if (this.lastMapViewCampusKey !== campus.key) {
+      this.lastMapViewCampusKey = campus.key;
+      recordAnalyticsEvent({ eventType: "map_view", campus: campus.label });
     }
     this.updateReport();
   },
@@ -1423,6 +1433,19 @@ Page({
   clearSelection() {
     if (!this.data.selected && !this.data.detailOpen && !this.data.detail) return;
     const wasPoi = this.data.sheetMode === "poi";
+    // 关详情上报 popup_close：只在确实开过 POI 详情时报（点空白清选中等其他路径不报），
+    // poi 信息在清空前取（对齐 Web 端 closePoi）。
+    const closingDetail = wasPoi ? (this.data.detail as DetailSheetData | null) : null;
+    const closingPoi = closingDetail ? this.poiByKey.get(closingDetail.poiKey) : undefined;
+    if (closingPoi) {
+      recordAnalyticsEvent({
+        eventType: "popup_close",
+        campus: closingPoi.campusLabel,
+        poiId: closingPoi.entityId,
+        poiName: closingPoi.name,
+        meta: { popup: "poi_detail" },
+      });
+    }
     this.setData({
       selected: null,
       detailOpen: false,
@@ -1953,6 +1976,8 @@ Page({
     if (!loaded) return;
     const trimmed = query.trim();
     if (!trimmed) {
+      // 清空 query 时重置上报去重，再次输入同一 query 仍算新一轮搜索。
+      this.lastSearchReportKey = "";
       this.currentHits = [];
       this.currentHitRows = [];
       this.displayHits = [];
@@ -1989,6 +2014,16 @@ Page({
       iconUrl: `/images/poi/${poiRowIconName(hit.poi)}.png`,
     }));
     this.setData({ searchStatus: "ready", searchActive: true });
+    // 防抖搜索出结果即报 search（同一「校区:query」不连续重复上报，对齐 Web 端去重）。
+    const searchReportKey = `${this.data.activeCampusKey}:${trimmed}`;
+    if (this.lastSearchReportKey !== searchReportKey) {
+      this.lastSearchReportKey = searchReportKey;
+      recordAnalyticsEvent({
+        eventType: "search",
+        campus: this.activeCampus?.label,
+        meta: { q: trimmed.slice(0, 100), resultCount: hits.length },
+      });
+    }
     // 命中集合变化 → 图钉 matched 重算 + 面板行按 activeFilters 过滤
     this.recomputeMarkers();
     this.refreshSearchRows();
@@ -2406,7 +2441,7 @@ Page({
   // ---------------------------------------------------------------------------
 
   /** 搜索/最近查看打开 POI：切校区 → 聚焦动画 → 详情 sheet → 记最近查看。 */
-  openPoi(poi: MapPoi, merchantId: string | null) {
+  openPoi(poi: MapPoi, merchantId: string | null, source: AnalyticsPoiSource = "search_result") {
     this.setData({ searchOpen: false, searchFocus: false });
     if (poi.campusKey !== this.data.activeCampusKey && this.loadedRelease) {
       this.setupCampus(poi.campusKey);
@@ -2416,15 +2451,23 @@ Page({
     if (point) {
       this.selectAt(point, { poiKey: poi.poiKey, name: poi.name, kindName: poi.kindName }, poi.sourceElementId);
     }
-    this.openDetailSheet(poi, merchantId);
+    this.openDetailSheet(poi, merchantId, source);
   },
 
-  openDetailByKey(poiKey: string, merchantId: string | null) {
+  openDetailByKey(poiKey: string, merchantId: string | null, source: AnalyticsPoiSource = "map_object") {
     const poi = this.poiByKey.get(poiKey);
-    if (poi) this.openDetailSheet(poi, merchantId);
+    if (poi) this.openDetailSheet(poi, merchantId, source);
   },
 
-  openDetailSheet(poi: MapPoi, merchantId: string | null) {
+  openDetailSheet(poi: MapPoi, merchantId: string | null, source: AnalyticsPoiSource = "search_result") {
+    // 详情打开即报 poi_view（对齐 Web 端 openPoi；所有入口都汇到这里，只此一处）。
+    recordAnalyticsEvent({
+      eventType: "poi_view",
+      campus: poi.campusLabel,
+      poiId: poi.entityId,
+      poiName: poi.name,
+      meta: { source },
+    });
     const media = detailMedia(poi.detail.media);
     const facts = detailFacts(poi.detail.facts);
     const statusBanner =

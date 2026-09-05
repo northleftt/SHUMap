@@ -2,6 +2,7 @@ import {
   BookOpenText,
   Building2,
   Bus,
+  ChartColumn,
   FileText,
   Inbox,
   Layers,
@@ -38,6 +39,7 @@ import { UsersPage } from "./pages/UsersPage";
 import { TaxonomyPage } from "./pages/TaxonomyPage";
 import { FloorsPage } from "./pages/FloorsPage";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
+import { OperationsDataPage } from "./pages/OperationsDataPage";
 import { DevToolsPage } from "./pages/DevToolsPage";
 
 // ===========================================================================
@@ -73,6 +75,8 @@ const NAV_GROUPS = [
     label: "实时运营",
     items: [
       { to: "/admin/operations", end: false, label: "运营信息", icon: Megaphone },
+      // 运营数据 = 埋点统计 + 功能评分两个 tab，纯读数，read:admin 即可看。
+      { to: "/admin/operations-data", end: false, label: "运营数据", icon: ChartColumn },
       { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus, permission: "write:transit" },
       { to: "/admin/submissions", end: false, label: "用户提交", icon: Inbox, permission: "review:content" },
     ],
@@ -91,6 +95,8 @@ const NAV_GROUPS = [
 
 function titleFor(pathname: string): string {
   if (pathname === "/admin") return "概览";
+  // 注意放在 /admin/operations 前缀判断之前：operations-data 也踩这个前缀。
+  if (pathname.startsWith("/admin/operations-data")) return "运营数据";
   if (pathname.startsWith("/admin/content/places/")) return "内容管理 · 地点编辑";
   if (pathname.startsWith("/admin/content/facilities/")) return "内容管理 · 设施编辑";
   if (pathname.startsWith("/admin/content/merchants/")) return "内容管理 · 商户编辑";
@@ -302,6 +308,7 @@ export function AdminPage() {
     () => (
       <Routes>
         <Route index element={<OverviewPage />} />
+        <Route path="operations-data" element={<OperationsDataPage />} />
         <Route path="content" element={<ContentPage />} />
         <Route path="content/places/:id" element={hasPermission("write:content") ? <PlaceEditorPage /> : <Navigate to="/admin/content" replace />} />
         <Route path="content/facilities/:id" element={hasPermission("write:content") ? <FacilityEditorPage /> : <Navigate to="/admin/content" replace />} />

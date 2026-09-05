@@ -31,6 +31,7 @@ import {
 } from "../../lib/map/viewport";
 import { apiGetBinary, apiGetText } from "../../lib/api";
 import { requestErrorRetryText } from "../../lib/request-error";
+import { recordPageView } from "../../lib/analytics";
 import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
 import {
   mediaExtension,
@@ -94,6 +95,7 @@ Page({
 
   onLoad(options: Record<string, string | undefined>) {
     enableShareMenus();
+    recordPageView("floors");
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20 };
     this.setData({
       statusBarHeight: windowInfo.statusBarHeight ?? 20,
