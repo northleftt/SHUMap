@@ -4,6 +4,7 @@ import { listFavorites } from "../../lib/favorites";
 import { loadReleaseWithCache } from "../../lib/release/loader";
 import { readSubmissions, type LocalSubmission } from "../../lib/submissions-log";
 import { APP_SHARE_TITLE, enableShareMenus, sharePath } from "../../lib/share";
+import { recordPageView } from "../../lib/analytics";
 
 function formatDate(iso: string): string {
   const date = new Date(iso);
@@ -51,6 +52,7 @@ Page({
   onShow() {
     const tabBar = this.getTabBar?.();
     if (tabBar) tabBar.setData({ selected: 3 });
+    recordPageView("profile");
     const submissions = readSubmissions();
     this.setData({
       recentCount: listRecents().length,

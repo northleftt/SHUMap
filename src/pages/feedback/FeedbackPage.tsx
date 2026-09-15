@@ -7,6 +7,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { createSubmission } from "../../lib/api/public";
+import { recordAnalyticsEvent, usePageView } from "../../lib/analytics";
 import type { FeedbackType, SubmissionTargetType } from "../../../shared/submission-contract";
 import {
   buildPlaceTargets,
@@ -55,6 +56,7 @@ export function FeedbackPage() {
 function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   const navigate = useNavigate();
   const auth = useOptionalAccountAuth();
+  usePageView("feedback");
   const { addSubmission } = useSubmissionsLog();
   // 反馈不要求登录。登录了就自动署名并可溯源，没登录则匿名，昵称随便填（可留空）。
   const signedIn = auth?.status === "signed_in" && auth.user !== null;
@@ -210,7 +212,13 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
             <button
               type="button"
               className="mt-2.5 flex w-full items-center justify-between rounded-2xl bg-surface px-4 py-3.5 shadow-card"
-              onClick={() => setPickerOpen((open) => !open)}
+              onClick={() => {
+                recordAnalyticsEvent({
+                  eventType: pickerOpen ? "popup_close" : "popup_open",
+                  meta: { popup: "target_picker", feedbackType: type },
+                });
+                setPickerOpen(!pickerOpen);
+              }}
             >
               <span className={selected ? "text-body text-ink" : "text-body text-sub"}>
                 {selected ? feedbackTargetLabel(selected) : isStop ? "选择站点" : "搜索并选择地点"}
@@ -248,6 +256,10 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
                       }`}
                       onClick={() => {
                         setSelected(item);
+                        recordAnalyticsEvent({
+                          eventType: "popup_close",
+                          meta: { popup: "target_picker", feedbackType: type, selected: true },
+                        });
                         setPickerOpen(false);
                         setQuery("");
                       }}

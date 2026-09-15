@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Avatar } from "../../components/ui/Avatar";
 import { StatusPill, type StatusTone } from "../../components/ui/StatusPill";
+import { usePageView } from "../../lib/analytics";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import { useLocalStore } from "../../lib/storage/localStore";
 import type { CollectionTaskMap } from "../../lib/storage/collectionTasks";
@@ -78,6 +79,7 @@ export function ProfilePage() {
   useEffect(() => {
     void refreshStatuses();
   }, [refreshStatuses]);
+  usePageView("profile");
 
   const menu = [
     {

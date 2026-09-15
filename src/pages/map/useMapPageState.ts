@@ -85,6 +85,8 @@ export function useMapPageState() {
   // 搜索命中的商户 → 其所在楼宇（商户不单设页面，落地到楼宇详情内的商户视图）
   const [merchantHitByPlace, setMerchantHitByPlace] = useState<Record<string, string>>({});
   const deepLinkAppliedRef = useRef(false);
+  // 搜索埋点去重：同一 校区+关键词+请求版本 只报一次（effect 会因 release 数据变化重跑）
+  const lastSearchEventRef = useRef<string | null>(null);
   const { addRecent } = useRecents();
 
   const pois = release ? release.pois : null;
@@ -151,6 +153,15 @@ export function useMapPageState() {
           setMerchantHitByPlace(merchantHits);
           setSearchStatus("ready");
           setSearchError("");
+          const dedupeKey = `${campusId}:${trimmed}:${searchRequestVersion}`;
+          if (lastSearchEventRef.current !== dedupeKey) {
+            lastSearchEventRef.current = dedupeKey;
+            recordAnalyticsEvent({
+              eventType: "search",
+              campus: campus.label,
+              meta: { q: trimmed.slice(0, 100), resultCount: order.length },
+            });
+          }
         })
         .catch((error: unknown) => {
           if (!controller.signal.aborted) {
@@ -210,6 +221,16 @@ export function useMapPageState() {
   const openPointPoi = (poiKey: string) => openPoi(poiKey, "map_object", null);
 
   const closePoi = () => {
+    const closingPoi = selectedPoiKey ? poiByKey.get(selectedPoiKey) : undefined;
+    if (closingPoi) {
+      recordAnalyticsEvent({
+        eventType: "popup_close",
+        campus: closingPoi.campusLabel,
+        poiId: closingPoi.entityId,
+        poiName: closingPoi.name,
+        meta: { popup: "poi_detail" },
+      });
+    }
     setSelectedPoiKey(null);
     setSelectedMerchantId(null);
     setSheetMode(previousSheetMode);

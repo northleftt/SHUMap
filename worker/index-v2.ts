@@ -2,7 +2,7 @@ import type { Env, ExecutionContext, MessageBatch } from "./types/cloudflare";
 import type { QueueJobMessage, SessionPrincipal } from "./domain/types";
 import { asErrorResponse, HttpError, json } from "./lib/http";
 import { handleBootstrap, handleLogin, handleLogout, handleSession, optionalSession, requireSession } from "./modules/auth";
-import { recordAnalyticsEvent } from "./modules/analytics";
+import { getAnalyticsSummary, recordAnalyticsEvent } from "./modules/analytics";
 import { claimCollectionTask, listCollectionTasks, saveCollectionTask, submitCollectionTask } from "./modules/collections";
 import { createFacilityHandler, createFacilityRevisionHandler, deleteFacility, getFacility, listFacilities, publicFacilityStatus, updateFacilityLifecycle } from "./modules/facilities";
 import {
@@ -38,6 +38,7 @@ import { createPlaceHandler, createPlaceRevisionHandler, deletePlace, getPlace, 
 import { getAdminMapAsset, getCurrentRelease, getPublicMapAsset, getVersionedRelease, listPublicPlaces, publicHealth, publicPlace, publicSearch } from "./modules/public";
 import { listPendingRevisions, reviewRevision, submitRevision } from "./modules/reviews";
 import { createSubmission, getSubmissionStatus, listSubmissions, reviewSubmission } from "./modules/submissions";
+import { listFeatureFeedback, submitFeatureFeedback } from "./modules/feature-feedback";
 import { createOrganization, deleteOrganization, listOrganizations, updateOrganization } from "./modules/organizations";
 import { deleteFloor, getFloorDetail, listFloorsForBuilding, updateFloorPlanStatus } from "./modules/floors";
 import { createDataSource, createFloor, createSpace, listCampusesAndSpaces, listReferenceData, updateFloor } from "./modules/spaces";
@@ -127,6 +128,8 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
 
   if (method === "GET" && path === "/api/health") return publicHealth();
   if (method === "POST" && path === "/api/analytics/events") return recordAnalyticsEvent(request, env);
+  // 功能评分：与 analytics 一样完全匿名——纯运营数据，不碰内容与会话。
+  if (method === "POST" && path === "/api/public/feature-feedback") return submitFeatureFeedback(request, env);
   if (method === "POST" && path === "/api/auth/bootstrap") return handleBootstrap(request, env);
   if (method === "POST" && path === "/api/auth/login") return handleLogin(request, env);
   if (method === "POST" && path === "/api/auth/logout") return handleLogout(request, env);
@@ -217,6 +220,10 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "GET" && path === "/api/admin/spaces") {
     await requireSession(request, env, "read:admin");
     return listCampusesAndSpaces(env);
+  }
+  if (method === "GET" && path === "/api/admin/analytics/summary") {
+    await requireSession(request, env, "read:admin");
+    return getAnalyticsSummary(env, new URL(request.url));
   }
   // 楼层与楼层图管理。读用 read:admin，写用 write:maps（与校区图一致）。
   // 列表 / 详情把该层的设施、商户、锚点反查出来，因此楼层页与内容管理天然同步。
@@ -620,6 +627,10 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "GET" && path === "/api/admin/submissions") {
     await requireSession(request, env, "read:admin");
     return listSubmissions(env);
+  }
+  if (method === "GET" && path === "/api/admin/feature-feedback") {
+    await requireSession(request, env, "read:admin");
+    return listFeatureFeedback(request, env);
   }
   const submissionReview = match(path, "/api/admin/submissions/:id/review");
   if (method === "POST" && submissionReview) {
