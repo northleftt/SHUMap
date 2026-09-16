@@ -1,6 +1,7 @@
 import { ArrowDownUp, ChevronDown, MapPin, Navigation, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FeatureFeedback } from "../../components/feedback/FeatureFeedback";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SheetModal } from "../../components/ui/SheetModal";
@@ -740,6 +741,11 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
             ) : null}
           </>
         )}
+
+        {/* 功能评分入口：提交过或关掉一次就不再出现（见 FeatureFeedback）。 */}
+        <div className="mt-6">
+          <FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" />
+        </div>
         </div>
       </div>
 

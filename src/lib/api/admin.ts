@@ -3,7 +3,7 @@
 // Route map: worker/index-v2.ts (routeAdmin) and worker/modules/*.
 
 import { apiFetch } from "./client";
-import type { ServiceCalendarDayType } from "../../admin/adminTypes";
+import type { FeatureFeedbackRow, ServiceCalendarDayType } from "../../admin/adminTypes";
 import type {
   FacilityRevisionWrite,
   GeometryType,
@@ -990,6 +990,11 @@ export function adminMediaContentUrl(mediaId: string): string {
 
 export function listSubmissions(signal?: AbortSignal): Promise<ListResponse<AdminSubmission>> {
   return apiFetch<ListResponse<AdminSubmission>>("/api/admin/submissions", { signal });
+}
+
+/** GET /api/admin/feature-feedback — 功能评分列表（运营数据，最新 200 条）。 */
+export function listFeatureFeedback(signal?: AbortSignal): Promise<ListResponse<FeatureFeedbackRow>> {
+  return apiFetch<ListResponse<FeatureFeedbackRow>>("/api/admin/feature-feedback", { signal });
 }
 
 export function reviewSubmission(

@@ -12,6 +12,7 @@ import {
   Rocket,
   Search,
   SquareCheckBig,
+  Star,
   Tags,
   Users,
   Wrench,
@@ -33,6 +34,7 @@ import { OperationDetailPage } from "./pages/OperationDetailPage";
 import { TransitPage } from "./pages/TransitPage";
 import { MapsPage } from "./pages/MapsPage";
 import { SubmissionsPage } from "./pages/SubmissionsPage";
+import { FeatureFeedbackPage } from "./pages/FeatureFeedbackPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { TaxonomyPage } from "./pages/TaxonomyPage";
@@ -75,6 +77,8 @@ const NAV_GROUPS = [
       { to: "/admin/operations", end: false, label: "运营信息", icon: Megaphone },
       { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus, permission: "write:transit" },
       { to: "/admin/submissions", end: false, label: "用户提交", icon: Inbox, permission: "review:content" },
+      // 功能评分是纯运营数据（无审核流），只要有 read:admin 就能看。
+      { to: "/admin/feature-feedback", end: false, label: "功能反馈", icon: Star },
     ],
   },
   {
@@ -106,6 +110,7 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/floors")) return "楼层与楼层图管理";
   if (pathname.startsWith("/admin/maps")) return "地图版本管理";
   if (pathname.startsWith("/admin/submissions")) return "用户提交 · 处理";
+  if (pathname.startsWith("/admin/feature-feedback")) return "功能反馈";
   if (pathname.startsWith("/admin/releases")) return "发布中心";
   if (pathname.startsWith("/admin/users")) return "账户管理";
   if (pathname.startsWith("/admin/dev-tools")) return "开发工具";
@@ -321,6 +326,7 @@ export function AdminPage() {
         <Route path="floors" element={hasPermission("write:maps") ? <FloorsPage /> : <Navigate to="/admin" replace />} />
         <Route path="maps" element={hasPermission("write:maps") ? <MapsPage /> : <Navigate to="/admin" replace />} />
         <Route path="submissions" element={hasPermission("review:content") ? <SubmissionsPage /> : <Navigate to="/admin" replace />} />
+        <Route path="feature-feedback" element={<FeatureFeedbackPage />} />
         <Route path="releases" element={hasPermission("publish:release") ? <ReleasesPage /> : <Navigate to="/admin" replace />} />
         <Route path="users" element={hasPermission("manage:users") ? <UsersPage /> : <Navigate to="/admin" replace />} />
         <Route path="dev-tools" element={hasPermission("write:maps") ? <DevToolsPage /> : <Navigate to="/admin" replace />} />

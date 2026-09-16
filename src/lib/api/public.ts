@@ -227,6 +227,23 @@ export function createSubmission(input: SubmissionInput, signal?: AbortSignal): 
 }
 
 /**
+ * POST /api/public/feature-feedback — 「你觉得这个功能好用吗」星级评分。
+ *
+ * 纯运营数据（不进内容审核流），匿名即可提交；成功时服务端回 204 无响应体。
+ * reason 任何评分都可附，前端只在低分时引导填写。
+ */
+export function submitFeatureFeedback(
+  input: { page: string; rating: number; reason?: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  return apiFetch<void>("/api/public/feature-feedback", {
+    method: "POST",
+    body: input,
+    signal,
+  });
+}
+
+/**
  * POST /api/public/media — anonymous photo upload. Raw image bytes, no JSON envelope;
  * the Worker sniffs the magic bytes, caps each file at 2 MiB and parks the object in
  * the quarantine scope until a reviewer accepts the submission it is attached to.
