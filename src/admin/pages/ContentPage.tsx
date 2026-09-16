@@ -65,10 +65,13 @@ function LifecyclePill({ status }: { status: string | null | undefined }) {
  * 建议，别让人对着 place_in_use 猜。
  */
 const ERROR_TEXT: Record<string, string> = {
-  place_in_use: "这个地点下面还挂着东西（下级地点 / 设施 / 商户 / 校车站点 / 楼层 / 供稿）。先把它们移走，或者直接停用这个地点。",
+  place_in_use: "这个地点下面还挂着东西（下级地点 / 设施 / 商户 / 校车站点 / 楼层 / 供稿 / 采集任务 / 其他实体的位置锚点）。先把它们移走，或者直接停用这个地点。",
   place_released: "这个地点已经进过发布版本，删掉会让历史版本指向不存在的数据。改用停用。",
+  place_kind_filter_inactive: "这个地点的分类在停用期间被移出了启用的筛选组。先恢复筛选组，再启用地点。",
+  place_footprint_conflict: "这栋楼停用期间，它的轮廓图形被别的楼认领了。去编辑页重新选一个轮廓，再启用。",
   facility_in_use: "还有供稿或运营事件指着这个设施。先处理掉它们，或者直接停用。",
   facility_released: "这个设施已经进过发布版本，删掉会让历史版本指向不存在的数据。改用停用。",
+  facility_type_inactive: "这个设施的类型在停用期间被禁用或失去了启用的筛选组。先恢复设施类型，再启用设施。",
 };
 
 function describeActionError(error: unknown, fallback: string): string {
@@ -167,7 +170,7 @@ export function ContentPage() {
             campus: placeName(f.hostPlaceId),
             status: f.editorialStatus ?? "draft",
             lifecycle: String(f.lifecycleStatus ?? "active"),
-            updatedAt: String(f.lastVerifiedAt ?? ""),
+            updatedAt: String(f.updatedAt ?? ""),
             to: `/admin/content/facilities/${f.id}`,
             retire: () => admin.updateFacilityLifecycle(f.id, "retired"),
             activate: () => admin.updateFacilityLifecycle(f.id, "active"),

@@ -145,6 +145,27 @@ export function isLocationDraftBlank(row: LocationDraft): boolean {
     && !hasOriginBinding(row);
 }
 
+/**
+ * 保存前的最后整理：丢掉一行都没填的草稿，并把主要位置收敛到恰好一个。
+ *
+ * 两步都是真实事故的修法：
+ * 1. 空行不过滤会带着全空字段送进 normalizeLocationInput，被后端「必须指明空间
+ *    归属 / 图形 / 几何」打成 400——用户只是点了一下「添加位置」又没用上。
+ * 2. 设施编辑器有两个面板共写一个数组（楼层图的服务位置 + 楼外位置），两边各自
+ *    维护 isPrimary，可能同时亮着（服务位置已是主要位置时再在楼外面板加一行，
+ *    新行默认点亮），保存被「恰好一个主要位置」拒掉。撞车时保留**最后**一个主要
+ *    位置（数组顺序 = 面板顺序，后动手的面板赢）；过滤完一个都没有时点亮首行，
+ *    否则空着的 primary 同样过不了契约。
+ */
+export function finalizeLocationDrafts(drafts: LocationDraft[]): LocationDraft[] {
+  const rows = drafts.filter((row) => !isLocationDraftBlank(row));
+  if (rows.length === 0) return rows;
+  const primaryIndexes = rows.flatMap((row, index) => (row.isPrimary ? [index] : []));
+  if (primaryIndexes.length === 1) return rows;
+  const keep = primaryIndexes.length > 1 ? primaryIndexes[primaryIndexes.length - 1] : 0;
+  return rows.map((row, index) => (index === keep ? { ...row, isPrimary: true } : row.isPrimary ? { ...row, isPrimary: false } : row));
+}
+
 export function locationDraftFromApi(raw: Record<string, unknown>, index: number): LocationDraft {
   const optionalString = (value: unknown, field: string): string => {
     if (value === undefined || value === null) return "";
