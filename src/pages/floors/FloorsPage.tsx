@@ -7,6 +7,7 @@ import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { ImagePreview } from "../../components/ui/ImagePreview";
 import type { PublicPlaceFacility, PublicPlaceFloor, ReleaseManifest } from "../../lib/api/types";
+import { usePageView } from "../../lib/analytics";
 import { facilityDotColor } from "../../lib/facilityIcons";
 import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
 import { releaseFacilitiesForPlace } from "../../lib/release/mapData";
@@ -148,6 +149,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
   const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
+  usePageView("floors");
   // 运营状态盖在快照基线上，读取失败时在列表上方明确提示。
   const facilityStatus = useFacilityStatus();
 

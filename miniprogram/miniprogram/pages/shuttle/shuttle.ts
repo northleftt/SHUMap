@@ -33,6 +33,7 @@ import {
 } from "../../lib/transit/schedule";
 import type { CampusLine, TransitStop } from "../../lib/transit/types";
 import { hasPublishedShuttleGuide } from "../../lib/shuttle-guide";
+import { recordAnalyticsEvent, recordPageView } from "../../lib/analytics";
 import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
 
 /** 倒计时文案：「5分钟后」/「1小时后」等，departure 已过返回 null。 */
@@ -155,6 +156,7 @@ Page({
   onShow() {
     const tabBar = this.getTabBar?.();
     if (tabBar) tabBar.setData({ selected: 1 });
+    recordPageView("shuttle");
   },
 
   /**
@@ -279,6 +281,11 @@ Page({
     }
 
     this.setData({ loading: true, errorMessage: "", isEmpty: false });
+    // 每次实际发起 OD/日期查询上报一次 shuttle_query（起终点相同的早退分支不报）。
+    recordAnalyticsEvent({
+      eventType: "shuttle_query",
+      meta: { from: fromEndpoint.name, to: toEndpoint.name, date: this.data.dateKey },
+    });
     try {
       const { lines, source, dayTypeLabel } = await fetchCampusLinesWithFallback(
         fromEndpoint,
@@ -504,9 +511,20 @@ Page({
       previewRoute: fromName && toName ? `${fromName} → ${toName}` : "",
       previewTrips: trips,
     });
+    recordAnalyticsEvent({
+      eventType: "popup_open",
+      meta: { popup: "trip_preview", departureTime, from: fromName, to: toName, date: this.data.dateKey },
+    });
   },
 
   closePreview() {
+    // 只在弹层确实开着时报 popup_close（reloadLines/openStopOnMap 也会顺手调这里）。
+    if (this.data.previewVisible) {
+      recordAnalyticsEvent({
+        eventType: "popup_close",
+        meta: { popup: "trip_preview", departureTime: this.data.previewTime },
+      });
+    }
     this.setData({ previewVisible: false, previewTrips: [] });
   },
 

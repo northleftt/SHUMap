@@ -17,6 +17,7 @@ import { facilityStatusLabel } from "../../lib/release/facilityStatus";
 import type { MapPoi, ReleaseFloor } from "../../lib/release/types";
 import { apiGetBinary } from "../../lib/api";
 import { requestErrorRetryText } from "../../lib/request-error";
+import { recordPageView } from "../../lib/analytics";
 import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
 import { config } from "../../config";
 import {
@@ -79,6 +80,7 @@ Page({
 
   onLoad(options: Record<string, string | undefined>) {
     enableShareMenus();
+    recordPageView("floors");
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20 };
     this.setData({
       statusBarHeight: windowInfo.statusBarHeight ?? 20,

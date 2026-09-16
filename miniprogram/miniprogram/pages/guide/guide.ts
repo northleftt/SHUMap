@@ -42,6 +42,7 @@ import {
   type ViewerTransform,
 } from "../../lib/image-viewer";
 import { enableShareMenus, shareQuery, sharePath, shareTitle } from "../../lib/share";
+import { recordPageView } from "../../lib/analytics";
 
 interface HubOption {
   id: string;
@@ -127,6 +128,7 @@ Page({
 
   onLoad(options: Record<string, string | undefined>) {
     enableShareMenus();
+    recordPageView("guide");
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20 };
     this.setData({ statusBarHeight: windowInfo.statusBarHeight ?? 20 });
     this.pendingQuery = parseGuideQuery(options || {});

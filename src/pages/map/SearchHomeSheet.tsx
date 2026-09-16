@@ -1,4 +1,5 @@
 import { Building2, CircleAlert, MapPin, RotateCcw, SearchX, Store } from "lucide-react";
+import { FeatureFeedback } from "../../components/feedback/FeatureFeedback";
 import { SHEET_SCROLL_ATTR } from "../../components/sheet/useSheetDrag";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
@@ -168,6 +169,11 @@ export function SearchHomeSheet({
           </div>
         </div>
       ) : null}
+
+      {/* 功能评分入口：提交过或关掉一次就不再出现（见 FeatureFeedback）。 */}
+      <div className="shrink-0">
+        <FeatureFeedback page="search" prompt="你觉得搜索好用吗？" />
+      </div>
     </div>
   );
 }
