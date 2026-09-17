@@ -62,6 +62,27 @@ curl http://localhost:8099/api/public/releases/current
 
 容器另提供本地探活路径 `/healthz`（不转发）。
 
+## staging 反代（shumap-api-staging）
+
+`../shumap-api-staging/` 是同源码的第二个服务：`server.mjs` 与本目录**逐字节一致**
+（漂移门禁 `tests/miniprogram-cloudrun-staging-proxy.test.mjs`），仅 Dockerfile 的
+默认 `UPSTREAM_BASE` 指向 `https://staging.map.shutf.com`（shumap-staging Worker，
+见 `docs/staging.md`）。小程序侧由 `lib/env.ts` 的环境切换把 `cloudService` 换成
+`shumap-api-staging`。
+
+部署（CloudBase CLI 凭据过期需先 `npx cloudbase login --flow device` 人工授权）：
+
+```bash
+cd tmp/cloudbase-cli
+printf '\n\n' | npx cloudbase cloudrun deploy -s shumap-api-staging --port 80 \
+  --source "$OLDPWD/miniprogram/cloudrun/shumap-api-staging" --wait --force \
+  -e cloudbase-d1gse9nsp7630b4e7
+```
+
+`PROXY_SHARED_SECRET` 同样在控制台环境变量里配，值用 **staging** worker 的
+`MINIPROGRAM_PROXY_SECRET`（与生产口令不同），配完保存触发滚动重启。
+2026-09-17 状态：源码已交付，服务**尚未部署**（CLI 凭据过期，需人工登录）。
+
 ## `PROXY_SHARED_SECRET`：让限流按人计数而不是按容器 IP
 
 小程序全部流量经本容器转发，Worker 看到的 `cf-connecting-ip` 恒为容器出口那一个 IP，

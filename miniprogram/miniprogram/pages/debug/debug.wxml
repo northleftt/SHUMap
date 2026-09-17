@@ -3,6 +3,22 @@
     <view class="navbar-title">Release 调试</view>
   </view>
 
+  <view class="section">
+    <view class="section-title">运行环境（当前：{{appEnv}}）</view>
+    <view class="env-row">
+      <view
+        wx:for="{{envOptions}}"
+        wx:key="*this"
+        class="env-chip {{appEnv === item ? 'env-chip-active' : ''}}"
+        data-env="{{item}}"
+        bindtap="switchEnv"
+      >{{item === 'staging' ? 'Staging（预发）' : '生产'}}</view>
+    </view>
+    <view class="row dim">{{apiBaseUrl}}</view>
+    <view class="row dim">云服务：{{cloudService}}</view>
+    <view class="row dim">切换会清 release 缓存并重启小程序；仅开发调试用。</view>
+  </view>
+
   <view wx:if="{{loading}}" class="hint">装配中…</view>
 
   <view wx:elif="{{errorMessage}}" class="hint error">

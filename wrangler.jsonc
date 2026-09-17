@@ -77,5 +77,61 @@
       "binding": "SHUMAP_BUCKET",
       "bucket_name": "shumap-assets"
     }
-  ]
+  ],
+  // 预发环境：独立 worker / D1 / R2 / Queue，自定义域名 staging.map.shutf.com。
+  // 部署：npm run deploy:staging；迁移：npm run migrations:staging。
+  // 用法与灌数据流程见 docs/staging.md。注意 wrangler 非交互模式不读本文件的
+  // account_id，所有 wrangler 命令需前置 CLOUDFLARE_ACCOUNT_ID（见 package.json 脚本）。
+  "env": {
+    "staging": {
+      "name": "shumap-staging",
+      // secrets / durable_objects 不被 env 继承（wrangler 部署时会警告），必须重复声明。
+      "secrets": {
+        "required": [
+          "SESSION_PEPPER"
+        ]
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "RELEASE_COORDINATOR",
+            "class_name": "ReleaseCoordinator"
+          }
+        ]
+      },
+      "routes": [
+        {
+          "pattern": "staging.map.shutf.com",
+          "custom_domain": true
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "shumap-v2-staging",
+          "database_id": "8b8986ef-492d-447d-b0cb-4759604697fc",
+          "migrations_dir": "migrations-v2"
+        }
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "IMPORT_QUEUE",
+            "queue": "shumap-import-staging"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "shumap-import-staging"
+          }
+        ]
+      },
+      "r2_buckets": [
+        {
+          "binding": "SHUMAP_BUCKET",
+          "bucket_name": "shumap-assets-staging"
+        }
+      ]
+    }
+  }
 }
