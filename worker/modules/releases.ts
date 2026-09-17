@@ -252,10 +252,12 @@ interface FloorCandidate {
 
 /**
  * manifest.floors 的对外形状。楼内平面图是每层一张图片（0032 起）：
- * image_media_id 投影成公共读路径，没上传过图的楼层为 null，客户端按「无图」处理。
+ * image_media_id 投影成公共读路径。imageUrl 只在有图时输出（同 0027 marker_size
+ * 口径）——旧版小程序的 floors 白名单没有这个键，无条件输出（哪怕为 null）
+ * 会让旧客户端解析整份 manifest 失败。
  */
 interface ReleaseFloor extends Omit<FloorCandidate, "imageMediaId"> {
-  imageUrl: string | null;
+  imageUrl?: string;
 }
 
 interface FacilityTypeCandidate {
@@ -676,7 +678,8 @@ async function buildCandidate(env: Env, releaseId: string, version: string, crea
     .filter((floor) => candidateIds.place.has(floor.buildingPlaceId))
     .map((floor): ReleaseFloor => {
       const { imageMediaId, ...fields } = floor;
-      return { ...fields, imageUrl: imageMediaId ? publicMediaPath(imageMediaId) : null };
+      // imageUrl 只在有图时输出（见 ReleaseFloor 注释），无图楼层不带这个键。
+      return imageMediaId ? { ...fields, imageUrl: publicMediaPath(imageMediaId) } : { ...fields };
     });
 
   const aliasRows = await all<{ placeId: string; name: string }>(

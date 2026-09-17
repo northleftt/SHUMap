@@ -57,6 +57,17 @@ function exactRecord(value: unknown, field: string, fields: readonly string[]): 
   return record;
 }
 
+// indoorSpaceId 是 indoor_spaces 时代的 legacy 键（0034 已删表）。存量修订的
+// structure_json（含 locations 数组元素）仍带着它，而审核流会把存量 JSON 原样
+// 过白名单——容忍并丢弃，别让历史数据卡死提交/审核。
+function stripLegacyKeys(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  if (!Object.hasOwn(record, "indoorSpaceId")) return value;
+  const { indoorSpaceId: _discarded, ...rest } = record;
+  return rest;
+}
+
 function exactOptionalRecord(value: unknown, field: string, fields: readonly string[]): Record<string, unknown> {
   const record = recordValue(value, field);
   const allowed = new Set(fields);
@@ -175,7 +186,7 @@ function geometryValue(value: unknown, field: string, geometryType: GeometryType
 }
 
 export function normalizeLocationInput(value: unknown, field: string): RevisionLocationInput {
-  const location = exactOptionalRecord(value, field, [
+  const location = exactOptionalRecord(stripLegacyKeys(value), field, [
     "campusId", "buildingPlaceId", "floorId", "role", "geometryType", "geometry", "crs",
     "mapVersionId", "mapFeatureId", "locationHint", "precisionLevel", "accuracyMeters", "sourceId", "validFrom",
     "validTo", "isPrimary",
@@ -353,7 +364,7 @@ function placeStructureValue(value: unknown, field: string): PlaceStructure {
 }
 
 function facilityStructureValue(value: unknown, field: string): FacilityStructure {
-  const structure = exactRecord(value, field, [
+  const structure = exactRecord(stripLegacyKeys(value), field, [
     "facilityTypeId", "hostPlaceId", "floorId", "quantity", "operationalStatus", "locations",
   ]);
   return {
@@ -367,7 +378,7 @@ function facilityStructureValue(value: unknown, field: string): FacilityStructur
 }
 
 function merchantStructureValue(value: unknown, field: string): MerchantStructure {
-  const structure = exactRecord(value, field, ["organizationId", "hostPlaceId", "floorId", "locations"]);
+  const structure = exactRecord(stripLegacyKeys(value), field, ["organizationId", "hostPlaceId", "floorId", "locations"]);
   return {
     organizationId: nullableText(structure.organizationId, `${field}.organizationId`, 100),
     hostPlaceId: text(structure.hostPlaceId, `${field}.hostPlaceId`, 100),

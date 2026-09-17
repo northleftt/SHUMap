@@ -203,7 +203,8 @@ function merchant(value: unknown, field: string): ReleaseMerchant {
 }
 
 function floor(value: unknown, field: string): ReleaseFloor {
-  const row = exactObject(value, field, ["id", "buildingPlaceId", "levelCode", "levelOrder", "displayName", "isPublic", "imageUrl"]);
+  // imageUrl 只在楼层有图时输出（0032 起，同 0027 marker_size 口径），缺键即无图。
+  const row = exactObject(value, field, ["id", "buildingPlaceId", "levelCode", "levelOrder", "displayName", "isPublic"], ["imageUrl"]);
   return {
     id: requiredString(row.id, `${field}.id`),
     buildingPlaceId: requiredString(row.buildingPlaceId, `${field}.buildingPlaceId`),
@@ -211,7 +212,7 @@ function floor(value: unknown, field: string): ReleaseFloor {
     levelOrder: finiteNumber(row.levelOrder, `${field}.levelOrder`),
     displayName: requiredString(row.displayName, `${field}.displayName`),
     isPublic: integerFlag(row.isPublic, `${field}.isPublic`),
-    imageUrl: nullableString(row.imageUrl, `${field}.imageUrl`),
+    imageUrl: row.imageUrl === undefined ? null : nullableString(row.imageUrl, `${field}.imageUrl`),
   };
 }
 
