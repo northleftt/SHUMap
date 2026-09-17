@@ -31,7 +31,7 @@ import {
   useAsyncData,
 } from "../components/primitives";
 
-import { LocationEditor, ALL_ROLES, isLocationDraftBlank, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { LocationEditor, ALL_ROLES, finalizeLocationDrafts, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
 import { markerScaleFromContent } from "../../lib/map/markerScale";
 import type { PlaceContent } from "../../../shared/revision-contract";
@@ -292,8 +292,8 @@ export function PlaceEditorPage() {
       setNotice("");
       const aliasList = aliases.split(/[、,，]/).map((a) => a.trim()).filter(Boolean);
       const content = composeContent();
-      const locations = locationDrafts
-        .filter((location) => !isLocationDraftBlank(location))
+      // finalize 同时收敛主要位置：空行占位 primary 被滤掉后一个都不剩，保存照样 400。
+      const locations = finalizeLocationDrafts(locationDrafts)
         .map((location) => locationInput(hasBuildingStructure ? {
           ...location,
           campusId,
@@ -609,24 +609,31 @@ export function PlaceEditorPage() {
 // 楼层管理：列出 / 新增 / 改显示名
 // ---------------------------------------------------------------------------
 
-/** "3" → "3 层"、"B1" → "地下 1 层"，其余原样。 */
-function suggestFloorName(levelCode: string): string {
+/** 楼层编号规范化：与后端 floors.ts 的 canonicalLevelCode 同口径，
+ *  "3" / "f3" / "F03" / "3F" → "F3"，"b1" / "B01" / "1B" → "B1"；不合法返回 null。
+ *  之前这里只认 F<n>/B<n>，用户按中文习惯填「3F」会被前端误拒，而后端本来收。 */
+export function canonicalFloorLevelCode(levelCode: string): string | null {
   const code = levelCode.trim().toUpperCase();
-  const above = code.match(/^F?(\d{1,3})$/);
-  if (above) return `${Number(above[1])} 层`;
-  const below = code.match(/^B(\d{1,2})$/);
-  if (below) return `地下 ${Number(below[1])} 层`;
-  return levelCode.trim();
+  const above = code.match(/^(?:F(\d{1,3})|(\d{1,3})F?)$/);
+  if (above) return `F${Number(above[1] ?? above[2])}`;
+  const below = code.match(/^(?:B(\d{1,2})|(\d{1,2})B)$/);
+  if (below) return `B${Number(below[1] ?? below[2])}`;
+  return null;
+}
+
+/** "F3" → "3 层"、"B1" → "地下 1 层"；不合法的编号原样返回（提交时后端会给出可读 400）。 */
+function suggestFloorName(levelCode: string): string {
+  const code = canonicalFloorLevelCode(levelCode);
+  if (code === null) return levelCode.trim();
+  if (code.startsWith("F")) return `${Number(code.slice(1))} 层`;
+  return `地下 ${Number(code.slice(1))} 层`;
 }
 
 /** 楼层排序值：地下为负，地上为正。 */
 function suggestFloorOrder(levelCode: string): number {
-  const code = levelCode.trim().toUpperCase();
-  const above = code.match(/^F?(\d{1,3})$/);
-  if (above) return Number(above[1]);
-  const below = code.match(/^B(\d{1,2})$/);
-  if (below) return -Number(below[1]);
-  throw new Error(`不支持的楼层编号：${levelCode}`);
+  const code = canonicalFloorLevelCode(levelCode);
+  if (code === null) throw new Error(`不支持的楼层编号：${levelCode}`);
+  return code.startsWith("F") ? Number(code.slice(1)) : -Number(code.slice(1));
 }
 
 function FloorPanel({

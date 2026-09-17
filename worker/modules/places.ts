@@ -165,12 +165,29 @@ interface PlaceUsage {
   transitStops: number;
   floors: number;
   submissions: number;
+  collectionTasks: number;
+  locationRefs: number;
+  searchRefs: number;
 }
 
 /**
  * 谁还指着这个地点。这几张表在 schema 里都是 `on delete restrict`（floors 走
  * buildings 级联，但楼层里的东西不会跟着消失），硬删会直接撞外键报 500，所以先数
  * 一遍，非零就回 409 带明细，让管理端能说清「先把 3 个设施移走」。
+ *
+ * locationRefs 数的是**别的实体**挂在该楼上的位置锚点
+ * （location_anchors.building_place_id 同样 on delete restrict）：设施 / 商户 /
+ * 运营事件可以把位置点进一栋自己并不寄居的楼，这一层引用不在上面任何一张
+ * 「宿主」表里。地点自己的锚点不算——它们本来就要跟着删除一起走。
+ *
+ * searchRefs 同理：search_documents.building_place_id 也是 restrict。正常路径下
+ * 它总跟着 release_items 一起走（下面另有 released 检查），这里是防御性计数，
+ * 与 revision-contracts.ts 的 assertBuildingCanBeRemoved 同口径。
+ *
+ * collectionTasks 是另一种债：0002 给 collection_tasks.building_place_id 配的是
+ * on delete **cascade**——不撞外键，但删楼会把这栋楼的采集任务连同已采集的
+ * payload 一起静默抹掉。这个端点的契约是「只删没人引用过的数据」，所以它也按
+ * 引用计数，让管理员先停用或先处理任务。
  */
 async function placeUsage(env: Env, placeId: string): Promise<PlaceUsage> {
   const row = await first<PlaceUsage>(
@@ -180,8 +197,16 @@ async function placeUsage(env: Env, placeId: string): Promise<PlaceUsage> {
             (select count(*) from merchant_outlets where host_place_id=?) as merchants,
             (select count(*) from transit_stops where place_id=?) as transitStops,
             (select count(*) from floors where building_place_id=?) as floors,
-            (select count(*) from content_submissions where target_type='place' and target_id=?) as submissions`,
-    [placeId, placeId, placeId, placeId, placeId, placeId],
+            (select count(*) from content_submissions where target_type='place' and target_id=?) as submissions,
+            (select count(*) from collection_tasks where building_place_id=?) as collectionTasks,
+            (select count(*) from search_documents where building_place_id=?) as searchRefs,
+            (select count(*) from location_anchors la
+              where la.building_place_id=?
+                and not exists (
+                  select 1 from entity_locations el
+                   where el.anchor_id=la.id and el.entity_type='place' and el.entity_id=?
+                )) as locationRefs`,
+    [placeId, placeId, placeId, placeId, placeId, placeId, placeId, placeId, placeId, placeId],
   );
   if (!row) throw new Error("Could not count place references");
   return row;
@@ -189,6 +214,71 @@ async function placeUsage(env: Env, placeId: string): Promise<PlaceUsage> {
 
 function usageTotal(usage: PlaceUsage): number {
   return Object.values(usage).reduce((total, count) => total + count, 0);
+}
+
+/**
+ * 从 retired 恢复前的两项前置检查。缺了它们，0012/0015 的触发器会把恢复请求
+ * 打成没有说明的 500（触发器的 raise(abort) 到全局错误处理就是 internal_error）：
+ *
+ * 1. 筛选组：protect_used_map_filter_deactivation 只挡「未停用」的成员，地点
+ *    停用期间它分类下的筛选组允许被下线；恢复时
+ *    require_place_active_map_filter_update 会拒掉这次 update。
+ * 2. 轮廓：楼宇停用后它的 footprint 图形对其他楼变为可认领（占用查询只看
+ *    valid_to is null 的绑定）；若停用期间已被别的楼认领，restoreEntityLocations
+ *    重新打开绑定会撞 require_unique_active_feature_footprint_update。这时该让
+ *    管理员去编辑页重选轮廓，而不是对着 500 猜。
+ *
+ * 预检与后面的 update/restore 不在一个事务里（TOCTOU）：窗口极小，最坏结果等于
+ * 修复前的旧行为（触发器拒、500），可接受。
+ */
+async function assertPlaceReactivatable(env: Env, placeId: string): Promise<void> {
+  const kindWithoutFilter = await first<{ id: string }>(
+    env.DB,
+    `select p.id from places p
+      where p.id=? and not exists (
+        select 1 from map_filter_members m
+          join map_filter_categories c on c.id=m.category_id and c.active=1
+         where m.place_kind_id=p.kind_id
+      )`,
+    [placeId],
+  );
+  if (kindWithoutFilter) {
+    throw new HttpError(
+      409,
+      "place_kind_filter_inactive",
+      "This place's kind no longer belongs to an active map filter; re-activate the filter first",
+    );
+  }
+  // 与 restoreEntityLocations 同口径：只在「没有存活绑定、要复活最近一批」时才可能撞。
+  const footprintConflict = await first<{ id: string }>(
+    env.DB,
+    `select el.id from entity_locations el
+       join location_anchors la on la.id=el.anchor_id
+      where el.entity_type='place' and el.entity_id=? and el.role='footprint'
+        and not exists (
+          select 1 from entity_locations live
+           where live.entity_type='place' and live.entity_id=? and live.valid_to is null
+        )
+        and el.valid_to = (
+          select max(valid_to) from entity_locations
+           where entity_type='place' and entity_id=?
+        )
+        and exists (
+          select 1 from entity_locations other
+            join location_anchors other_anchor on other_anchor.id=other.anchor_id
+           where other.valid_to is null and other.role='footprint'
+             and other_anchor.map_feature_id=la.map_feature_id
+        )
+      limit 1`,
+    [placeId, placeId, placeId],
+  );
+  if (footprintConflict) {
+    throw new HttpError(
+      409,
+      "place_footprint_conflict",
+      "The building footprint feature was claimed by another building while this one was retired; pick a new footprint in the editor",
+    );
+  }
 }
 
 /**
@@ -218,6 +308,9 @@ export async function updatePlaceLifecycle(
   if (!before) throw new HttpError(404, "not_found", "Place does not exist");
   const body = exactObject(await readJson<unknown>(request), "placeLifecycle", ["lifecycleStatus"]);
   const lifecycleStatus = oneOf(body.lifecycleStatus, "lifecycleStatus", PLACE_LIFECYCLES);
+  if (before.lifecycle_status === "retired" && lifecycleStatus !== "retired") {
+    await assertPlaceReactivatable(env, placeId);
+  }
   const now = isoNow();
   await env.DB.prepare("update places set lifecycle_status=?,retired_at=?,updated_at=? where id=?")
     .bind(lifecycleStatus, lifecycleStatus === "retired" ? now : null, now, placeId)

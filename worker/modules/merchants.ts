@@ -130,6 +130,26 @@ export async function updateMerchantLifecycle(
   if (!before) throw new HttpError(404, "not_found", "Merchant outlet does not exist");
   const body = exactObject(await readJson<unknown>(request), "merchantLifecycle", ["lifecycleStatus"]);
   const lifecycleStatus = oneOf(body.lifecycleStatus, "lifecycleStatus", LIFECYCLE_STATUSES);
+  // 从 retired 恢复前先确认商户筛选组仍有一个启用的：protect_used_* 只挡
+  // 「未停用」的成员，停用期间筛选组允许被整体下线；不查的话 0012 的
+  // require_merchant_active_map_filter_update 会把恢复打成没有说明的 500。
+  // （与 places/facilities 的恢复预检同构；预检与更新不在一个事务里，
+  // 窗口极小，最坏结果等于修复前的旧行为。）
+  if (before.lifecycle_status === "retired" && lifecycleStatus !== "retired") {
+    const activeFilter = await first<{ id: string }>(
+      env.DB,
+      `select m.id from map_filter_members m
+         join map_filter_categories c on c.id=m.category_id and c.active=1
+        where m.includes_merchants=1 limit 1`,
+    );
+    if (!activeFilter) {
+      throw new HttpError(
+        409,
+        "merchant_filter_inactive",
+        "The merchant map filter was deactivated while this outlet was retired; re-activate the filter first",
+      );
+    }
+  }
   await env.DB.prepare("update merchant_outlets set lifecycle_status=?,updated_at=? where id=?")
     .bind(lifecycleStatus, isoNow(), outletId).run();
   await audit(env, principal, "merchant.lifecycle.update", "merchant_outlet", outletId, requestId, before, { lifecycleStatus });

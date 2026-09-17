@@ -32,7 +32,7 @@ import {
 } from "../components/primitives";
 
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
-import { LocationEditor, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { LocationEditor, finalizeLocationDrafts, locationDraftFromApi, locationInput, mergeOutdoorLocationDrafts, type LocationDraft } from "../components/LocationEditor";
 import { sanitizeSvg } from "../../lib/svg/sanitize";
 import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
 import { markerScaleFromContent } from "../../lib/map/markerScale";
@@ -230,7 +230,7 @@ export function FacilityEditorPage() {
             floorId: floorId || null,
             quantity: parsedQuantity,
             operationalStatus,
-            locations: locationDrafts.map(locationInput),
+            locations: finalizeLocationDrafts(locationDrafts).map(locationInput),
           },
         });
         revisionId = created.revisionId;
@@ -246,7 +246,7 @@ export function FacilityEditorPage() {
             floorId: floorId || null,
             quantity: parsedQuantity,
             operationalStatus,
-            locations: locationDrafts.map(locationInput),
+            locations: finalizeLocationDrafts(locationDrafts).map(locationInput),
           },
         });
         revisionId = created.id;
@@ -285,14 +285,24 @@ export function FacilityEditorPage() {
               />
               <SelectField
                 label="所属楼宇"
-                onChange={(v) => { setHostPlaceId(v); setFloorId(""); }}
+                onChange={(v) => {
+                  setHostPlaceId(v);
+                  setFloorId("");
+                  // 服务位置草稿绑的是旧楼旧层的平面图（floorId + mapVersionId 都在
+                  // 行里），留着它会把设施标到已经不属于它的楼层图上。
+                  setLocationDrafts((rows) => rows.filter((location) => location.role !== "service_position"));
+                }}
                 options={data.places.map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
                 placeholder="选择楼宇"
                 value={hostPlaceId}
               />
               <SelectField
                 label="楼层"
-                onChange={(value) => { setFloorId(value); }}
+                onChange={(value) => {
+                  setFloorId(value);
+                  // 同上：楼层一换，服务位置草稿里的 floorId/平面图版本就过期了。
+                  setLocationDrafts((rows) => rows.filter((location) => location.role !== "service_position"));
+                }}
                 options={floors.map((f) => ({ value: f.id, label: f.displayName }))}
                 placeholder={hostPlaceId ? (floors.length ? "选择楼层" : "该楼宇暂无楼层") : "先选楼宇"}
                 value={floorId}
@@ -364,10 +374,9 @@ export function FacilityEditorPage() {
           entityPlaceId={hostPlaceId || null}
           mapVersions={data.maps}
           onChange={(rows) => {
-            setLocationDrafts((current) => [
-              ...current.filter((location) => location.role === "service_position"),
-              ...rows,
-            ]);
+            // 两个面板共写一个数组：合并只做主要位置收敛，不能丢空行——
+            // 「添加位置」追加的就是全空行，当帧滤掉按钮就废了；空行过滤在保存路径。
+            setLocationDrafts((current) => mergeOutdoorLocationDrafts(current, rows));
           }}
           roles={FACILITY_LOCATION_ROLES}
           spaces={data.spaces}

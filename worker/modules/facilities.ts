@@ -17,7 +17,8 @@ export async function listFacilities(env: Env): Promise<Response> {
     `select f.id,f.facility_type_id as facilityTypeId,t.name as facilityTypeName,f.host_place_id as hostPlaceId,
             f.floor_id as floorId,f.lifecycle_status as lifecycleStatus,
             f.operational_status as operationalStatus,f.quantity,r.id as currentRevisionId,r.display_name as displayName,r.editorial_status as editorialStatus,
-            f.last_verified_at as lastVerifiedAt,f.next_verification_due_at as nextVerificationDueAt
+            f.last_verified_at as lastVerifiedAt,f.next_verification_due_at as nextVerificationDueAt,
+            f.updated_at as updatedAt
        from facility_instances f join facility_types t on t.id=f.facility_type_id
        left join facility_revisions r on r.id=coalesce(
          (select pending.id from facility_revisions pending
@@ -166,6 +167,30 @@ export async function updateFacilityLifecycle(
   if (!before) throw new HttpError(404, "not_found", "Facility does not exist");
   const body = exactObject(await readJson<unknown>(request), "facilityLifecycle", ["lifecycleStatus"]);
   const lifecycleStatus = oneOf(body.lifecycleStatus, "lifecycleStatus", FACILITY_LIFECYCLES);
+  // 从 retired 恢复前先确认设施类型仍然可用：protect_used_map_filter_deactivation
+  // 只挡「未停用」设施的筛选组，停用期间类型可以被禁用、筛选组可以被下线；
+  // 不查的话 0012 的 require_facility_active_map_filter_update 会把恢复打成
+  // 没有说明的 500（raise(abort) 到全局处理就是 internal_error）。
+  if (before.lifecycle_status === "retired" && lifecycleStatus !== "retired") {
+    const typeInactive = await first<{ id: string }>(
+      env.DB,
+      `select f.id from facility_instances f
+        where f.id=? and not exists (
+          select 1 from facility_types t
+            join map_filter_members m on m.facility_type_id=t.id
+            join map_filter_categories c on c.id=m.category_id and c.active=1
+           where t.id=f.facility_type_id and t.status='active'
+        )`,
+      [facilityId],
+    );
+    if (typeInactive) {
+      throw new HttpError(
+        409,
+        "facility_type_inactive",
+        "This facility's type was disabled or lost its active map filter while retired; re-activate the type first",
+      );
+    }
+  }
   await env.DB.prepare("update facility_instances set lifecycle_status=?,updated_at=? where id=?")
     .bind(lifecycleStatus, isoNow(), facilityId)
     .run();

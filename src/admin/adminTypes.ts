@@ -160,6 +160,7 @@ export interface FacilityListItem {
   lifecycleStatus?: string;
   displayName?: string | null;
   editorialStatus?: EditorialStatus | null;
+  updatedAt?: string;
   [column: string]: unknown;
 }
 
