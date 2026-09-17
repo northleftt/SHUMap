@@ -23,7 +23,6 @@ export interface RevisionLocationInput {
   campusId: string | null;
   buildingPlaceId: string | null;
   floorId: string | null;
-  indoorSpaceId: string | null;
   role: LocationRole;
   geometryType: GeometryType;
   geometry: JsonObject | null;
@@ -110,7 +109,6 @@ export interface FacilityStructure {
   facilityTypeId: string;
   hostPlaceId: string | null;
   floorId: string | null;
-  indoorSpaceId: string | null;
   quantity: number | null;
   operationalStatus: "available" | "partially_available" | "unavailable" | "unknown";
   locations: RevisionLocationInput[];
@@ -143,7 +141,6 @@ export interface MerchantStructure {
   organizationId: string | null;
   hostPlaceId: string;
   floorId: string | null;
-  indoorSpaceId: string | null;
   locations: RevisionLocationInput[];
 }
 

@@ -388,7 +388,6 @@ function primaryPointLocations(manifest: ReleaseManifest): Map<string, ReleaseLo
       location.geometry_type !== "Point"
       || location.crs !== "svg_viewbox"
       || location.floor_id !== null
-      || location.indoor_space_id !== null
     ) continue;
     const key = `${location.entityType}:${location.entityId}`;
     const list = candidates.get(key) ?? [];

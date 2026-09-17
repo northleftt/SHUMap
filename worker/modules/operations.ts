@@ -21,13 +21,12 @@ import { planLocation } from "./locations";
 const EVENT_TYPES = ["maintenance", "activity", "closure", "notice"] as const;
 const EVENT_SEVERITIES = ["info", "warning", "critical"] as const;
 const EVENT_TARGET_TYPES = [
-  "place", "floor", "space", "facility", "merchant_outlet", "transit_stop", "transit_route", "transit_trip", "map_feature",
+  "place", "floor", "facility", "merchant_outlet", "transit_stop", "transit_route", "transit_trip", "map_feature",
 ] as const;
 const EVENT_LOCATION_ROLES = ["event_location", "impact_area", "route_shape"] as const;
 const EVENT_TARGET_TABLES: Record<(typeof EVENT_TARGET_TYPES)[number], string> = {
   place: "places",
   floor: "floors",
-  space: "indoor_spaces",
   facility: "facility_instances",
   merchant_outlet: "merchant_outlets",
   transit_stop: "transit_stops",

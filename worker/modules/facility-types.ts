@@ -133,7 +133,6 @@ interface FacilityTypeInstanceRow {
   floorId: string | null;
   floorName: string | null;
   floorLevelCode: string | null;
-  spaceName: string | null;
   editorialStatus: string | null;
 }
 
@@ -213,7 +212,7 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
                 (select r2.display_name from place_revisions r2 where r2.place_id=pl.id order by r2.revision_no desc limit 1)
               ) as placeName,
               f.floor_id as floorId,fl.display_name as floorName,fl.level_code as floorLevelCode,
-              sp.display_name as spaceName,fr.editorial_status as editorialStatus
+              fr.editorial_status as editorialStatus
          from facility_instances f
          join facility_types t on t.id=f.facility_type_id
          left join facility_revisions fr on fr.id=coalesce(
@@ -223,7 +222,6 @@ export async function listFacilityTypes(env: Env): Promise<Response> {
          left join places pl on pl.id=f.host_place_id
          left join place_revisions pr on pr.id=pl.current_revision_id
          left join floors fl on fl.id=f.floor_id
-         left join indoor_spaces sp on sp.id=f.indoor_space_id
         order by t.name,placeName,fl.level_order,displayName`,
     ),
     all<{ iconKey: string; label: string; status: string }>(

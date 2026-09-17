@@ -81,7 +81,7 @@ test("listMapImportJobs returns parsed payload fields and joined file name", asy
     `insert into jobs(id,job_type,idempotency_key,status,payload_json,attempt_count,error_message,created_at,started_at,finished_at)
      values('job_a','map_import','key-a','failed',?,2,'missing footprint',?,?,?)`,
   ).run(
-    JSON.stringify({ mediaAssetId: "media_a", campusId: "campus_a", floorId: null, versionLabel: "2026-08-01" }),
+    JSON.stringify({ mediaAssetId: "media_a", campusId: "campus_a", versionLabel: "2026-08-01" }),
     now,
     now,
     now,
@@ -144,7 +144,7 @@ test("listMapImportJobs parses anchorReview from succeeded job result", async ()
     `insert into jobs(id,job_type,idempotency_key,status,payload_json,result_json,attempt_count,created_at)
      values('job_ok','map_import','key-ok','succeeded',?,?,0,?)`,
   ).run(
-    JSON.stringify({ mediaAssetId: "media_x", campusId: "campus_a", floorId: null, versionLabel: "v1" }),
+    JSON.stringify({ mediaAssetId: "media_x", campusId: "campus_a", versionLabel: "v1" }),
     JSON.stringify({
       mapVersionId: "mapver_x",
       featureCount: 10,

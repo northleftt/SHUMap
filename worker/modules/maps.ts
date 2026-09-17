@@ -6,7 +6,9 @@ import { isoNow, jsonString, makeId, optionalString, requiredString, sha256 } fr
 import { audit } from "./audit";
 
 interface CreateMapUploadBody {
-  assetType: "campus_svg" | "floor_svg" | "floor_image" | "geojson" | "source_cad" | "source_bim" | "source_pdf";
+  // floor_svg / floor_image 已随楼层图 SVG 链路一起废弃（0032）：楼层平面图走
+  // PUT /api/admin/floors/:id/image 直传位图，不再进导入管线。
+  assetType: "campus_svg" | "geojson" | "source_cad" | "source_bim" | "source_pdf";
   originalName: string;
   contentType: string;
   byteSize: number;
@@ -18,11 +20,10 @@ interface CreateMapUploadBody {
 interface CreateImportJobBody {
   mediaAssetId: string;
   campusId?: string | null;
-  floorId?: string | null;
   versionLabel: string;
 }
 
-const ASSET_TYPES = ["campus_svg", "floor_svg", "floor_image", "geojson", "source_cad", "source_bim", "source_pdf"];
+const ASSET_TYPES = ["campus_svg", "geojson", "source_cad", "source_bim", "source_pdf"];
 const IMPORT_CONTENT_TYPES = new Set(["image/svg+xml", "image/png", "image/jpeg", "application/pdf", "application/json", "application/octet-stream"]);
 const MAX_MAP_ASSET_BYTES = 50 * 1024 * 1024;
 
@@ -87,11 +88,7 @@ export async function enqueueMapImport(
 ): Promise<Response> {
   const body = await readJson<CreateImportJobBody>(request);
   const mediaAssetId = requiredString(body.mediaAssetId, "mediaAssetId", 100);
-  const campusId = optionalString(body.campusId, "campusId", 100);
-  const floorId = optionalString(body.floorId, "floorId", 100);
-  if ((campusId ? 1 : 0) + (floorId ? 1 : 0) !== 1) {
-    throw new HttpError(400, "validation_error", "Exactly one of campusId or floorId is required");
-  }
+  const campusId = requiredString(body.campusId, "campusId", 100);
   const media = await first<{ id: string; status: string; content_type: string }>(
     env.DB,
     "select id,status,content_type from media_assets where id=?",
@@ -101,17 +98,14 @@ export async function enqueueMapImport(
   if (media.content_type !== "image/svg+xml") {
     throw new HttpError(415, "unsupported_media_type", "Map import requires an SVG media asset");
   }
-  await Promise.all([
-    assertExists(env.DB, "campuses", campusId, "Campus"),
-    assertExists(env.DB, "floors", floorId, "Floor"),
-  ]);
+  await assertExists(env.DB, "campuses", campusId, "Campus");
   const versionLabel = requiredString(body.versionLabel, "versionLabel", 100);
-  const payload = { mediaAssetId, campusId, floorId, versionLabel };
+  const payload = { mediaAssetId, campusId, versionLabel };
   const idempotencyKey = await sha256(jsonString(payload));
   const existing = await first<{ id: string; status: string }>(env.DB, "select id,status from jobs where idempotency_key=?", [idempotencyKey]);
   if (existing) return json(existing, { status: 202 });
   const jobId = makeId("job");
-  const jobType = floorId ? "floor_import" : "map_import";
+  const jobType = "map_import";
   await env.DB.prepare(
     `insert into jobs(id,job_type,idempotency_key,status,payload_json,attempt_count,created_by,created_at)
      values(?,?,?,'queued',?,0,?,?)`,

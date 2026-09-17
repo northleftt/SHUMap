@@ -2,7 +2,7 @@ import { Map as MapIcon, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { parseSvgFeatures } from "../../../shared/svg-geometry.mjs";
 import * as admin from "../../lib/api/admin";
-import type { Floor, MapLifecycleStatus, MapVersion, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
+import type { MapLifecycleStatus, MapVersion, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   Chip,
   EmptyState,
@@ -75,10 +75,7 @@ export function MapsPage() {
   }, []);
 
   const [campusFilter, setCampusFilter] = useState("all");
-  const [targetKind, setTargetKind] = useState<"campus" | "floor">("campus");
   const [campusId, setCampusId] = useState("");
-  const [buildingPlaceId, setBuildingPlaceId] = useState("");
-  const [floorId, setFloorId] = useState("");
   const [versionLabel, setVersionLabel] = useState("");
   const [sourceId, setSourceId] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -120,13 +117,11 @@ export function MapsPage() {
     return () => clearInterval(timer);
   }, [hasActiveJobs, reload]);
 
-  // 文件与目标都选定后，与当前 published 版本做 diff 预览
+  // 文件与校区都选定后，与当前 published 版本做 diff 预览
   useEffect(() => {
     const maps = state.status === "ready" ? state.data.maps : null;
-    const targetCampusId = targetKind === "campus" && campusId ? campusId : null;
-    const targetFloorId = targetKind === "floor" && floorId ? floorId : null;
     setDiff(null);
-    if (!file || !maps || (!targetCampusId && !targetFloorId)) return;
+    if (!file || !maps || !campusId) return;
     let stale = false;
     const controller = new AbortController();
     void (async () => {
@@ -135,9 +130,7 @@ export function MapsPage() {
         // 与 worker 导入共用同一解析器，保证预览的图形集合就是实际导入的集合
         const features = parseSvgFeatures(text);
         const published = maps.find(
-          (version) =>
-            version.lifecycleStatus === "published" &&
-            (targetCampusId ? version.campusId === targetCampusId : version.floorId === targetFloorId),
+          (version) => version.lifecycleStatus === "published" && version.campusId === campusId,
         );
         if (!published) {
           if (!stale) setDiff({ kind: "first-version", addedCount: features.length });
@@ -163,7 +156,7 @@ export function MapsPage() {
       stale = true;
       controller.abort();
     };
-  }, [file, targetKind, campusId, floorId, state]);
+  }, [file, campusId, state]);
 
   if (state.status === "loading") return <LoadingState label="加载底图版本…" />;
   if (state.status === "error") return <ErrorBanner message={state.message} />;
@@ -179,9 +172,6 @@ export function MapsPage() {
   };
   const floorById = new Map(floors.map((f) => [f.id, f]));
   const buildingByPlaceId = new Map(buildings.map((b) => [b.placeId, b]));
-  const floorOptions: Floor[] = buildingPlaceId
-    ? floors.filter((f) => f.buildingPlaceId === buildingPlaceId)
-    : [];
 
   /** 楼层版本的 campus_id 为 null（schema 二选一约束），归属校区经楼宇解析。 */
   function versionCampusId(version: MapVersion): string | null {
@@ -229,8 +219,7 @@ export function MapsPage() {
 
   async function startImport() {
     if (!file) { setError("请先选择 SVG 文件"); return; }
-    if (targetKind === "campus" && !campusId) { setError("请选择校区"); return; }
-    if (targetKind === "floor" && !floorId) { setError("请选择楼宇与楼层"); return; }
+    if (!campusId) { setError("请选择校区"); return; }
     if (!versionLabel.trim()) { setError("请填写版本号"); return; }
     setBusy(true);
     setError("");
@@ -245,7 +234,7 @@ export function MapsPage() {
       const hash = await sha256Hex(bytes);
       setProgress("创建上传意图…");
       const intent = await admin.createMapUploadIntent({
-        assetType: targetKind === "floor" ? "floor_svg" : "campus_svg",
+        assetType: "campus_svg",
         originalName: file.name,
         contentType: "image/svg+xml",
         byteSize: bytes.byteLength,
@@ -255,11 +244,10 @@ export function MapsPage() {
       setProgress("上传底图内容…");
       await admin.uploadMediaContent(intent.mediaAssetId, bytes, "image/svg+xml");
       setProgress("创建导入任务…");
-      // map_versions 的 check 约束是 campus_id / floor_id 二选一，import-jobs 同样要求恰好一个。
+      // 楼层平面图已改为位图直传（楼层管理页），这里只导入校区底图，campusId 必填。
       await admin.createImportJob({
         mediaAssetId: intent.mediaAssetId,
-        campusId: targetKind === "campus" ? campusId : null,
-        floorId: targetKind === "floor" ? floorId : null,
+        campusId,
         versionLabel: versionLabel.trim(),
       });
       setProgress("已提交导入，正在后台处理，完成后版本会显示为就绪。");
@@ -333,47 +321,17 @@ export function MapsPage() {
                 type="file"
               />
             </label>
-            {/* 目标二选一：校区底图 或 某楼宇的某楼层平面图（map_versions 的 check 约束） */}
-            <div className="flex gap-2">
-              <Chip active={targetKind === "campus"} onClick={() => { setTargetKind("campus"); setError(""); }}>校区底图</Chip>
-              <Chip active={targetKind === "floor"} onClick={() => { setTargetKind("floor"); setError(""); }}>楼层平面图</Chip>
+            {/* 目标只有校区底图；楼层平面图在「楼层管理」页按层上传位图 */}
+            <div className="grid grid-cols-2 gap-3">
+              <SelectField
+                label="校区"
+                onChange={setCampusId}
+                options={campuses.map((c) => ({ value: c.id, label: c.name }))}
+                placeholder="选择校区"
+                value={campusId}
+              />
+              <Field label="版本号" onChange={setVersionLabel} placeholder="如 2026-07-01" value={versionLabel} />
             </div>
-            {targetKind === "campus" ? (
-              <div className="grid grid-cols-2 gap-3">
-                <SelectField
-                  label="校区"
-                  onChange={setCampusId}
-                  options={campuses.map((c) => ({ value: c.id, label: c.name }))}
-                  placeholder="选择校区"
-                  value={campusId}
-                />
-                <Field label="版本号" onChange={setVersionLabel} placeholder="如 2026-07-01" value={versionLabel} />
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <SelectField
-                    label="楼宇"
-                    onChange={(value) => { setBuildingPlaceId(value); setFloorId(""); }}
-                    options={buildings.map((b) => ({
-                      value: b.placeId,
-                      label: `${b.displayName ?? b.placeId}${b.campusId ? ` · ${campusName(b.campusId).replace("校区", "")}` : ""}`,
-                    }))}
-                    placeholder="选择楼宇"
-                    value={buildingPlaceId}
-                  />
-                  <SelectField
-                    disabled={!buildingPlaceId}
-                    label="楼层"
-                    onChange={setFloorId}
-                    options={floorOptions.map((f) => ({ value: f.id, label: f.displayName || f.levelCode }))}
-                    placeholder={buildingPlaceId && floorOptions.length === 0 ? "该楼宇暂无楼层" : "选择楼层"}
-                    value={floorId}
-                  />
-                </div>
-                <Field label="版本号" onChange={setVersionLabel} placeholder="如 2026-07-01" value={versionLabel} />
-              </>
-            )}
             <SelectField
               label="数据来源（可选）"
               onChange={setSourceId}

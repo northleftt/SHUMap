@@ -214,6 +214,7 @@ export async function publicPlace(env: Env, placeId: string): Promise<Response> 
       levelCode: floor.levelCode,
       levelOrder: floor.levelOrder,
       displayName: floor.displayName,
+      imageUrl: floor.imageUrl,
     }));
   return json({
     releaseId: manifest.release.id,

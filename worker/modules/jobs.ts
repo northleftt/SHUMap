@@ -21,8 +21,7 @@ interface JobRow {
 
 interface ImportPayload {
   mediaAssetId: string;
-  campusId: string | null;
-  floorId: string | null;
+  campusId: string;
   versionLabel: string;
 }
 
@@ -47,17 +46,15 @@ interface ImportedFeature extends ParsedSvgFeature {
   shapeHash: string | null;
 }
 
-const IMPORT_PAYLOAD_KEYS = new Set(["mediaAssetId", "campusId", "floorId", "versionLabel"]);
+// 楼层图自 0032 起不再有导入任务（每层一张图片直接挂在 floors.image_media_id），
+// 队列里只剩校区图导入一种。旧 floor_import 任务的 payload 带 floorId 字段，
+// 会撞下面的键白名单而确定性失败 —— 这正是想要的终态，不必兼容。
+const IMPORT_PAYLOAD_KEYS = new Set(["mediaAssetId", "campusId", "versionLabel"]);
 const MAX_MAP_ASSET_BYTES = 50 * 1024 * 1024;
 
 function requiredJobString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.trim()) throw new ImportValidationError(`Map import ${field} must be a non-empty string`);
   return value.trim();
-}
-
-function optionalJobId(value: unknown, field: string): string | null {
-  if (value === null) return null;
-  return requiredJobString(value, field);
 }
 
 function parseImportPayload(job: JobRow): ImportPayload {
@@ -74,22 +71,11 @@ function parseImportPayload(job: JobRow): ImportPayload {
   for (const key of Object.keys(record)) {
     if (!IMPORT_PAYLOAD_KEYS.has(key)) throw new ImportValidationError(`Map import payload contains unsupported field ${key}`);
   }
-  const payload = {
+  return {
     mediaAssetId: requiredJobString(record.mediaAssetId, "mediaAssetId"),
-    campusId: optionalJobId(record.campusId, "campusId"),
-    floorId: optionalJobId(record.floorId, "floorId"),
+    campusId: requiredJobString(record.campusId, "campusId"),
     versionLabel: requiredJobString(record.versionLabel, "versionLabel"),
   };
-  if (Number(payload.campusId !== null) + Number(payload.floorId !== null) !== 1) {
-    throw new ImportValidationError("Map import payload must identify exactly one campus or floor");
-  }
-  if (job.job_type === "map_import" && payload.campusId === null) {
-    throw new ImportValidationError("Campus map import payload has no campusId");
-  }
-  if (job.job_type === "floor_import" && payload.floorId === null) {
-    throw new ImportValidationError("Floor map import payload has no floorId");
-  }
-  return payload;
 }
 
 export async function processQueue(batch: MessageBatch<QueueJobMessage>, env: Env): Promise<void> {
@@ -162,8 +148,7 @@ function importedStableKey(
 ): string {
   if (footprint) return `place:${footprint.placeId}`;
   if (previous?.stableFeatureKey) return previous.stableFeatureKey;
-  const target = payload.campusId ? `campus:${payload.campusId}` : `floor:${payload.floorId}`;
-  return `${target}:svg:${feature.sourceElementId}`;
+  return `campus:${payload.campusId}:svg:${feature.sourceElementId}`;
 }
 
 async function processMapImport(env: Env, job: JobRow): Promise<void> {
@@ -212,10 +197,10 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
   const previousVersion = await first<{ id: string; coordinateSpaceJson: string }>(
     env.DB,
     `select id,coordinate_space_json as coordinateSpaceJson from map_versions
-      where coalesce(campus_id,'')=coalesce(?,'') and coalesce(floor_id,'')=coalesce(?,'')
+      where campus_id=? and floor_id is null
         and lifecycle_status in ('ready','published','archived')
       order by created_at desc,id desc limit 1`,
-    [payload.campusId, payload.floorId],
+    [payload.campusId],
   );
   const previousFeatures = previousVersion
     ? await all<PreviousFeatureRow>(
@@ -226,21 +211,19 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
     )
     : [];
   const previousBySourceId = new Map(previousFeatures.map((feature) => [feature.sourceElementId, feature]));
-  const activeFootprints = payload.campusId
-    ? await all<FootprintBindingRow>(
-      env.DB,
-      `select mf.id as featureId,mf.source_element_id as sourceElementId,el.entity_id as placeId,
-              la.id as anchorId,el.id as bindingId,la.campus_id as campusId,el.is_primary as isPrimary
-         from map_features mf
-         join map_versions mv on mv.id=mf.map_version_id and mv.floor_id is null
-         join location_anchors la on la.map_feature_id=mf.id and la.role='footprint' and la.valid_to is null
-         join entity_locations el on el.anchor_id=la.id and el.entity_type='place'
-              and el.role='footprint' and el.valid_to is null
-         join buildings b on b.place_id=el.entity_id and b.place_id=la.building_place_id
-        where mv.campus_id=? and la.campus_id=? and mf.source_element_id is not null`,
-      [payload.campusId, payload.campusId],
-    )
-    : [];
+  const activeFootprints = await all<FootprintBindingRow>(
+    env.DB,
+    `select mf.id as featureId,mf.source_element_id as sourceElementId,el.entity_id as placeId,
+            la.id as anchorId,el.id as bindingId,la.campus_id as campusId,el.is_primary as isPrimary
+       from map_features mf
+       join map_versions mv on mv.id=mf.map_version_id and mv.floor_id is null
+       join location_anchors la on la.map_feature_id=mf.id and la.role='footprint' and la.valid_to is null
+       join entity_locations el on el.anchor_id=la.id and el.entity_type='place'
+            and el.role='footprint' and el.valid_to is null
+       join buildings b on b.place_id=el.entity_id and b.place_id=la.building_place_id
+      where mv.campus_id=? and la.campus_id=? and mf.source_element_id is not null`,
+    [payload.campusId, payload.campusId],
+  );
   const footprintBySourceId = footprintBindings(activeFootprints);
   const importedSourceIds = new Set(features.map((feature) => feature.sourceElementId));
   const missingFootprints = activeFootprints
@@ -253,11 +236,11 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
 
   const statements = [
     env.DB.prepare("insert into map_assets(id,asset_type,media_asset_id,checksum,metadata_json,created_at) values(?,?,?,?,?,?)")
-      .bind(mapAssetId, payload.floorId ? "floor_svg" : "campus_svg", media.id, media.sha256, jsonString({ importJobId: job.id }), now),
+      .bind(mapAssetId, "campus_svg", media.id, media.sha256, jsonString({ importJobId: job.id }), now),
     env.DB.prepare(
       `insert into map_versions(id,campus_id,floor_id,map_asset_id,parent_version_id,version_label,coordinate_space_type,coordinate_space_json,parser_version,lifecycle_status,created_at)
-       values(?,?,?,?,?,?,'svg_viewbox',?,'svg-geometry-v3','ready',?)`,
-    ).bind(mapVersionId, payload.campusId, payload.floorId, mapAssetId, previousVersion?.id ?? null, payload.versionLabel, jsonString(coordinateSpace), now),
+       values(?,?,null,?,?,?,'svg_viewbox',?,'svg-geometry-v3','ready',?)`,
+    ).bind(mapVersionId, payload.campusId, mapAssetId, previousVersion?.id ?? null, payload.versionLabel, jsonString(coordinateSpace), now),
   ];
 
   for (const feature of features) {
@@ -319,29 +302,27 @@ async function processMapImport(env: Env, job: JobRow): Promise<void> {
   }
   // 换底图后，仍停留在旧坐标系的手工标注（设施点/影响区等 svg_viewbox 非 footprint 锚点）
   // 默认不随导入迁移——列进 result_json，由管理端任务卡片提示人工重新选点（见 MapsPage）。
-  const anchorReviewRows = payload.campusId
-    ? await all<{ id: string; role: string; entityType: string; entityId: string; entityName: string | null; mapVersionId: string | null }>(
-      env.DB,
-      `select la.id,la.role,el.entity_type as entityType,el.entity_id as entityId,la.map_version_id as mapVersionId,
-              coalesce((select pn.name from place_names pn
-                         where pn.place_id=el.entity_id and el.entity_type='place' and pn.name_type='primary' limit 1),
-                       (select ft.name from facility_instances fi
-                         join facility_types ft on ft.id=fi.facility_type_id
-                         where fi.id=el.entity_id and el.entity_type='facility' limit 1)) as entityName
-         from location_anchors la
-         join entity_locations el on el.anchor_id=la.id and el.valid_to is null
-        where la.campus_id=? and la.valid_to is null and la.crs='svg_viewbox' and la.role<>'footprint'
-          and (la.map_version_id is null or la.map_version_id<>?)
-        order by la.role,la.id`,
-      [payload.campusId, mapVersionId],
-    )
-    : [];
+  const anchorReviewRows = await all<{ id: string; role: string; entityType: string; entityId: string; entityName: string | null; mapVersionId: string | null }>(
+    env.DB,
+    `select la.id,la.role,el.entity_type as entityType,el.entity_id as entityId,la.map_version_id as mapVersionId,
+            coalesce((select pn.name from place_names pn
+                       where pn.place_id=el.entity_id and el.entity_type='place' and pn.name_type='primary' limit 1),
+                     (select ft.name from facility_instances fi
+                       join facility_types ft on ft.id=fi.facility_type_id
+                       where fi.id=el.entity_id and el.entity_type='facility' limit 1)) as entityName
+       from location_anchors la
+       join entity_locations el on el.anchor_id=la.id and el.valid_to is null
+      where la.campus_id=? and la.valid_to is null and la.crs='svg_viewbox' and la.role<>'footprint'
+        and (la.map_version_id is null or la.map_version_id<>?)
+      order by la.role,la.id`,
+    [payload.campusId, mapVersionId],
+  );
   // 画布坐标系没变（coordinate_space_json 逐字节一致 = 同一 viewBox）时旧坐标逐点有效：
   // 仍指向旧版本的锚点直接改挂新版本；未绑版本的 campus 级标注也不需复核。只有画布
   // 真有平移/缩放才维持人工重新选点。
   let anchorAutoMigrated: typeof anchorReviewRows = [];
   let anchorReview = anchorReviewRows;
-  if (payload.campusId && anchorReviewRows.length > 0) {
+  if (anchorReviewRows.length > 0) {
     const newSpaceJson = jsonString(coordinateSpace);
     const oldVersionIds = [...new Set(anchorReviewRows.map((row) => row.mapVersionId).filter((id): id is string => id !== null))];
     const sameSpaceVersions = new Set(

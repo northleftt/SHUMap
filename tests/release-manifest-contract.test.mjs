@@ -122,6 +122,7 @@ function manifestFixture() {
       levelOrder: 1,
       displayName: "一层",
       isPublic: 1,
+      imageUrl: null,
     }],
     facilityTypes: [{
       id: "facility_type_printer",
@@ -172,6 +173,19 @@ function manifestFixture() {
 
 test("release manifest parser accepts the complete contract", () => {
   assert.deepEqual(parseReleaseManifest(manifestFixture()), manifestFixture());
+});
+
+test("floor imageUrl is optional and absent means no image", () => {
+  // 0032 起 worker 只在楼层有图时输出 imageUrl（旧版小程序的 floors exactObject
+  // 白名单没有这个键，无条件输出会让旧客户端解析失败）；缺键按无图解析。
+  const value = manifestFixture();
+  delete value.floors[0].imageUrl;
+  assert.equal(parseReleaseManifest(value).floors[0].imageUrl, null);
+  assert.equal(parseReleaseManifest(manifestFixture()).floors[0].imageUrl, null, "显式 null 存量照常解析");
+
+  const withImage = manifestFixture();
+  withImage.floors[0].imageUrl = "/api/public/media/media_floor_1";
+  assert.equal(parseReleaseManifest(withImage).floors[0].imageUrl, "/api/public/media/media_floor_1");
 });
 
 test("release manifest parser rejects missing fields", () => {

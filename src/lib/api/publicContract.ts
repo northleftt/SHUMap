@@ -46,7 +46,7 @@ const EVENT_TYPES = ["maintenance", "activity", "closure", "notice"] as const;
 const EVENT_SEVERITIES = ["info", "warning", "critical"] as const;
 const EVENT_STATUSES = ["scheduled", "active", "resolved", "cancelled", "expired"] as const;
 const EVENT_TARGET_TYPES = [
-  "place", "floor", "space", "facility", "merchant_outlet", "transit_stop", "transit_route", "transit_trip", "map_feature",
+  "place", "floor", "facility", "merchant_outlet", "transit_stop", "transit_route", "transit_trip", "map_feature",
 ] as const;
 const EVENT_LOCATION_ROLES = ["event_location", "impact_area", "route_shape"] as const;
 const EVENT_GEOMETRY_TYPES = ["Point", "Polygon", "LineString"] as const;

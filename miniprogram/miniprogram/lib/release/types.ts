@@ -72,6 +72,8 @@ export interface ReleaseFloor {
   levelOrder: number;
   displayName: string;
   isPublic: 0 | 1;
+  /** 楼层平面位图（站内相对路径 /api/public/media/…）；该层无图纸为 null。 */
+  imageUrl: string | null;
 }
 
 export interface ReleaseFacilityType {

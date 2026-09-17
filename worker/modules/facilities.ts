@@ -15,7 +15,7 @@ export async function listFacilities(env: Env): Promise<Response> {
   const items = await all(
     env.DB,
     `select f.id,f.facility_type_id as facilityTypeId,t.name as facilityTypeName,f.host_place_id as hostPlaceId,
-            f.floor_id as floorId,f.indoor_space_id as indoorSpaceId,f.lifecycle_status as lifecycleStatus,
+            f.floor_id as floorId,f.lifecycle_status as lifecycleStatus,
             f.operational_status as operationalStatus,f.quantity,r.id as currentRevisionId,r.display_name as displayName,r.editorial_status as editorialStatus,
             f.last_verified_at as lastVerifiedAt,f.next_verification_due_at as nextVerificationDueAt
        from facility_instances f join facility_types t on t.id=f.facility_type_id
@@ -75,20 +75,20 @@ export async function createFacilityHandler(
 ): Promise<Response> {
   const revision = normalizeFacilityRevision(await readJson<unknown>(request));
   await validateFacilityRevision(env, revision);
-  const { facilityTypeId, hostPlaceId, floorId, indoorSpaceId, quantity, operationalStatus, locations } = revision.structure;
+  const { facilityTypeId, hostPlaceId, floorId, quantity, operationalStatus, locations } = revision.structure;
 
   const facilityId = makeId("facility");
   const revisionId = makeId("frev");
   const now = isoNow();
   const contentJson = jsonString(revision.content);
-  const structureJson = jsonString({ facilityTypeId, hostPlaceId, floorId, indoorSpaceId, quantity, operationalStatus, locations });
+  const structureJson = jsonString({ facilityTypeId, hostPlaceId, floorId, quantity, operationalStatus, locations });
   const serviceHoursJson = revision.serviceHours === null ? null : jsonString(revision.serviceHours);
   const contentHash = await sha256(`${revision.displayName}\n${serviceHoursJson ?? ""}\n${contentJson}\n${structureJson}`);
   await env.DB.batch([
     env.DB.prepare(
-      `insert into facility_instances(id,facility_type_id,host_place_id,floor_id,indoor_space_id,lifecycle_status,approval_pending,operational_status,quantity,created_at,updated_at)
-       values(?,?,?,?,?,'planned',1,?,?,?,?)`,
-    ).bind(facilityId, facilityTypeId, hostPlaceId, floorId, indoorSpaceId, operationalStatus, quantity, now, now),
+      `insert into facility_instances(id,facility_type_id,host_place_id,floor_id,lifecycle_status,approval_pending,operational_status,quantity,created_at,updated_at)
+       values(?,?,?,?,'planned',1,?,?,?,?)`,
+    ).bind(facilityId, facilityTypeId, hostPlaceId, floorId, operationalStatus, quantity, now, now),
     env.DB.prepare(
       `insert into facility_revisions(id,facility_id,revision_no,editorial_status,display_name,service_hours_json,content_json,structure_json,source_id,content_hash,created_by,created_at)
        values(?,?,1,'draft',?,?,?,?,?,?,?,?)`,

@@ -13,7 +13,7 @@ const sql = fs.readdirSync(migrationsDir)
 
 const requiredTables = [
   "users", "roles", "sessions", "audit_events", "data_sources", "media_assets", "campuses", "places", "place_revisions",
-  "buildings", "floors", "indoor_spaces", "map_assets", "map_versions", "map_features", "location_anchors", "entity_locations",
+  "buildings", "floors", "map_assets", "map_versions", "map_features", "location_anchors", "entity_locations",
   "facility_types", "facility_instances", "facility_revisions", "merchant_outlets", "merchant_revisions", "operational_events",
   "campaigns", "transit_stops", "transit_routes", "transit_patterns", "service_calendars", "transit_trips", "transit_stop_times",
   "content_submissions", "submission_reviews", "collection_tasks", "public_rate_limits", "analytics_events", "verification_records", "releases", "release_items", "search_documents", "jobs",
