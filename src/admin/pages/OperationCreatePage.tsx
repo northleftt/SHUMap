@@ -251,7 +251,6 @@ export function OperationCreatePage() {
       campusId: campusRow.id,
       buildingPlaceId: null,
       floorId: null,
-      indoorSpaceId: null,
       mapVersionId: mapVersion.id,
       mapFeatureId: null,
       crs: "svg_viewbox",

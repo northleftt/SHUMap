@@ -16,6 +16,7 @@ import type { LoadedRelease } from "../../lib/release/mapData";
 import { addSubmission } from "../../lib/submissions-log";
 import type { MapBuilding, TransitStop } from "../../lib/release/types";
 import { APP_SHARE_TITLE, enableShareMenus, sharePath } from "../../lib/share";
+import { recordPageView } from "../../lib/analytics";
 
 type FeedbackType = "correction" | "new_place" | "shuttle" | "other";
 type PhotoStatus = "uploading" | "done" | "error";
@@ -89,6 +90,7 @@ Page({
 
   onLoad() {
     enableShareMenus();
+    recordPageView("feedback");
     this.loadedRelease = null as LoadedRelease | null;
     // buildings / stops 保留给回归脚本与旧调用点；选择器本身走下面两个目标集合。
     this.buildings = [] as MapBuilding[];

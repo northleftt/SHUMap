@@ -1,5 +1,6 @@
 // 校外 Tab。对标 Web 端 src/pages/offcampus/OffCampusPage.tsx（预留占位，形态待定）。
 import { APP_SHARE_TITLE, enableShareMenus, sharePath } from "../../lib/share";
+import { recordPageView } from "../../lib/analytics";
 
 Page({
   onLoad() {
@@ -10,6 +11,7 @@ Page({
   onShow() {
     const tabBar = this.getTabBar?.();
     if (tabBar) tabBar.setData({ selected: 2 });
+    recordPageView("offcampus");
   },
 
   /** 转发：本页仍是占位，卡片落到地图首页（内容成形后再改成本页深链）。 */

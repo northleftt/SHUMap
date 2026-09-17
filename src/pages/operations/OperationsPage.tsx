@@ -5,6 +5,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusPill, type StatusTone } from "../../components/ui/StatusPill";
 import { severityOf } from "../../components/ui/SeverityBanner";
 import type { OperationalEvent } from "../../lib/api/types";
+import { usePageView } from "../../lib/analytics";
 import { useNow } from "../../lib/hooks/useNow";
 import { useOperations } from "../../lib/hooks/useOperations";
 import { releaseFacilitiesForPlace } from "../../lib/release/mapData";
@@ -68,6 +69,7 @@ export function OperationsPage() {
   const operations = useOperations();
   const releaseState = useRelease();
   const now = useNow(60_000);
+  usePageView("operations");
 
   if (releaseState.status === "loading") {
     return (

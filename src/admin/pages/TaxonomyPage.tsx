@@ -391,7 +391,7 @@ function InstanceList({ instances, canEdit }: { instances: FacilityTypeInstanceR
               <td className="px-3 py-2.5 text-body text-ink">{instance.displayName}</td>
               <td className="px-3 py-2.5 text-aux text-sub">{instance.placeName ?? "未关联楼宇"}</td>
               <td className="px-3 py-2.5 text-aux text-sub">
-                {[instance.floorName ?? instance.floorLevelCode, instance.spaceName].filter(Boolean).join(" · ") || "—"}
+                {instance.floorName ?? instance.floorLevelCode ?? "—"}
               </td>
               <td className="px-3 py-2.5">
                 <span className="flex flex-wrap items-center gap-1.5">

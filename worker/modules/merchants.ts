@@ -10,7 +10,7 @@ import { listEntityLocations } from "./locations";
 export async function listMerchants(env: Env): Promise<Response> {
   const items = await all(
     env.DB,
-    `select m.id,m.organization_id as organizationId,m.host_place_id as hostPlaceId,m.floor_id as floorId,m.indoor_space_id as indoorSpaceId,
+    `select m.id,m.organization_id as organizationId,m.host_place_id as hostPlaceId,m.floor_id as floorId,
             m.lifecycle_status as lifecycleStatus,r.id as currentRevisionId,r.display_name as displayName,r.business_type as businessType,
             r.editorial_status as editorialStatus,m.created_at as createdAt,m.updated_at as updatedAt
        from merchant_outlets m left join merchant_revisions r on r.id=coalesce(
@@ -51,18 +51,18 @@ export async function createMerchant(
 ): Promise<Response> {
   const revision = normalizeMerchantRevision(await readJson<unknown>(request));
   await validateMerchantRevision(env, revision);
-  const { organizationId, hostPlaceId, floorId, indoorSpaceId, locations } = revision.structure;
+  const { organizationId, hostPlaceId, floorId, locations } = revision.structure;
   const id = makeId("merchant");
   const revisionId = makeId("mrev");
   const now = isoNow();
   const openingHours = revision.openingHours === null ? null : jsonString(revision.openingHours);
   const contact = revision.contact === null ? null : jsonString(revision.contact);
   const contentJson = jsonString(revision.content);
-  const structureJson = jsonString({ organizationId, hostPlaceId, floorId, indoorSpaceId, locations });
+  const structureJson = jsonString({ organizationId, hostPlaceId, floorId, locations });
   const contentHash = await sha256(`${revision.displayName}\n${openingHours ?? ""}\n${contact ?? ""}\n${contentJson}\n${structureJson}`);
   await env.DB.batch([
-    env.DB.prepare(`insert into merchant_outlets(id,organization_id,host_place_id,floor_id,indoor_space_id,lifecycle_status,approval_pending,created_at,updated_at)
-      values(?,?,?,?,?,'planned',1,?,?)`).bind(id, organizationId, hostPlaceId, floorId, indoorSpaceId, now, now),
+    env.DB.prepare(`insert into merchant_outlets(id,organization_id,host_place_id,floor_id,lifecycle_status,approval_pending,created_at,updated_at)
+      values(?,?,?,?,'planned',1,?,?)`).bind(id, organizationId, hostPlaceId, floorId, now, now),
     env.DB.prepare(`insert into merchant_revisions(id,outlet_id,revision_no,editorial_status,display_name,business_type,opening_hours_json,contact_json,content_json,structure_json,source_id,content_hash,created_by,created_at)
       values(?,?,1,'draft',?,?,?,?,?,?,?,?,?,?)`).bind(revisionId, id, revision.displayName, revision.businessType, openingHours, contact, contentJson, structureJson, revision.sourceId, contentHash, principal.userId, now),
   ]);

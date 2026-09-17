@@ -159,7 +159,6 @@ function seedImport(database, bytes, { byteSize = bytes.byteLength, digest = sha
   ).run(JSON.stringify({
     mediaAssetId: "media_import",
     campusId: "campus_import",
-    floorId: null,
     versionLabel: "imported",
   }), now);
 }

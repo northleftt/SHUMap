@@ -292,10 +292,10 @@ async function applyFacilityStructure(
   revision: FacilityRevisionWrite,
   now: string,
 ): Promise<D1PreparedStatement[]> {
-  const { facilityTypeId, hostPlaceId, floorId, indoorSpaceId, quantity, operationalStatus, locations } = revision.structure;
+  const { facilityTypeId, hostPlaceId, floorId, quantity, operationalStatus, locations } = revision.structure;
   const statements: D1PreparedStatement[] = [
-    env.DB.prepare("update facility_instances set facility_type_id=?,host_place_id=?,floor_id=?,indoor_space_id=?,quantity=?,operational_status=?,updated_at=? where id=?")
-      .bind(facilityTypeId, hostPlaceId, floorId, indoorSpaceId, quantity, operationalStatus, now, facilityId),
+    env.DB.prepare("update facility_instances set facility_type_id=?,host_place_id=?,floor_id=?,quantity=?,operational_status=?,updated_at=? where id=?")
+      .bind(facilityTypeId, hostPlaceId, floorId, quantity, operationalStatus, now, facilityId),
   ];
   statements.push(...await replaceLocationStatements(env, principal, "facility", facilityId, locations, now));
   return statements;
@@ -308,10 +308,10 @@ async function applyMerchantStructure(
   revision: MerchantRevisionWrite,
   now: string,
 ): Promise<D1PreparedStatement[]> {
-  const { organizationId, hostPlaceId, floorId, indoorSpaceId, locations } = revision.structure;
+  const { organizationId, hostPlaceId, floorId, locations } = revision.structure;
   const statements: D1PreparedStatement[] = [
-    env.DB.prepare("update merchant_outlets set organization_id=?,host_place_id=?,floor_id=?,indoor_space_id=?,updated_at=? where id=?")
-      .bind(organizationId, hostPlaceId, floorId, indoorSpaceId, now, outletId),
+    env.DB.prepare("update merchant_outlets set organization_id=?,host_place_id=?,floor_id=?,updated_at=? where id=?")
+      .bind(organizationId, hostPlaceId, floorId, now, outletId),
   ];
   statements.push(...await replaceLocationStatements(env, principal, "merchant_outlet", outletId, locations, now));
   return statements;
@@ -492,7 +492,6 @@ async function materializeCollectedFloors(
         facilityTypeId: facilityType.id,
         hostPlaceId: placeId,
         floorId,
-        indoorSpaceId: null,
         quantity: 1,
         operationalStatus: "unknown",
         locations: [],

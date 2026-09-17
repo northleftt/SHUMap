@@ -53,7 +53,6 @@ interface MerchantEditorRevision {
   organizationId: string;
   hostPlaceId: string;
   floorId: string;
-  indoorSpaceId: string;
   businessType: string;
   openingHours: string;
   phone: string;
@@ -90,7 +89,6 @@ function parseMerchantEditorRevision(response: MerchantDetailResponse): Merchant
     organizationId: nullableString(structure.organizationId, "merchant_revisions.structure_json.organizationId") ?? "",
     hostPlaceId: nullableString(structure.hostPlaceId, "merchant_revisions.structure_json.hostPlaceId") ?? "",
     floorId: nullableString(structure.floorId, "merchant_revisions.structure_json.floorId") ?? "",
-    indoorSpaceId: nullableString(structure.indoorSpaceId, "merchant_revisions.structure_json.indoorSpaceId") ?? "",
     businessType: nullableString(merchant.business_type, "merchant_revisions.business_type") ?? "",
     openingHours: nullableSingleTextObject(merchant.opening_hours_json, "merchant_revisions.opening_hours_json", "text"),
     phone: nullableSingleTextObject(merchant.contact_json, "merchant_revisions.contact_json", "phone"),
@@ -118,7 +116,7 @@ function parseMerchantEditorRevision(response: MerchantDetailResponse): Merchant
 /**
  * 门店能标的位置用途。
  *
- * 开在楼里的店靠上面的「所在地点 / 楼层 / 室内空间」定位，这里补的是另一半：
+ * 开在楼里的店靠上面的「所在地点 / 楼层」定位，这里补的是另一半：
  * 摆在楼外的摊位、快闪车、集市档口，它们没有楼宇可挂，只能在校区图上点一个点。
  * 面积与路径类用途（impact_area / route_shape）属于运营事件，不给门店。
  * navigation_target 供导航终点用，画布选点后自动换算成 GCJ-02 经纬度。
@@ -152,7 +150,6 @@ export function MerchantEditorPage() {
   const [organizationId, setOrganizationId] = useState("");
   const [hostPlaceId, setHostPlaceId] = useState("");
   const [floorId, setFloorId] = useState("");
-  const [indoorSpaceId, setIndoorSpaceId] = useState("");
   const [businessType, setBusinessType] = useState("");
   const [openingHours, setOpeningHours] = useState("");
   const [phone, setPhone] = useState("");
@@ -179,7 +176,6 @@ export function MerchantEditorPage() {
     setName(editor.displayName);
     setHostPlaceId(editor.hostPlaceId);
     setFloorId(editor.floorId);
-    setIndoorSpaceId(editor.indoorSpaceId);
     setBusinessType(editor.businessType);
     setOrganizationId(editor.organizationId);
     setOpeningHours(editor.openingHours);
@@ -202,7 +198,6 @@ export function MerchantEditorPage() {
   const editor = data.editor;
   const reviewLocked = editor?.editorialStatus === "in_review";
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
-  const indoorSpaces = data.spaces.spaces.filter((space) => !floorId || space.floorId === floorId);
   // 校区跟着所在地点走：选了楼就锁在那栋楼的校区，没选楼时让用户自己在画布上切。
   const hostCampusId = data.places.find((place) => place.id === hostPlaceId)?.campusId ?? null;
 
@@ -268,7 +263,6 @@ export function MerchantEditorPage() {
             organizationId: organizationId || null,
             hostPlaceId,
             floorId: floorId || null,
-            indoorSpaceId: indoorSpaceId || null,
             locations: locationDrafts.map(locationInput),
           },
         });
@@ -285,7 +279,6 @@ export function MerchantEditorPage() {
             organizationId: organizationId || null,
             hostPlaceId,
             floorId: floorId || null,
-            indoorSpaceId: indoorSpaceId || null,
             locations: locationDrafts.map(locationInput),
           },
         });
@@ -325,24 +318,17 @@ export function MerchantEditorPage() {
               />
               <SelectField
                 label="所在地点"
-                onChange={(value) => { setHostPlaceId(value); setFloorId(""); setIndoorSpaceId(""); }}
+                onChange={(value) => { setHostPlaceId(value); setFloorId(""); }}
                 options={data.places.map((p) => ({ value: p.id, label: p.displayName ?? p.id }))}
                 placeholder="选择地点"
                 value={hostPlaceId}
               />
               <SelectField
                 label="所在楼层"
-                onChange={(value) => { setFloorId(value); setIndoorSpaceId(""); }}
+                onChange={(value) => { setFloorId(value); }}
                 options={floors.map((f) => ({ value: f.id, label: f.displayName }))}
                 placeholder={hostPlaceId ? (floors.length ? "选择楼层" : "该地点暂无楼层") : "先选地点"}
                 value={floorId}
-              />
-              <SelectField
-                label="室内空间"
-                onChange={setIndoorSpaceId}
-                options={indoorSpaces.map((space) => ({ value: space.id, label: space.displayName }))}
-                placeholder={floorId ? "不指定" : "先选楼层"}
-                value={indoorSpaceId}
               />
               <Field label="分类" onChange={setBusinessType} placeholder="如 咖啡轻食" value={businessType} />
               <Field label="营业时间" onChange={setOpeningHours} placeholder="如 08:00 - 20:00" value={openingHours} />
@@ -432,7 +418,7 @@ export function MerchantEditorPage() {
           </div>
         </Panel>
 
-        {/* 门店位置：开在楼里就选楼层/房间，摆在楼外（市集摊位、快闪车）就在校区图上点。 */}
+        {/* 门店位置：开在楼里就选楼层，摆在楼外（市集摊位、快闪车）就在校区图上点。 */}
         <LocationEditor
           buildingCampusId={hostCampusId}
           disabled={reviewLocked}

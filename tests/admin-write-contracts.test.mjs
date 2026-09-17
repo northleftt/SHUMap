@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const bundle = await build({
   stdin: {
     contents: `
-      export { createFloor, updateFloor } from "./worker/modules/spaces.ts";
+      export { createFloor, updateFloor } from "./worker/modules/floors.ts";
       export { createPattern, createCalendar, createTrip, updateTrip } from "./worker/modules/transit.ts";
       export {
         createMapFilter,
@@ -154,7 +154,7 @@ const completeFloor = {
   isPublic: true,
 };
 
-test("space write contracts reject unknown, missing, empty, and coerced fields", async () => {
+test("floor write contracts reject unknown, missing, empty, and coerced fields", async () => {
   {
     const { env } = environment();
     await rejectsValidation(

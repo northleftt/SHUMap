@@ -20,7 +20,6 @@ interface StoredEntityLocation {
   campusId: string | null;
   buildingPlaceId: string | null;
   floorId: string | null;
-  indoorSpaceId: string | null;
   geometryType: RevisionLocationInput["geometryType"];
   geometryJson: string | null;
   crs: string | null;
@@ -44,7 +43,7 @@ export async function listEntityLocations(
     env.DB,
     `select el.id as bindingId,el.role,el.is_primary as isPrimary,
             la.campus_id as campusId,la.building_place_id as buildingPlaceId,
-            la.floor_id as floorId,la.indoor_space_id as indoorSpaceId,
+            la.floor_id as floorId,
             la.geometry_type as geometryType,la.geometry_json as geometryJson,la.crs,
             la.map_version_id as mapVersionId,la.map_feature_id as mapFeatureId,
             mf.source_element_id as sourceElementId,la.location_hint as locationHint,
@@ -81,7 +80,7 @@ export async function listEntityLocationsByType(
     env.DB,
     `select el.id as bindingId,el.entity_id as entityId,el.role,el.is_primary as isPrimary,
             la.campus_id as campusId,la.building_place_id as buildingPlaceId,
-            la.floor_id as floorId,la.indoor_space_id as indoorSpaceId,
+            la.floor_id as floorId,
             la.geometry_type as geometryType,la.geometry_json as geometryJson,la.crs,
             la.map_version_id as mapVersionId,la.map_feature_id as mapFeatureId,
             mf.source_element_id as sourceElementId,la.location_hint as locationHint,
@@ -131,11 +130,11 @@ export async function planLocation(
   statements.push(
     env.DB.prepare(
       `insert into location_anchors(
-        id,campus_id,building_place_id,floor_id,indoor_space_id,role,geometry_type,geometry_json,crs,map_version_id,
+        id,campus_id,building_place_id,floor_id,role,geometry_type,geometry_json,crs,map_version_id,
         map_feature_id,location_hint,precision_level,accuracy_meters,source_id,verification_status,valid_from,valid_to,created_at,updated_at
-      ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).bind(
-      anchorId, input.campusId, input.buildingPlaceId, input.floorId, input.indoorSpaceId,
+      anchorId, input.campusId, input.buildingPlaceId, input.floorId,
       input.role, input.geometryType, geometryJson, input.crs, input.mapVersionId, input.mapFeatureId,
       input.locationHint, input.precisionLevel, input.accuracyMeters, input.sourceId,
       verificationStatus, input.validFrom, input.validTo, now, now,
@@ -198,7 +197,7 @@ function validateInput(input: RevisionLocationInput): void {
   if (input.mapFeatureId && !input.mapVersionId) {
     throw new HttpError(400, "validation_error", "A map feature must be bound to its map version");
   }
-  if (!input.buildingPlaceId && !input.floorId && !input.indoorSpaceId && !input.mapFeatureId && input.geometry == null) {
+  if (!input.buildingPlaceId && !input.floorId && !input.mapFeatureId && input.geometry == null) {
     throw new HttpError(400, "validation_error", "Location must identify a spatial parent, map feature, or geometry");
   }
 }
@@ -208,7 +207,6 @@ async function validateHierarchy(env: Env, input: RevisionLocationInput): Promis
     assertExists(env.DB, "campuses", input.campusId, "Campus"),
     assertExists(env.DB, "buildings", input.buildingPlaceId, "Building"),
     assertExists(env.DB, "floors", input.floorId, "Floor"),
-    assertExists(env.DB, "indoor_spaces", input.indoorSpaceId, "Indoor space"),
     assertExists(env.DB, "map_versions", input.mapVersionId, "Map version"),
     assertExists(env.DB, "map_features", input.mapFeatureId, "Map feature"),
     assertExists(env.DB, "data_sources", input.sourceId, "Data source"),
@@ -228,12 +226,6 @@ async function validateHierarchy(env: Env, input: RevisionLocationInput): Promis
     );
     if (building?.campus_id !== input.campusId) {
       throw new HttpError(400, "invalid_spatial_hierarchy", "Building does not belong to the selected campus");
-    }
-  }
-  if (input.indoorSpaceId) {
-    const space = await first<{ floor_id: string }>(env.DB, "select floor_id from indoor_spaces where id=?", [input.indoorSpaceId]);
-    if (input.floorId && space?.floor_id !== input.floorId) {
-      throw new HttpError(400, "invalid_spatial_hierarchy", "Space does not belong to the selected floor");
     }
   }
   if (input.mapFeatureId && input.mapVersionId) {

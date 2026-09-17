@@ -73,6 +73,8 @@ export interface ReleaseFloor {
   levelOrder: number;
   displayName: string;
   isPublic: 0 | 1;
+  /** 楼层平面图位图地址（/api/public/media/<id>）；未上传为 null。 */
+  imageUrl: string | null;
 }
 
 /**
@@ -249,6 +251,8 @@ export interface PublicPlaceFloor {
   levelCode: string;
   levelOrder: number;
   displayName: string | null;
+  /** 楼层平面图位图地址（/api/public/media/<id>）；未上传为 null。 */
+  imageUrl: string | null;
 }
 
 export interface PublicPlaceResponse {
@@ -430,7 +434,6 @@ export interface OperationalEventTarget {
   targetType:
     | "place"
     | "floor"
-    | "space"
     | "facility"
     | "merchant_outlet"
     | "transit_stop"

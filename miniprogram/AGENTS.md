@@ -310,23 +310,25 @@
     report 增 `searchQuery/searchHitCount/searchFirstPoiKey/detailOpen/detailPoiKey/detailMerchantId`。
 - 楼层图页 `pages/floors/floors`（Skyline，已注册 app.json）：
   - onLoad 收 placeId；楼层 = manifest.floors 按 buildingPlaceId 过滤 + isPublic + levelOrder 升序，
-    默认选最小层；`floorMapVersionsByFloor` 判有无平面图，无图纸强制列表视图。
-  - 平面图视图渲染架构与地图页一致（shared 变量 + applyAnimatedStyle + `<image>` 直连
-    maps asset + RASTER_RATIO=3）；手势识别同为 JS 触摸事件 + viewport.ts 纯函数
-    （`.floor-surface` bind 事件，处理器按 view/hasPlan 守卫）；fit 整图 = focus 中心、
-    scaleMultiplier=1 的 createInitialWindow 同式。楼层 SVG 复用 `map-asset-<mapVersionId>`
-    缓存通道（fetchFloorSvg 自带 try/catch 降级）。
-  - **徽章 tap 的最终方案：不用徽章 bindtap**，与地图页 hitTest 同思路——onSurfaceTap
-    换算世界坐标后找最近徽章，容差 24px/scale。
+    默认选最小层；**有无平面图看 manifest `floors[].imageUrl`**（楼层级位图，站内相对路径
+    `/api/public/media/…`，null = 无图纸强制列表视图）。楼层图不再是 map_versions/SVG，
+    `lib/release/floorPlans.ts` 与设施锚点徽章已整体删除。
+  - 平面图视图：`<image>` 直连全 URL（imageUrl 拼 `config.apiBaseUrl`，与 lib/guide.ts
+    站内媒体解析同口径；不再走 SVG asset / `map-asset-*` 缓存 / 本地写盘）；
+    **捏合缩放与拖动由 movable-area + movable-view（scale，1~5 倍）原生实现**，
+    不用 JS 线程手势 + viewport.ts（该方案仅为校区地图保留）。movable-view 高度按
+    图片宽高比实测（bindload natural size × 容器宽），竖长图纸 1 倍下也能拖到底部；
+    加载中/失败有覆盖层（失败可重试：清 src 再置回强制重拉）。
   - 列表视图：楼层说明（facts 里 label === "楼层说明"）+ 本层实拍（media 里 floorLevelCode 匹配）
     + 本层设施行（poi.facilities 按 floorId 过滤）；设施元数据一律从楼宇 poi.facilities 按 id 回查。
-  - automator 直调：`switchFloor(floorId)`/`setView(view)`/`selectFacility(facilityId)`；
-    report：`{placeId, floorCount, activeFloorId, hasPlan, anchorCount, view, selectedFacilityId}`。
+  - automator 直调：`switchFloor(floorId)`/`setView(view)`；
+    report：`{placeId, floorCount, activeFloorId, hasPlan, view, planState}`。
 - 端到端：`scripts/miniprogram-map-automator.mjs` 5.5 节覆盖搜索→详情 sheet；
   `scripts/miniprogram-floors-automator.mjs` 覆盖楼层图页（node 侧选目标楼宇：
   优先有平面图的，没有则退到有楼层+设施的楼宇断言列表视图）。单测 `tests/miniprogram-search.test.mjs`。
-- 未验证项：线上 release 目前没有楼层平面图（maps 无 floor_id 行），plan 视图（图纸渲染/徽章/
-  pinch 手感）只在数据齐了之后才能端到端验证；搜索商户折叠链路线上无商户数据，靠单测覆盖。
+  ⚠️ floors automator 的 plan 视图断言（徽章/selectFacility/anchorCount）尚未随位图化改版更新。
+- 未验证项：楼层位图化后 plan 视图（movable-view 捏合/拖动手感、imageUrl 直连）未端到端验证
+  （Skyline 下 movable-view scale 行为需真机确认）；搜索商户折叠链路线上无商户数据，靠单测覆盖。
 
 ## 工程现状（Part 2：地图 canvas 引擎）
 
@@ -432,14 +434,14 @@
 - `lib/release/`：从 Web 端搬运的 release 装配纯逻辑
   - `types.ts`（release manifest + 地图模型类型）、`manifestContract.ts`（`parseReleaseManifest` 严格校验）、
     `mapData.ts`（`buildMapPois`/`CAMPUS_DISPLAY`/`campusMapVersions`/`campusConfigFromMap`，网络层已换成 api 通道）、
-    `merchants.ts`、`floorPlans.ts`
+    `merchants.ts`（floorPlans.ts 已随楼层位图化删除）
   - `loader.ts`：装配入口 `loadReleaseWithCache(deps?)`（deps 可注入 storage/fetcher，单测靠它在 node 里跑）；
     `selectCampus(loaded, campusIdOrKey)` 按 campus id **或** campusKey（baoshan/jiading/yanchang）选校区，
     返回 `{ campus, mapVersionId, viewBox }`（viewBox 由 `parseSvgViewBox` 解析 SVG 原文得到）
   - 依赖：`lib/svg-geometry.ts`、`lib/revision-contract.ts`、`lib/dataContract.ts`
 - 缓存约定（wx storage，按 id 作 key 天然失效，无 TTL）：
   `release-current-id`（上次 releaseId 指针）、`release-<releaseId>`（校验过的 manifest JSON）、
-  `map-asset-<mapVersionId>`（SVG 原文）。releaseId 变化清旧 `release-*`；`map-asset-*` 跨 release 复用。
+  `map-asset-<mapVersionId>`（**校区**底图 SVG 原文）。releaseId 变化清旧 `release-*`；`map-asset-*` 跨 release 复用。
   写入失败（超容量）静默降级为不缓存，见 loader.ts 头注释
 - `pages/debug/debug`：Skyline 临时调试页（release 版本/三校区/POI 总数/设施类型），
   装配摘要放在 `data.report` 供 automator evaluate 读取。公测起 profile 页「调试信息」

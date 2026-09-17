@@ -101,8 +101,8 @@ test("editors submit complete reviewed structures and omit blank location rows",
   // 空行过滤 + 主要位置收敛统一走 finalizeLocationDrafts（内部按 isLocationDraftBlank 滤空行，
   // 行为断言在 place-facility-crud-fixes.test.mjs）。
   assert.match(place, /finalizeLocationDrafts\(locationDrafts\)/);
-  assert.match(facility, /indoorSpaceId: indoorSpaceId \|\| null,[\s\S]*?quantity: parsedQuantity,[\s\S]*?operationalStatus,[\s\S]*?locations:/);
-  assert.match(merchant, /indoorSpaceId: indoorSpaceId \|\| null,[\s\S]*?locations:/);
+  assert.match(facility, /floorId: floorId \|\| null,[\s\S]*?quantity: parsedQuantity,[\s\S]*?operationalStatus,[\s\S]*?locations:/);
+  assert.match(merchant, /floorId: floorId \|\| null,[\s\S]*?locations:/);
 });
 
 test("revision hashes cover structural data and floor media rehash keeps it", () => {

@@ -1,23 +1,20 @@
 import type { SessionPrincipal } from "../domain/types";
 import type { Env } from "../types/cloudflare";
-import { all, first } from "../lib/db";
-import { HttpError, json, readJson } from "../lib/http";
-import { exactObject, isoNow, oneOf } from "../lib/values";
+import { all, assertExists, first } from "../lib/db";
+import { HttpError, json, readBodyLimited, readJson } from "../lib/http";
+import { booleanValue, exactObject, isoNow, makeId, numberValue, optionalString, partialObject, requiredString, sha256 } from "../lib/values";
 import { audit } from "./audit";
+import { publicMediaPath } from "./media";
 
 // ---------------------------------------------------------------------------
-// 楼层详情与楼层图管理。
+// 楼层管理：一层楼就是 floors 表里的一行 + 可选的一张平面图图片。
 //
-// 楼层本身的增改在 spaces.ts（createFloor / updateFloor）——那里只管 floors 表的
-// 几个标量列。这里管的是「一层楼上都挂了什么」：平面图版本、设施、商户、锚点。
+// 楼内平面图是「每层一张 PNG/JPEG/WebP」（0032 起），不再有 SVG 导入、图纸版本、
+// 图上锚点那一套。楼层本身的骨架（编号、排序、显示名、是否公开）在这里增改；
+// 设施 / 商户在各自编辑器里选楼层（facility_instances.floor_id 等），本模块把
+// 这些引用**反查**出来，所以楼层页看到的永远是内容侧的现状。
 //
-// 双向同步靠的是同一个 floor_id 外键，而不是复制数据：
-//   · 设施 / 商户在各自编辑器里选楼层（facility_instances.floor_id / merchant_outlets.floor_id）
-//   · 本模块把这些引用**反查**出来，所以楼层页看到的永远是设施侧的现状，不会过期
-//   · 楼层图（map_versions.floor_id）一旦就绪，设施编辑器的服务位置面板立刻能在图上点选
-//     （FacilityEditorPage 按 floorId + svg_viewbox + ready/published 找图）
-//
-// 因此「删除楼层」必须先解除这些引用，否则会留下悬空的设施与看不到的图纸。
+// 因此「删除楼层」必须先解除这些引用，否则会留下悬空的设施。
 // ---------------------------------------------------------------------------
 
 interface FloorRow {
@@ -28,82 +25,38 @@ interface FloorRow {
   displayName: string;
   isPublic: number;
   lifecycleStatus: string;
+  imageMediaId: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// 楼层编号的规范形式：F<n> / B<n>，n 不带前导零。
-//
-// 这不是洁癖：0016 迁移专门修过一行 level_code='一层' 的数据，成因就是
-// POST /api/admin/floors 当时把 levelCode 当自由文本收下（requiredString，无格式
-// 校验），而 reviews.ts 的 formatFloorDisplayName / floorOrderOf 只认 F<n>/B<n>，
-// 于是手工建的楼层和审核流建的楼层格式不一致，前者在用户端显示成半成品。
-//
-// 0016 结尾的契约断言正是 `level_code glob 'F[0-9]*' or 'B[0-9]*'` 且
-// `level_code = 首字母 || cast(其余 as integer)`。这里在写入口把它挡住，
-// 免得同一个坑再挖一遍。
-// ---------------------------------------------------------------------------
+const FLOOR_SELECT = `id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
+       display_name as displayName,is_public as isPublic,lifecycle_status as lifecycleStatus,image_media_id as imageMediaId`;
 
-/**
- * "3" / "f3" / "F03" / "3F" → "F3"；"b1" / "B01" / "1B" → "B1"。不合法则 400。
- *
- * 前后缀都收：中文语境里「3F」「B1」两种写法都常见，全都规范化到 F<n>/B<n> 这一种
- * 存储形式，比让用户去猜后台要哪种更省事。
- */
-export function canonicalLevelCode(raw: unknown): string {
-  if (typeof raw !== "string") {
-    throw new HttpError(400, "validation_error", "levelCode must be a string");
-  }
-  const code = raw.trim().toUpperCase();
-  const above = code.match(/^(?:F(\d{1,3})|(\d{1,3})F?)$/);
-  if (above) return `F${Number(above[1] ?? above[2])}`;
-  const below = code.match(/^(?:B(\d{1,2})|(\d{1,2})B)$/);
-  if (below) return `B${Number(below[1] ?? below[2])}`;
-  throw new HttpError(
-    400,
-    "validation_error",
-    `楼层编号只支持 F<数字> 或 B<数字>（如 F3、3F、B1），收到 ${raw}`,
-  );
-}
-
-/** 规范编号的排序值：地上为正、地下为负。与 reviews.ts 的 floorOrderOf 同口径。 */
-export function levelOrderOf(levelCode: string): number {
-  const above = levelCode.match(/^F(\d{1,3})$/);
-  if (above) return Number(above[1]);
-  const below = levelCode.match(/^B(\d{1,2})$/);
-  if (below) return -Number(below[1]);
-  throw new HttpError(400, "validation_error", `Unsupported floor level code: ${levelCode}`);
-}
-
-/** 规范编号的中文显示名。与 reviews.ts 的 formatFloorDisplayName 同口径。 */
-export function levelDisplayName(levelCode: string): string {
-  const above = levelCode.match(/^F(\d{1,3})$/);
-  if (above) return `${Number(above[1])} 层`;
-  const below = levelCode.match(/^B(\d{1,2})$/);
-  if (below) return `地下 ${Number(below[1])} 层`;
-  throw new HttpError(400, "validation_error", `Unsupported floor level code: ${levelCode}`);
+function floorJson(floor: FloorRow) {
+  return {
+    ...floor,
+    isPublic: floor.isPublic === 1,
+    imageUrl: floor.imageMediaId ? publicMediaPath(floor.imageMediaId) : null,
+  };
 }
 
 /** 一层楼的引用计数：非零就不允许删除，前端据此说明「为什么删不掉」。 */
 export interface FloorUsage {
   facilities: number;
   merchants: number;
-  spaces: number;
   mapVersions: number;
   anchors: number;
 }
 
 async function floorUsage(env: Env, floorId: string): Promise<FloorUsage> {
-  const [facilities, merchants, spaces, mapVersions, anchors] = await Promise.all([
+  const [facilities, merchants, mapVersions, anchors] = await Promise.all([
     first<{ count: number }>(env.DB, "select count(*) as count from facility_instances where floor_id=?", [floorId]),
     first<{ count: number }>(env.DB, "select count(*) as count from merchant_outlets where floor_id=?", [floorId]),
-    first<{ count: number }>(env.DB, "select count(*) as count from indoor_spaces where floor_id=?", [floorId]),
     first<{ count: number }>(env.DB, "select count(*) as count from map_versions where floor_id=?", [floorId]),
     first<{ count: number }>(env.DB, "select count(*) as count from location_anchors where floor_id=?", [floorId]),
   ]);
   return {
     facilities: facilities?.count ?? 0,
     merchants: merchants?.count ?? 0,
-    spaces: spaces?.count ?? 0,
     mapVersions: mapVersions?.count ?? 0,
     anchors: anchors?.count ?? 0,
   };
@@ -112,8 +65,8 @@ async function floorUsage(env: Env, floorId: string): Promise<FloorUsage> {
 /**
  * GET /api/admin/floors?buildingPlaceId=... — 一栋楼的楼层总览。
  *
- * 每层带上平面图版本与引用计数，管理端因此能一屏回答：这层有图吗、图是就绪还是
- * 已发布、这层挂了几个设施几个商户、能不能删。
+ * 每层带上平面图图片地址与引用计数，管理端因此能一屏回答：这层有图吗、
+ * 这层挂了几个设施几个商户、能不能删。
  */
 export async function listFloorsForBuilding(request: Request, env: Env): Promise<Response> {
   const buildingPlaceId = new URL(request.url).searchParams.get("buildingPlaceId");
@@ -130,31 +83,16 @@ export async function listFloorsForBuilding(request: Request, env: Env): Promise
   );
   if (!building) throw new HttpError(404, "not_found", "Building does not exist");
 
-  const floors = await all<FloorRow>(
-    env.DB,
-    `select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
-            display_name as displayName,is_public as isPublic,lifecycle_status as lifecycleStatus
-       from floors where building_place_id=? order by level_order desc`,
-    [buildingPlaceId],
-  );
+  const floors = await all<FloorRow>(env.DB, `select ${FLOOR_SELECT} from floors where building_place_id=? order by level_order desc`, [buildingPlaceId]);
   const items = await Promise.all(floors.map(async (floor) => ({
-    ...floor,
-    isPublic: floor.isPublic === 1,
-    plans: await all(
-      env.DB,
-      `select mv.id,mv.version_label as versionLabel,mv.lifecycle_status as lifecycleStatus,
-              mv.coordinate_space_type as coordinateSpaceType,mv.created_at as createdAt,
-              (select count(*) from map_features mf where mf.map_version_id=mv.id) as featureCount
-         from map_versions mv where mv.floor_id=? order by mv.created_at desc`,
-      [floor.id],
-    ),
+    ...floorJson(floor),
     usage: await floorUsage(env, floor.id),
   })));
   return json({ building, items });
 }
 
 /**
- * GET /api/admin/floors/:id — 单层详情：图纸 + 该层的设施 / 商户 / 锚点。
+ * GET /api/admin/floors/:id — 单层详情：图片 + 该层的设施 / 商户 / 锚点。
  *
  * 设施与商户是**反查**出来的（按 floor_id），所以这里显示的就是内容侧的当前状态；
  * 在设施编辑器里改了楼层归属，这里刷新即变，无需任何同步动作。
@@ -164,7 +102,7 @@ export async function getFloorDetail(env: Env, floorId: string): Promise<Respons
     env.DB,
     `select f.id,f.building_place_id as buildingPlaceId,f.level_code as levelCode,f.level_order as levelOrder,
             f.display_name as displayName,f.is_public as isPublic,f.lifecycle_status as lifecycleStatus,
-            r.display_name as buildingName
+            f.image_media_id as imageMediaId,r.display_name as buildingName
        from floors f
        join places p on p.id=f.building_place_id
        left join place_revisions r on r.id=p.current_revision_id
@@ -173,21 +111,13 @@ export async function getFloorDetail(env: Env, floorId: string): Promise<Respons
   );
   if (!floor) throw new HttpError(404, "not_found", "Floor does not exist");
 
-  const [plans, facilities, merchants, spaces, anchors, usage] = await Promise.all([
-    all(
-      env.DB,
-      `select mv.id,mv.version_label as versionLabel,mv.lifecycle_status as lifecycleStatus,
-              mv.coordinate_space_type as coordinateSpaceType,mv.created_at as createdAt,
-              (select count(*) from map_features mf where mf.map_version_id=mv.id) as featureCount
-         from map_versions mv where mv.floor_id=? order by mv.created_at desc`,
-      [floorId],
-    ),
+  const [facilities, merchants, anchors, usage] = await Promise.all([
     // 设施名取「待审修订优先，否则当前修订」，与 listFacilities 的口径一致，
     // 这样楼层页看到的名字和内容管理列表里是同一个。
     all(
       env.DB,
       `select f.id,f.facility_type_id as facilityTypeId,t.name as facilityTypeName,f.lifecycle_status as lifecycleStatus,
-              f.operational_status as operationalStatus,f.indoor_space_id as indoorSpaceId,
+              f.operational_status as operationalStatus,
               coalesce(r.display_name,t.name) as displayName,r.editorial_status as editorialStatus,
               (select count(*) from entity_locations el
                  join location_anchors la on la.id=el.anchor_id
@@ -205,7 +135,7 @@ export async function getFloorDetail(env: Env, floorId: string): Promise<Respons
     ),
     all(
       env.DB,
-      `select m.id,m.lifecycle_status as lifecycleStatus,m.indoor_space_id as indoorSpaceId,
+      `select m.id,m.lifecycle_status as lifecycleStatus,
               r.display_name as displayName,r.business_type as businessType,r.editorial_status as editorialStatus
          from merchant_outlets m
          left join merchant_revisions r on r.id=coalesce(
@@ -215,13 +145,6 @@ export async function getFloorDetail(env: Env, floorId: string): Promise<Respons
            m.current_revision_id
          )
         where m.floor_id=? order by coalesce(r.display_name,m.id)`,
-      [floorId],
-    ),
-    all(
-      env.DB,
-      `select id,space_type as spaceType,stable_code as stableCode,display_name as displayName,
-              lifecycle_status as lifecycleStatus
-         from indoor_spaces where floor_id=? order by display_name`,
       [floorId],
     ),
     all(
@@ -237,22 +160,173 @@ export async function getFloorDetail(env: Env, floorId: string): Promise<Respons
     floorUsage(env, floorId),
   ]);
 
-  return json({
-    floor: { ...floor, isPublic: floor.isPublic === 1 },
-    plans,
-    facilities,
-    merchants,
-    spaces,
-    anchors,
-    usage,
+  return json({ floor: { ...floorJson(floor), buildingName: floor.buildingName }, facilities, merchants, anchors, usage });
+}
+
+/**
+ * POST /api/admin/floors — 新建楼层。
+ *
+ * levelCode 是这一层在楼内的唯一标签（如 F3、B1），只做去空白与非空校验；
+ * levelOrder 由调用方给出（地上为正、地下为负的排序值），显示名留空时按编号顶上。
+ * 同层重复由 unique(building_place_id, level_code) 兜底，这里先查一次以便回
+ * 可读的 409 而不是外键错误。
+ */
+export async function createFloor(request: Request, env: Env, principal: SessionPrincipal, requestId: string): Promise<Response> {
+  const body = exactObject(await readJson<unknown>(request), "floor", [
+    "buildingPlaceId",
+    "levelCode",
+    "levelOrder",
+    "displayName",
+    "isPublic",
+  ]);
+  const buildingPlaceId = requiredString(body.buildingPlaceId, "buildingPlaceId", 100);
+  await assertExists(env.DB, "buildings", buildingPlaceId, "Building");
+  const levelCode = requiredString(body.levelCode, "levelCode", 50).trim();
+  const levelOrder = numberValue(body.levelOrder, "levelOrder");
+  const isPublic = booleanValue(body.isPublic, "isPublic");
+  const existing = await first<{ id: string }>(
+    env.DB,
+    "select id from floors where building_place_id=? and level_code=?",
+    [buildingPlaceId, levelCode],
+  );
+  if (existing) {
+    throw new HttpError(409, "floor_exists", `这栋楼已经有 ${levelCode} 层了`);
+  }
+  const displayName = optionalString(body.displayName, "displayName", 100)?.trim() || levelCode;
+  const id = makeId("floor");
+  const now = isoNow();
+  await env.DB.prepare(
+    `insert into floors(id,building_place_id,level_code,level_order,display_name,is_public,lifecycle_status,created_at,updated_at)
+     values(?,?,?,?,?,?,'active',?,?)`,
+  ).bind(
+    id,
+    buildingPlaceId,
+    levelCode,
+    levelOrder,
+    displayName,
+    isPublic ? 1 : 0,
+    now,
+    now,
+  ).run();
+  await audit(env, principal, "floor.create", "floor", id, requestId, null, { ...body, levelCode, levelOrder, displayName });
+  return json({ id, levelCode, levelOrder, displayName }, { status: 201 });
+}
+
+/**
+ * PATCH /api/admin/floors/:id — 楼层显示名 / 排序 / 是否对外可见。
+ *
+ * 楼层不进修订流（floors 没有修订表），改动即时生效并记审计。level_code 是
+ * 楼层在同一楼内的唯一键，且已被设施/锚点按 id 引用，这里不允许改。
+ */
+export async function updateFloor(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  floorId: string,
+  requestId: string,
+): Promise<Response> {
+  const before = await first<Record<string, unknown>>(
+    env.DB,
+    "select id,building_place_id,level_code,level_order,display_name,is_public from floors where id=?",
+    [floorId],
+  );
+  if (!before) throw new HttpError(404, "not_found", "Floor does not exist");
+  const body = partialObject(await readJson<unknown>(request), "floorUpdate", ["displayName", "levelOrder", "isPublic"]);
+  const displayName = !Object.hasOwn(body, "displayName")
+    ? String(before.display_name)
+    : requiredString(body.displayName, "displayName", 100);
+  const levelOrder = !Object.hasOwn(body, "levelOrder")
+    ? Number(before.level_order)
+    : numberValue(body.levelOrder, "levelOrder");
+  const isPublic = !Object.hasOwn(body, "isPublic")
+    ? Number(before.is_public)
+    : booleanValue(body.isPublic, "isPublic") ? 1 : 0;
+  const now = isoNow();
+  await env.DB.prepare("update floors set display_name=?,level_order=?,is_public=?,updated_at=? where id=?")
+    .bind(displayName, levelOrder, isPublic, now, floorId).run();
+  await audit(env, principal, "floor.update", "floor", floorId, requestId, before, { displayName, levelOrder, isPublic });
+  return json({ id: floorId, displayName, levelOrder, isPublic });
+}
+
+/** 平面图图片只接受位图；svg 会带脚本，永不放行。与管理端直传同口径。 */
+const FLOOR_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const MAX_FLOOR_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * PUT /api/admin/floors/:id/image — 上传 / 替换这一层的平面图图片（raw body）。
+ *
+ * 复用管理端图片直传的防线（声明类型白名单 + 魔术字节校验 + 8 MiB 上限，
+ * 见 media.ts 的 createAdminMediaUpload），落盘 `public/media/`、行记
+ * bucket_scope='public' / status='published'，因此 GET /api/public/media/:id
+ * 立刻可读，下一次发版随 manifest.floors[].imageUrl 下发。
+ *
+ * 重复 PUT 即替换：floors.image_media_id 指向新图。旧图的对象与行原地保留
+ * （media_assets 其它引用方也可能指着它），不做级联清理。
+ */
+export async function uploadFloorImage(
+  request: Request,
+  env: Env,
+  principal: SessionPrincipal,
+  floorId: string,
+  requestId: string,
+): Promise<Response> {
+  const floor = await first<{ id: string; imageMediaId: string | null }>(
+    env.DB,
+    "select id,image_media_id as imageMediaId from floors where id=?",
+    [floorId],
+  );
+  if (!floor) throw new HttpError(404, "not_found", "Floor does not exist");
+
+  const contentType = (request.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (!FLOOR_IMAGE_TYPES.has(contentType)) {
+    throw new HttpError(415, "unsupported_media_type", "Only image/jpeg, image/png and image/webp are accepted");
+  }
+  const bytes = await readBodyLimited(request, MAX_FLOOR_IMAGE_BYTES);
+  if (bytes.byteLength === 0) throw new HttpError(400, "validation_error", "Image body is empty");
+  if (bytes.byteLength > MAX_FLOOR_IMAGE_BYTES) {
+    throw new HttpError(413, "payload_too_large", "Each floor plan image must be at most 8 MiB");
+  }
+  if (sniffImageType(bytes) !== contentType) {
+    throw new HttpError(415, "unsupported_media_type", "Image bytes do not match the declared image type");
+  }
+
+  const mediaId = makeId("media");
+  const objectKey = `public/media/${mediaId}.${contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg"}`;
+  const digest = await sha256(bytes);
+  const now = isoNow();
+  await env.SHUMAP_BUCKET.put(objectKey, bytes, {
+    httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" },
+    customMetadata: { scope: "public", uploadedBy: principal.userId },
   });
+  await env.DB.prepare(
+    `insert into media_assets(id,bucket_scope,object_key,original_name,content_type,byte_size,sha256,status,uploaded_by,created_at,approved_at)
+     values(?,'public',?,null,?,?,?,'published',?,?,?)`,
+  ).bind(mediaId, objectKey, contentType, bytes.byteLength, digest, principal.userId, now, now).run();
+  await env.DB.prepare("update floors set image_media_id=?,updated_at=? where id=?").bind(mediaId, now, floorId).run();
+  await audit(env, principal, "floor.image", "floor", floorId, requestId, { imageMediaId: floor.imageMediaId }, { imageMediaId: mediaId });
+  return json({ id: floorId, imageMediaId: mediaId, imageUrl: publicMediaPath(mediaId) });
+}
+
+/** 只认 JPEG/PNG/WebP 的文件头，避免声明 image/* 却上传别的东西。 */
+function sniffImageType(bytes: ArrayBuffer): string | null {
+  const view = new Uint8Array(bytes);
+  if (view.length >= 3 && view[0] === 0xff && view[1] === 0xd8 && view[2] === 0xff) return "image/jpeg";
+  if (
+    view.length >= 8 && view[0] === 0x89 && view[1] === 0x50 && view[2] === 0x4e && view[3] === 0x47
+    && view[4] === 0x0d && view[5] === 0x0a && view[6] === 0x1a && view[7] === 0x0a
+  ) return "image/png";
+  if (
+    view.length >= 12 && view[0] === 0x52 && view[1] === 0x49 && view[2] === 0x46 && view[3] === 0x46
+    && view[8] === 0x57 && view[9] === 0x45 && view[10] === 0x42 && view[11] === 0x50
+  ) return "image/webp";
+  return null;
 }
 
 /**
  * DELETE /api/admin/floors/:id — 只在这层完全空了之后才允许。
  *
- * 楼层被五种东西引用（设施、商户、室内空间、平面图版本、位置锚点），其中前四种在
- * schema 里是 `on delete restrict`，硬删会直接撞外键报 500。所以这里先数一遍，非零
+ * 楼层被四种东西引用（设施、商户、历史图纸版本、位置锚点），schema 里是
+ * `on delete restrict`，硬删会直接撞外键报 500。所以这里先数一遍，非零
  * 就回 409 并带上明细，让管理端能说清「先把 3 个设施移走」而不是丢一个数据库错误。
  *
  * 想「下架」而不是删除的，应该把 is_public 改成 false（PATCH /api/admin/floors/:id），
@@ -264,16 +338,10 @@ export async function deleteFloor(
   floorId: string,
   requestId: string,
 ): Promise<Response> {
-  const floor = await first<FloorRow>(
-    env.DB,
-    `select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
-            display_name as displayName,is_public as isPublic,lifecycle_status as lifecycleStatus
-       from floors where id=?`,
-    [floorId],
-  );
+  const floor = await first<FloorRow>(env.DB, `select ${FLOOR_SELECT} from floors where id=?`, [floorId]);
   if (!floor) throw new HttpError(404, "not_found", "Floor does not exist");
   const usage = await floorUsage(env, floorId);
-  const total = usage.facilities + usage.merchants + usage.spaces + usage.mapVersions + usage.anchors;
+  const total = usage.facilities + usage.merchants + usage.mapVersions + usage.anchors;
   if (total > 0) {
     throw new HttpError(
       409,
@@ -285,52 +353,4 @@ export async function deleteFloor(
   await env.DB.prepare("delete from floors where id=?").bind(floorId).run();
   await audit(env, principal, "floor.delete", "floor", floorId, requestId, floor, null);
   return json({ id: floorId, deleted: true });
-}
-
-/**
- * PATCH /api/admin/floors/:id/plan-status — 楼层图版本的就绪 / 归档。
- *
- * 楼层图与校区图共用 map_versions 的生命周期，但校区图靠发版（release）切换，楼层图
- * 目前没有独立发版入口：导入完成后是 `ready`，客户端与设施编辑器都认 ready/published，
- * 所以这里只需要能把过期的旧图 `archived` 掉，避免同一层出现两张可用图纸。
- *
- * 不允许在这里改成 published —— 那是发版流程的职责（releases.ts 会把选中的版本升上去）。
- */
-export async function updateFloorPlanStatus(
-  request: Request,
-  env: Env,
-  principal: SessionPrincipal,
-  mapVersionId: string,
-  requestId: string,
-): Promise<Response> {
-  const body = exactObject(await readJson<unknown>(request), "floorPlanStatus", ["lifecycleStatus"]);
-  const lifecycleStatus = oneOf(body.lifecycleStatus, "lifecycleStatus", ["ready", "archived"] as const);
-  const version = await first<{ id: string; floorId: string | null; lifecycleStatus: string }>(
-    env.DB,
-    "select id,floor_id as floorId,lifecycle_status as lifecycleStatus from map_versions where id=?",
-    [mapVersionId],
-  );
-  if (!version) throw new HttpError(404, "not_found", "Map version does not exist");
-  if (version.floorId === null) {
-    throw new HttpError(400, "validation_error", "This endpoint only manages floor plans");
-  }
-  if (version.lifecycleStatus === "published") {
-    throw new HttpError(409, "invalid_state", "A published floor plan is changed through the release flow");
-  }
-  if (version.lifecycleStatus === "draft") {
-    throw new HttpError(409, "invalid_state", "This floor plan is still importing");
-  }
-  await env.DB.prepare("update map_versions set lifecycle_status=? where id=?")
-    .bind(lifecycleStatus, mapVersionId).run();
-  await audit(
-    env,
-    principal,
-    "floor.plan.status",
-    "map_version",
-    mapVersionId,
-    requestId,
-    { lifecycleStatus: version.lifecycleStatus },
-    { lifecycleStatus },
-  );
-  return json({ id: mapVersionId, lifecycleStatus, updatedAt: isoNow() });
 }

@@ -113,7 +113,6 @@ function revision(featureId) {
         campusId: "campus_baoshan",
         buildingPlaceId: null,
         floorId: null,
-        indoorSpaceId: null,
         role: "footprint",
         geometryType: "Polygon",
         geometry: null,

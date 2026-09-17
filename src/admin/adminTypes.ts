@@ -50,21 +50,10 @@ export interface Floor {
   lifecycleStatus: string;
 }
 
-export interface IndoorSpace {
-  id: string;
-  floorId: string;
-  parentSpaceId: string | null;
-  spaceType: string;
-  stableCode: string | null;
-  displayName: string;
-  lifecycleStatus: string;
-}
-
 export interface SpacesResponse {
   campuses: Campus[];
   buildings: Building[];
   floors: Floor[];
-  spaces: IndoorSpace[];
 }
 
 export interface Organization {
@@ -165,7 +154,6 @@ export interface FacilityListItem {
   facilityTypeId?: string;
   hostPlaceId?: string | null;
   floorId?: string | null;
-  indoorSpaceId?: string | null;
   quantity?: number | null;
   operationalStatus?: string;
   /** 设施只有三档：planned / active / retired。「坏了」是 operationalStatus 的事。 */
@@ -181,7 +169,6 @@ export interface MerchantListItem {
   organizationId?: string | null;
   hostPlaceId?: string | null;
   floorId?: string | null;
-  indoorSpaceId?: string | null;
   lifecycleStatus?: string;
   displayName?: string | null;
   businessType?: string | null;
@@ -404,6 +391,22 @@ export interface SubmissionRow {
   submitterEmail: string | null;
   /** 账号真名，与用户自填的 submitterName 区分开。 */
   submitterAccountName: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// 功能评分反馈（GET /api/admin/feature-feedback）
+// ---------------------------------------------------------------------------
+
+/**
+ * 一条功能评分。纯运营数据：匿名提交、无审核流，page 是自由分组键
+ * （search / shuttle 等，随版本增加），不是枚举。
+ */
+export interface FeatureFeedbackRow {
+  id: string;
+  page: string;
+  rating: number;
+  reason: string | null;
+  createdAt: string;
 }
 
 // ---------------------------------------------------------------------------

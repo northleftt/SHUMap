@@ -1,10 +1,12 @@
 import { ArrowDownUp, ChevronDown, MapPin, Navigation, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { FeatureFeedback } from "../../components/feedback/FeatureFeedback";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { SectionHeader } from "../../components/ui/SectionHeader";
 import { SheetModal } from "../../components/ui/SheetModal";
 import type { CampusLine, PublicDayType } from "../../lib/api/types";
+import { recordAnalyticsEvent, usePageView } from "../../lib/analytics";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useNow } from "../../lib/hooks/useNow";
 import { MapAppSheet, type MapTarget } from "../../lib/nav";
@@ -489,6 +491,7 @@ export function ShuttlePage() {
 function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
   const navigate = useNavigate();
   const isDesktop = useBreakpoint() === "desktop";
+  usePageView("shuttle");
   // OD 选择是校区级端点：有站点的校区 + 无校区站点各自成端点（如陈太公寓）。
   const endpoints = useMemo(() => listTransitEndpoints(release.manifest), [release]);
   const stopTargets = useStopMapTargets(release);
@@ -514,6 +517,15 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
 
   useEffect(() => {
     if (!fromEndpoint || !toEndpoint) return;
+    const dateText = [
+      selectedDate.getFullYear(),
+      String(selectedDate.getMonth() + 1).padStart(2, "0"),
+      String(selectedDate.getDate()).padStart(2, "0"),
+    ].join("-");
+    recordAnalyticsEvent({
+      eventType: "shuttle_query",
+      meta: { from: fromEndpoint.name, to: toEndpoint.name, date: dateText },
+    });
     if (fromEndpoint.id === toEndpoint.id) {
       setLinesState({ status: "ready", lines: [], dayType: null });
       return;
@@ -575,7 +587,29 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
     if (linesState.status !== "ready") return;
     const remaining = todayFlag ? getRemainingJourneys(flatJourneys, nowDate) : flatJourneys;
     const items = journeysAtTime(remaining, departureTime);
-    if (items.length > 0) setPreview({ departureTime, items });
+    if (items.length > 0) {
+      setPreview({ departureTime, items });
+      recordAnalyticsEvent({
+        eventType: "popup_open",
+        meta: {
+          popup: "trip_preview",
+          departureTime,
+          journeyCount: items.length,
+          from: fromEndpoint?.name ?? null,
+          to: toEndpoint?.name ?? null,
+        },
+      });
+    }
+  };
+
+  const closePreview = () => {
+    if (preview) {
+      recordAnalyticsEvent({
+        eventType: "popup_close",
+        meta: { popup: "trip_preview", departureTime: preview.departureTime },
+      });
+    }
+    setPreview(null);
   };
 
   const heroCard = (
@@ -740,6 +774,11 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
             ) : null}
           </>
         )}
+
+        {/* 功能评分入口：提交过或关掉一次就不再出现（见 FeatureFeedback）。 */}
+        <div className="mt-6">
+          <FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" />
+        </div>
         </div>
       </div>
 
@@ -752,7 +791,7 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
               fromName={fromEndpoint?.name ?? ""}
               toName={toEndpoint?.name ?? ""}
               release={release}
-              onClose={() => setPreview(null)}
+              onClose={closePreview}
             />
           </div>
         </aside>
@@ -764,7 +803,7 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
           fromName={fromEndpoint?.name ?? ""}
           toName={toEndpoint?.name ?? ""}
           release={release}
-          onClose={() => setPreview(null)}
+          onClose={closePreview}
         />
       ) : null}
     </div>

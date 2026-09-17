@@ -17,6 +17,7 @@ import { LoadingState } from "../../components/ui/EmptyState";
 import { SeverityIcon, severityOf } from "../../components/ui/SeverityBanner";
 import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { useOperations } from "../../lib/hooks/useOperations";
+import { recordAnalyticsEvent } from "../../lib/analytics";
 import { facilityIconKeyMap } from "../../lib/facilityIcons";
 import { markerScaleValue, useMarkerScale } from "../../lib/map/markerScale";
 import type { CampusKey } from "../../lib/types";
@@ -490,7 +491,14 @@ export function MapPage() {
               <button
                 type="button"
                 className="text-aux font-medium text-primary"
-                onClick={() => setDetailEventId(selectedEvent.id)}
+                onClick={() => {
+                  setDetailEventId(selectedEvent.id);
+                  recordAnalyticsEvent({
+                    eventType: "popup_open",
+                    campus: state.campus?.label,
+                    meta: { popup: "operation_detail", eventId: selectedEvent.id },
+                  });
+                }}
               >
                 查看详情 ›
               </button>
@@ -662,7 +670,16 @@ export function MapPage() {
           event={detailEvent}
           buildings={state.releaseData.buildings}
           variant={isMobile ? "sheet" : "panel"}
-          onClose={() => setDetailEventId(null)}
+          onClose={() => {
+            if (detailEventId) {
+              recordAnalyticsEvent({
+                eventType: "popup_close",
+                campus: state.campus?.label,
+                meta: { popup: "operation_detail", eventId: detailEventId },
+              });
+            }
+            setDetailEventId(null);
+          }}
         />
       </div>
     </div>
