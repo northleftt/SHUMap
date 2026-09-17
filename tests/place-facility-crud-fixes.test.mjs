@@ -98,10 +98,13 @@ test("the place's own anchors do not count as blocking references", () => {
 // 设施编辑器有两个面板共写 locationDrafts（楼层图「服务位置」+「楼外位置」）。
 // 两个真实翻车路径：点了「添加位置」没填就保存（空行被后端「必须指明空间归属」
 // 拒掉）；服务位置已是主要位置时再在楼外面板加行（新行默认点亮 isPrimary，
-// 「恰好一个主要位置」拒掉）。修复：保存与面板合并都过 finalizeLocationDrafts。
+// 「恰好一个主要位置」拒掉）。修复分两条路径：**保存**过 finalizeLocationDrafts
+// （滤空行 + 收敛 primary），**面板合并**过 mergeOutdoorLocationDrafts（只收敛
+// primary）——合并路径绝不能滤空行，否则「添加位置」追加的空行当帧被滤掉，
+// 按钮永远加不了行（PR 复审抓到的回归，这里用行为断言锁死）。
 // ---------------------------------------------------------------------------
 
-const { finalizeLocationDrafts, emptyLocation } = await bundleModule("src/admin/components/LocationEditor.tsx");
+const { finalizeLocationDrafts, mergeOutdoorLocationDrafts, emptyLocation } = await bundleModule("src/admin/components/LocationEditor.tsx");
 
 test("finalizeLocationDrafts drops rows where nothing was ever filled", () => {
   const filled = { ...emptyLocation("primary_display"), id: "a", campusId: "campus_baoshan", longitude: "121.4", latitude: "31.32" };
@@ -128,10 +131,25 @@ test("finalizeLocationDrafts promotes the first row when filtering removed the o
   assert.equal(result[0].isPrimary, true);
 });
 
-test("FacilityEditorPage routes both saves and the outdoor panel merge through finalizeLocationDrafts", () => {
+test("mergeOutdoorLocationDrafts keeps the blank row the add button just appended", () => {
+  // 复审回归：合并路径滤空行 → 「添加位置」按钮永远加不了行。
+  const service = { ...emptyLocation("service_position"), id: "svc", isPrimary: true, floorId: "floor_1", buildingPlaceId: "place_b" };
+  const blankNew = emptyLocation("primary_display"); // 「添加位置」追加的正是全空行
+  const merged = mergeOutdoorLocationDrafts([service], [blankNew]);
+  assert.equal(merged.length, 2, "空行必须活到用户填它那一刻");
+  assert.equal(merged.filter((row) => row.isPrimary).length, 1, "合并仍要收敛主要位置");
+});
+
+test("FacilityEditorPage finalizes on save but only converges primary on merge", () => {
   const source = read("src/admin/pages/FacilityEditorPage.tsx");
   assert.equal(source.match(/finalizeLocationDrafts\(locationDrafts\)\.map\(locationInput\)/g)?.length, 2, "新建与修订两条保存路径都要过 finalize");
-  assert.match(source, /finalizeLocationDrafts\(\[\s*\.\.\.current\.filter/, "楼外面板合并时也要收敛");
+  assert.match(source, /mergeOutdoorLocationDrafts\(current, rows\)/, "楼外面板合并走 mergeOutdoorLocationDrafts");
+  assert.doesNotMatch(source, /finalizeLocationDrafts\(\[/, "合并路径若过 finalize 会把「添加位置」的空行当帧滤掉");
+});
+
+test("PlaceEditorPage save converges primary too, not just blank filtering", () => {
+  // 空行占位 primary 被滤掉后一个都不剩，只滤不收照样 400——与设施编辑器同口径。
+  assert.match(read("src/admin/pages/PlaceEditorPage.tsx"), /finalizeLocationDrafts\(locationDrafts\)/);
 });
 
 // ---------------------------------------------------------------------------

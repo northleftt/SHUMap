@@ -145,25 +145,40 @@ export function isLocationDraftBlank(row: LocationDraft): boolean {
     && !hasOriginBinding(row);
 }
 
-/**
- * 保存前的最后整理：丢掉一行都没填的草稿，并把主要位置收敛到恰好一个。
- *
- * 两步都是真实事故的修法：
- * 1. 空行不过滤会带着全空字段送进 normalizeLocationInput，被后端「必须指明空间
- *    归属 / 图形 / 几何」打成 400——用户只是点了一下「添加位置」又没用上。
- * 2. 设施编辑器有两个面板共写一个数组（楼层图的服务位置 + 楼外位置），两边各自
- *    维护 isPrimary，可能同时亮着（服务位置已是主要位置时再在楼外面板加一行，
- *    新行默认点亮），保存被「恰好一个主要位置」拒掉。撞车时保留**最后**一个主要
- *    位置（数组顺序 = 面板顺序，后动手的面板赢）；过滤完一个都没有时点亮首行，
- *    否则空着的 primary 同样过不了契约。
- */
-export function finalizeLocationDrafts(drafts: LocationDraft[]): LocationDraft[] {
-  const rows = drafts.filter((row) => !isLocationDraftBlank(row));
+/** 主要位置收敛到恰好一个：多个时保留**最后**点亮的（数组顺序 = 面板顺序，
+ *  后动手的面板赢），一个都没有时点亮首行。不增删行——空行的去留是调用方的事。 */
+function convergePrimaryLocation(rows: LocationDraft[]): LocationDraft[] {
   if (rows.length === 0) return rows;
   const primaryIndexes = rows.flatMap((row, index) => (row.isPrimary ? [index] : []));
   if (primaryIndexes.length === 1) return rows;
   const keep = primaryIndexes.length > 1 ? primaryIndexes[primaryIndexes.length - 1] : 0;
   return rows.map((row, index) => (index === keep ? { ...row, isPrimary: true } : row.isPrimary ? { ...row, isPrimary: false } : row));
+}
+
+/**
+ * 保存前的最后整理：丢掉一行都没填的草稿，并把主要位置收敛到恰好一个。
+ *
+ * 空行不过滤会带着全空字段送进 normalizeLocationInput，被后端「必须指明空间
+ * 归属 / 图形 / 几何」打成 400——用户只是点了一下「添加位置」又没用上。
+ * 注意空行过滤只能留在保存路径：编辑中的合并路径调它会把「添加位置」刚追加
+ * 的空行当帧滤掉，按钮永远加不了行（见 mergeOutdoorLocationDrafts）。
+ */
+export function finalizeLocationDrafts(drafts: LocationDraft[]): LocationDraft[] {
+  return convergePrimaryLocation(drafts.filter((row) => !isLocationDraftBlank(row)));
+}
+
+/**
+ * 设施编辑器「楼外位置」面板的合并入口：服务位置行原样保留在前，楼外行整体
+ * 替换，只做主要位置收敛。两个面板共写一个数组、各自维护 isPrimary，可能同时
+ * 亮着（服务位置已是主要位置时再在楼外面板加行，新行默认点亮），不收敛会在
+ * 保存时撞「恰好一个主要位置」。**这里不能丢空行**：「添加位置」追加的就是
+ * 全空行，滤掉它按钮就废了；空行过滤是保存路径（finalizeLocationDrafts）的事。
+ */
+export function mergeOutdoorLocationDrafts(current: LocationDraft[], rows: LocationDraft[]): LocationDraft[] {
+  return convergePrimaryLocation([
+    ...current.filter((location) => location.role === "service_position"),
+    ...rows,
+  ]);
 }
 
 export function locationDraftFromApi(raw: Record<string, unknown>, index: number): LocationDraft {

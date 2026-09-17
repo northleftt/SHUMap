@@ -13,8 +13,9 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const bundle = await build({
   stdin: {
     contents: `
-      export { updatePlaceLifecycle } from "./worker/modules/places.ts";
+      export { updatePlaceLifecycle, deletePlace } from "./worker/modules/places.ts";
       export { updateFacilityLifecycle } from "./worker/modules/facilities.ts";
+      export { updateMerchantLifecycle } from "./worker/modules/merchants.ts";
     `,
     resolveDir: root,
     sourcefile: "lifecycle-reactivation-guards-entry.ts",
@@ -240,6 +241,47 @@ test("reactivating a clean retired place still works and restores its footprint 
   assert.equal(binding.validTo, null, "轮廓绑定应被重新打开");
 });
 
+test("reactivating a clean retired facility still works", async () => {
+  const db = database();
+  const type = db.prepare("select id from facility_types where status='active' limit 1").get();
+  assert.ok(type, "0011/0019 应种好至少一个启用的设施类型");
+  db.prepare(
+    `insert into facility_instances(id,facility_type_id,lifecycle_status,approval_pending,created_at,updated_at)
+     values('facility_ok',?,'retired',0,'2026-08-01','2026-08-01')`,
+  ).run(type.id);
+
+  const env = { DB: new D1Database(db) };
+  const response = await handlers.updateFacilityLifecycle(lifecycleRequest("active"), env, principal, "facility_ok", "request_reactivate");
+  assert.equal(response.status, 200);
+  const row = db.prepare("select lifecycle_status as status from facility_instances where id='facility_ok'").get();
+  assert.equal(row.status, "active");
+});
+
+test("reactivating a merchant while its filter is deactivated returns 409, not a trigger 500", async () => {
+  const db = database();
+  db.prepare(
+    `insert into merchant_outlets(id,lifecycle_status,approval_pending,created_at,updated_at)
+     values('outlet_dead','retired',0,'2026-08-01','2026-08-01')`,
+  ).run();
+  // 商户筛选组整体下线：protect_used_map_filter_deactivation 不拦 retired 商户，合法。
+  db.prepare(
+    `update map_filter_categories set active=0
+      where id in (select category_id from map_filter_members where includes_merchants=1)`,
+  ).run();
+
+  // 500 路径实证：裸 update 会被 0012 的 require_merchant_active_map_filter_update 拒掉。
+  assert.throws(
+    () => db.prepare("update merchant_outlets set lifecycle_status='active' where id='outlet_dead'").run(),
+    /merchants must belong to an active map filter/,
+  );
+
+  const env = { DB: new D1Database(db) };
+  await assert.rejects(
+    handlers.updateMerchantLifecycle(lifecycleRequest("active"), env, principal, "outlet_dead", "request_reactivate"),
+    (error) => error.status === 409 && error.code === "merchant_filter_inactive",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // collection_tasks 是 cascade 不是 restrict：删楼不撞外键，但会把这栋楼的采集
 // 任务连同已采集 payload 一起静默抹掉。placeUsage 现在把它也计为引用。
@@ -259,9 +301,27 @@ test("placeUsage counts collection tasks so deleting a building does not silentl
   assert.equal(row.count, 1, "采集任务必须被计为引用，deletePlace 才回 409 而不是静默级联");
 });
 
+test("deletePlace returns a 409 with reference details through the real handler", async () => {
+  const db = database();
+  insertRetiredPlace(db, "place_del", "other");
+  db.prepare("insert into buildings(place_id) values('place_del')").run();
+  // 别的实体（运营事件）把位置锚进了这栋楼——placeUsage 的 locationRefs 要接住它。
+  db.prepare(
+    `insert into location_anchors(id,building_place_id,role,geometry_type,precision_level,verification_status,created_at,updated_at)
+     values('anchor_foreign','place_del','event_location','Point','building','reviewed','2026-08-01','2026-08-01')`,
+  ).run();
+
+  const env = { DB: new D1Database(db) };
+  await assert.rejects(
+    handlers.deletePlace(env, principal, "place_del", "request_delete"),
+    (error) => error.status === 409 && error.code === "place_in_use" && error.details?.locationRefs === 1,
+  );
+  assert.ok(db.prepare("select id from places where id='place_del'").get(), "409 之后行必须还在");
+});
+
 test("the new 409 codes all have actionable copy in the content page", () => {
   const content = read("src/admin/pages/ContentPage.tsx");
-  for (const code of ["place_kind_filter_inactive", "place_footprint_conflict", "facility_type_inactive"]) {
+  for (const code of ["place_kind_filter_inactive", "place_footprint_conflict", "facility_type_inactive", "merchant_filter_inactive"]) {
     assert.match(content, new RegExp(code), `${code} 需要在 ERROR_TEXT 里有可照做的文案`);
   }
 });

@@ -72,6 +72,7 @@ const ERROR_TEXT: Record<string, string> = {
   facility_in_use: "还有供稿或运营事件指着这个设施。先处理掉它们，或者直接停用。",
   facility_released: "这个设施已经进过发布版本，删掉会让历史版本指向不存在的数据。改用停用。",
   facility_type_inactive: "这个设施的类型在停用期间被禁用或失去了启用的筛选组。先恢复设施类型，再启用设施。",
+  merchant_filter_inactive: "商户的筛选组在停用期间被下线了。先到「筛选组」里恢复，再启用商户。",
 };
 
 function describeActionError(error: unknown, fallback: string): string {

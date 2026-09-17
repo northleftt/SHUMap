@@ -32,7 +32,7 @@ import {
 } from "../components/primitives";
 
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
-import { LocationEditor, finalizeLocationDrafts, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { LocationEditor, finalizeLocationDrafts, locationDraftFromApi, locationInput, mergeOutdoorLocationDrafts, type LocationDraft } from "../components/LocationEditor";
 import { sanitizeSvg } from "../../lib/svg/sanitize";
 import { parseSvgViewBox } from "../../../shared/svg-geometry.mjs";
 import { markerScaleFromContent } from "../../lib/map/markerScale";
@@ -391,12 +391,9 @@ export function FacilityEditorPage() {
           entityPlaceId={hostPlaceId || null}
           mapVersions={data.maps}
           onChange={(rows) => {
-            // 两个面板共写一个数组：合并后要重新收敛主要位置（ finalize 内部也
-            // 会顺手丢掉空行），否则服务位置与楼外新行可能同时亮着 isPrimary。
-            setLocationDrafts((current) => finalizeLocationDrafts([
-              ...current.filter((location) => location.role === "service_position"),
-              ...rows,
-            ]));
+            // 两个面板共写一个数组：合并只做主要位置收敛，不能丢空行——
+            // 「添加位置」追加的就是全空行，当帧滤掉按钮就废了；空行过滤在保存路径。
+            setLocationDrafts((current) => mergeOutdoorLocationDrafts(current, rows));
           }}
           roles={FACILITY_LOCATION_ROLES}
           spaces={data.spaces}

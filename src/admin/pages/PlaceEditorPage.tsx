@@ -31,7 +31,7 @@ import {
   useAsyncData,
 } from "../components/primitives";
 
-import { LocationEditor, ALL_ROLES, isLocationDraftBlank, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
+import { LocationEditor, ALL_ROLES, finalizeLocationDrafts, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
 import { markerScaleFromContent } from "../../lib/map/markerScale";
 import type { PlaceContent } from "../../../shared/revision-contract";
@@ -292,8 +292,8 @@ export function PlaceEditorPage() {
       setNotice("");
       const aliasList = aliases.split(/[、,，]/).map((a) => a.trim()).filter(Boolean);
       const content = composeContent();
-      const locations = locationDrafts
-        .filter((location) => !isLocationDraftBlank(location))
+      // finalize 同时收敛主要位置：空行占位 primary 被滤掉后一个都不剩，保存照样 400。
+      const locations = finalizeLocationDrafts(locationDrafts)
         .map((location) => locationInput(hasBuildingStructure ? {
           ...location,
           campusId,

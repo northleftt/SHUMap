@@ -98,7 +98,9 @@ test("editors submit complete reviewed structures and omit blank location rows",
   const facility = read("src/admin/pages/FacilityEditorPage.tsx");
   const merchant = read("src/admin/pages/MerchantEditorPage.tsx");
   assert.match(place, /parentPlaceId: parentPlaceId \|\| null/);
-  assert.match(place, /filter\(\(location\) => !isLocationDraftBlank\(location\)\)/);
+  // 空行过滤 + 主要位置收敛统一走 finalizeLocationDrafts（内部按 isLocationDraftBlank 滤空行，
+  // 行为断言在 place-facility-crud-fixes.test.mjs）。
+  assert.match(place, /finalizeLocationDrafts\(locationDrafts\)/);
   assert.match(facility, /indoorSpaceId: indoorSpaceId \|\| null,[\s\S]*?quantity: parsedQuantity,[\s\S]*?operationalStatus,[\s\S]*?locations:/);
   assert.match(merchant, /indoorSpaceId: indoorSpaceId \|\| null,[\s\S]*?locations:/);
 });
