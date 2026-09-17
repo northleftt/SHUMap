@@ -72,6 +72,10 @@ npm run maps:upload:canonical
 
 生产入口是 `https://map.shutf.com`（Workers Custom Domain，zone `shutf.com`）。发布前需要设置 `SESSION_PEPPER`。管理员初始化密钥按部署环境单独配置。
 
+另有 staging（预发）环境：`https://staging.map.shutf.com`，独立 worker / D1 / R2 /
+Queue，数据为生产快照克隆，用于验证破坏性与数据依赖的变更。部署与灌数据流程、
+小程序切环境方法见 [docs/staging.md](docs/staging.md)。
+
 ## 目录
 
 ```text

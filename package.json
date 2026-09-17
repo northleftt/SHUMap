@@ -10,6 +10,8 @@
     "build:cloudflare": "npm run build",
     "build:edgeone": "VITE_ROUTER_MODE=hash npm run build",
     "deploy:cloudflare": "npm run build && npx wrangler deploy",
+    "deploy:staging": "npm run build && CLOUDFLARE_ACCOUNT_ID=400623ade20e6d96cb546c98bcf3e33f npx wrangler deploy --env staging",
+    "migrations:staging": "CLOUDFLARE_ACCOUNT_ID=400623ade20e6d96cb546c98bcf3e33f npx wrangler d1 migrations apply shumap-v2-staging --remote --env staging",
     "db:migrate:remote": "npx wrangler d1 migrations apply shumap-v2 --remote",
     "db:migrate:local": "npx wrangler d1 migrations apply shumap-v2 --local",
     "db:seed:v2": "node scripts/generate_v2_seed.mjs > output/v2-seed.sql",

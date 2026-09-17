@@ -205,6 +205,16 @@
 
 ## 工程现状（Part 0：微信云托管代理，2026-08-07 已上线）
 
+- **staging 环境切换（2026-09-17）**：`config.ts` 模块加载时读 wx storage 键
+  `shumap.env` 并覆盖 `apiBaseUrl`/`webBaseUrl`/`cloudService`（纯逻辑 `lib/env.ts`，
+  单测 `tests/miniprogram-env-switch.test.mjs`）；非 `staging` 一律按生产。
+  入口在 debug 页（pages/debug/debug）顶部「运行环境」：清 release/map-asset 缓存
+  → 写 storage → `wx.restartMiniProgram` 重启生效。staging 反代服务
+  `cloudrun/shumap-api-staging/`（server.mjs 与生产逐字节一致，仅 Dockerfile 上游
+  不同，漂移门禁 `tests/miniprogram-cloudrun-staging-proxy.test.mjs`）**尚未部署**
+  （CloudBase CLI 凭据过期需人工登录，步骤见 cloudrun/README.md）；部署前在
+  devtools 测 staging 需临时把 `useCloudContainer` 改回 false 直连
+  `staging.map.shutf.com`。全量说明见主仓库 `docs/staging.md`。
 - `cloudrun/shumap-api/`：零依赖 Node 反向代理容器（`server.mjs` + `Dockerfile`，监听 80），
   已部署到云环境 `cloudbase-d1gse9nsp7630b4e7`（个人版，ap-shanghai）服务 `shumap-api`。
 - **上游是 Worker 自定义域名 `https://map.shutf.com`，不是 workers.dev**：

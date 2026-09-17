@@ -73,3 +73,26 @@
   font-size: 22rpx;
   color: #86909c;
 }
+
+.env-row {
+  display: flex;
+  flex-direction: row;
+  gap: 16rpx;
+  margin-bottom: 12rpx;
+}
+
+.env-chip {
+  padding: 10rpx 28rpx;
+  border-radius: 999rpx;
+  border: 1rpx solid #e5e6eb;
+  font-size: 26rpx;
+  color: #4e5969;
+  background: #f7f8fa;
+}
+
+.env-chip-active {
+  background: #e8f1f8;
+  border-color: #1e80c1;
+  color: #1e80c1;
+  font-weight: 600;
+}

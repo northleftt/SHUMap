@@ -1,0 +1,10 @@
+{
+  "name": "shumap-api-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "微信云托管反向代理：转发到 shumap Cloudflare Worker",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}
