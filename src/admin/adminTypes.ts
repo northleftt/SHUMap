@@ -48,6 +48,9 @@ export interface Floor {
   displayName: string;
   isPublic: number;
   lifecycleStatus: string;
+  /** 平面图位图（0032 起每层一张）；只有地点详情接口的 floors 带这两个字段。 */
+  imageMediaId?: string | null;
+  imageUrl?: string | null;
 }
 
 export interface SpacesResponse {

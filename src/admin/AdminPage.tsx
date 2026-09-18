@@ -5,7 +5,6 @@ import {
   ChartColumn,
   FileText,
   Inbox,
-  Layers,
   LayoutGrid,
   LogOut,
   Map as MapIcon,
@@ -37,7 +36,6 @@ import { SubmissionsPage } from "./pages/SubmissionsPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { TaxonomyPage } from "./pages/TaxonomyPage";
-import { FloorsPage } from "./pages/FloorsPage";
 import { OrganizationsPage } from "./pages/OrganizationsPage";
 import { OperationsDataPage } from "./pages/OperationsDataPage";
 import { DevToolsPage } from "./pages/DevToolsPage";
@@ -54,7 +52,6 @@ const NAV_GROUPS = [
       { to: "/admin/content", end: false, label: "内容管理", icon: FileText },
       { to: "/admin/taxonomy", end: false, label: "分类管理", icon: Tags },
       { to: "/admin/organizations", end: false, label: "品牌与机构", icon: Building2, permission: "write:content" },
-      { to: "/admin/floors", end: false, label: "楼层与楼层图", icon: Layers, permission: "write:maps" },
       { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
       { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
       // 返校指南是独立模块：自己的页面、自己的编辑器、自己的发布。
@@ -109,7 +106,6 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/operations/")) return "运营信息 · 事件详情与进展";
   if (pathname.startsWith("/admin/operations")) return "运营信息管理";
   if (pathname.startsWith("/admin/transit")) return "校车时刻";
-  if (pathname.startsWith("/admin/floors")) return "楼层与楼层图管理";
   if (pathname.startsWith("/admin/maps")) return "地图版本管理";
   if (pathname.startsWith("/admin/submissions")) return "用户提交 · 处理";
   if (pathname.startsWith("/admin/releases")) return "发布中心";
@@ -325,7 +321,7 @@ export function AdminPage() {
         <Route path="operations/:id/edit" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />
         <Route path="operations/:id" element={<OperationDetailPage />} />
         <Route path="transit" element={hasPermission("write:transit") ? <TransitPage /> : <Navigate to="/admin" replace />} />
-        <Route path="floors" element={hasPermission("write:maps") ? <FloorsPage /> : <Navigate to="/admin" replace />} />
+        <Route path="floors" element={<Navigate to="/admin/content" replace />} />
         <Route path="maps" element={hasPermission("write:maps") ? <MapsPage /> : <Navigate to="/admin" replace />} />
         <Route path="submissions" element={hasPermission("review:content") ? <SubmissionsPage /> : <Navigate to="/admin" replace />} />
         <Route path="releases" element={hasPermission("publish:release") ? <ReleasesPage /> : <Navigate to="/admin" replace />} />

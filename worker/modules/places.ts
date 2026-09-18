@@ -7,6 +7,7 @@ import { exactObject, isoNow, jsonString, makeId, oneOf, sha256 } from "../lib/v
 import { normalizePlaceRevision, validatePlaceRevision } from "../lib/revision-contracts";
 import { audit } from "./audit";
 import { listEntityLocations, restoreEntityLocations, retireEntityLocations } from "./locations";
+import { publicMediaPath } from "./media";
 
 const PLACE_LIFECYCLES = ["planned", "active", "temporarily_closed", "retired"] as const;
 
@@ -49,18 +50,21 @@ export async function getPlace(env: Env, id: string): Promise<Response> {
     [id],
   );
   if (!place) throw new HttpError(404, "not_found", "Place does not exist");
-  const [revisions, names, locations, floors] = await Promise.all([
+  const [revisions, names, locations, floorRows] = await Promise.all([
     all(env.DB, "select * from place_revisions where place_id=? order by revision_no desc", [id]),
     all(env.DB, "select * from place_names where place_id=? order by name_type,name", [id]),
     listEntityLocations(env, "place", id),
-    all(
+    all<{ id: string; buildingPlaceId: string; levelCode: string; levelOrder: number; displayName: string; isPublic: number; lifecycleStatus: string; imageMediaId: string | null }>(
       env.DB,
       `select id,building_place_id as buildingPlaceId,level_code as levelCode,level_order as levelOrder,
-              display_name as displayName,is_public as isPublic,lifecycle_status as lifecycleStatus
+              display_name as displayName,is_public as isPublic,lifecycle_status as lifecycleStatus,
+              image_media_id as imageMediaId
          from floors where building_place_id=? order by level_order`,
       [id],
     ),
   ]);
+  // 楼层平面图是每层一张图片（0032 起），楼宇编辑页的楼层面板直接上传/替换。
+  const floors = floorRows.map((row) => ({ ...row, imageUrl: row.imageMediaId ? publicMediaPath(row.imageMediaId) : null }));
   return json({ place: { ...place, isBuilding: Number(place.isBuilding) === 1 }, revisions, names, locations, floors });
 }
 
