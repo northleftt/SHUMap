@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Layers, Plus, Trash2, Upload } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
@@ -695,6 +695,49 @@ function FloorPanel({
     }
   }
 
+  // 楼层平面图是每层一张位图（0032 起）：直传 PUT /api/admin/floors/:id/image，上传即替换。
+  async function uploadPlan(floor: Floor, file: File) {
+    setBusy(true);
+    setError("");
+    try {
+      await admin.uploadFloorImage(floor.id, file, file.type);
+      onDone(`已更新 ${floor.displayName} 的平面图`);
+    } catch (err) {
+      setError(errorMessage(err, "上传平面图失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function togglePublic(floor: Floor) {
+    setBusy(true);
+    setError("");
+    try {
+      const hidden = floor.isPublic === 0;
+      await admin.updateFloor(floor.id, { isPublic: hidden });
+      onDone(`${floor.displayName} 已${hidden ? "对外显示" : "对外隐藏"}`);
+    } catch (err) {
+      setError(errorMessage(err, "更新楼层可见性失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeFloor(floor: Floor) {
+    if (!window.confirm(`确认删除楼层「${floor.displayName}」？该操作不可恢复。`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await admin.deleteFloor(floor.id);
+      onDone(`已删除楼层 ${floor.displayName}`);
+    } catch (err) {
+      // 有设施/商户/锚点挂着时服务端回 409 floor_in_use，明细在 message 里。
+      setError(errorMessage(err, "删除楼层失败"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const sorted = [...floors].sort((a, b) => a.levelOrder - b.levelOrder);
 
   return (
@@ -755,16 +798,68 @@ function FloorPanel({
               }
               return (
                 <div key={floorId} className="flex items-center gap-3 py-2.5 text-body">
-                  <span className="font-medium text-ink">{label}</span>
-                  <span className="text-label text-sub">{code}</span>
-                  {hidden ? <Pill>不对外展示</Pill> : null}
+                  {floor.imageUrl ? (
+                    <img
+                      alt={`${label} 平面图`}
+                      className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover"
+                      src={floor.imageUrl}
+                    />
+                  ) : (
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary-container text-primary">
+                      <Layers size={16} />
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <span className="font-medium text-ink">{label}</span>
+                    <span className="ml-1.5 text-label text-sub">{code}</span>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      {floor.imageUrl ? <Pill tone="ok">有平面图</Pill> : <Pill tone="neutral">无平面图</Pill>}
+                      {hidden ? <Pill>不对外展示</Pill> : null}
+                    </div>
+                  </div>
                   <span className="flex-1" />
+                  <label
+                    className={`inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-label text-ink transition-colors ${
+                      busy ? "cursor-wait opacity-60" : "cursor-pointer hover:border-primary hover:text-primary"
+                    }`}
+                  >
+                    <Upload size={13} />
+                    {floor.imageUrl ? "替换平面图" : "上传平面图"}
+                    <input
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      disabled={busy}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (file) void uploadPlan(floor, file);
+                      }}
+                      type="file"
+                    />
+                  </label>
                   <button
-                    className="text-aux font-medium text-primary"
+                    className="shrink-0 text-aux font-medium text-primary"
+                    disabled={busy}
+                    onClick={() => togglePublic(floor)}
+                    type="button"
+                  >
+                    {hidden ? "对外显示" : "对外隐藏"}
+                  </button>
+                  <button
+                    className="shrink-0 text-aux font-medium text-primary"
+                    disabled={busy}
                     onClick={() => { setEditingId(floorId); setEditingName(label); setError(""); }}
                     type="button"
                   >
                     重命名
+                  </button>
+                  <button
+                    className="shrink-0 text-aux font-medium text-primary"
+                    disabled={busy}
+                    onClick={() => removeFloor(floor)}
+                    type="button"
+                  >
+                    删除
                   </button>
                 </div>
               );

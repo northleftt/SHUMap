@@ -551,13 +551,9 @@ test("the floor endpoints are registered behind the map permission", () => {
   assert.ok(detailGate > 0 && detailAt - detailGate < 200, "floor detail must require read:admin");
 });
 
-test("the admin floor page links back to the content editors and uploads plan images directly", () => {
-  const page = read("src/admin/pages/FloorsPage.tsx");
-  // 楼层页不编辑设施内容，只跳转过去——避免同一份数据两处可改。
-  assert.match(page, /\/admin\/content\/facilities\//);
-  assert.match(page, /\/admin\/content\/merchants\//);
-  assert.match(page, /listBuildingFloors/);
-  // 每层一张位图：直传 PUT /api/admin/floors/:id/image，只接受 PNG/JPEG/WebP。
+test("the place editor floor panel uploads plan images directly", () => {
+  const page = read("src/admin/pages/PlaceEditorPage.tsx");
+  // 楼层管理并入楼宇编辑页：每层一张位图，直传 PUT /api/admin/floors/:id/image，只接受 PNG/JPEG/WebP。
   assert.match(page, /uploadFloorImage/);
   assert.match(page, /image\/png,image\/jpeg,image\/webp/);
   // 旧的 SVG 导入管线（意图 → 上传 → 导入任务）与图纸状态操作都已拆除。
@@ -566,7 +562,9 @@ test("the admin floor page links back to the content editors and uploads plan im
   assert.doesNotMatch(page, /createImportJob/);
   assert.doesNotMatch(page, /floor_svg/);
 
+  // 独立的「楼层与楼层图」入口已撤掉；旧路径重定向到内容管理。
   const adminShell = read("src/admin/AdminPage.tsx");
-  assert.match(adminShell, /path="floors"/);
-  assert.match(adminShell, /FloorsPage/);
+  assert.doesNotMatch(adminShell, /FloorsPage/);
+  assert.doesNotMatch(adminShell, /楼层与楼层图/);
+  assert.match(adminShell, /path="floors" element=\{<Navigate to="\/admin\/content" replace \/>/);
 });
