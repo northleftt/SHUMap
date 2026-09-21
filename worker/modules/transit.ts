@@ -59,9 +59,9 @@ const MAX_CALENDAR_EXCEPTIONS = 366;
 const MAX_STOP_LOCATIONS = 2;
 const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 /**
- * 日历的日型（0025 迁移的 CHECK 枚举）。客户端的「今天是工作日/假日……」标签读它，
- * 见 resolveDayType。'other' 是逃生舱：不属于五种日型的日历（考试周、临时加开）选它，
- * 标签不认它，但班次照常运营。
+ * 日历的日型（0025 迁移的 CHECK 枚举）。**历史遗留**：客户端的「今天是工作日/假日……」
+ * 标签已改由校历判定（worker/lib/daytype.ts），此列不再驱动任何行为，仅为兼容旧数据
+ * 保留可写；新日历一律写 'other'。
  */
 const DAY_TYPES = ["weekday", "weekend", "holiday", "winter_break", "summer_break", "other"] as const;
 
@@ -571,18 +571,17 @@ export async function createCalendar(request: Request, env: Env, principal: Sess
     "name",
     "validFrom",
     "validTo",
-    "dayType",
     "weekdays",
     "exceptions",
     "sourceId",
-  ]);
+  ], ["dayType"]);
   const id = makeId("calendar");
   const sourceId = optionalString(body.sourceId, "sourceId", 100);
   await assertExists(env.DB, "data_sources", sourceId, "Data source");
   const weekdays = exactObject(body.weekdays, "weekdays", WEEKDAYS);
   const flags = WEEKDAYS.map((day) => booleanValue(weekdays[day], `weekdays.${day}`) ? 1 : 0);
   const name = requiredString(body.name, "name", 200);
-  const dayType = oneOf(body.dayType, "dayType", DAY_TYPES);
+  const dayType = body.dayType === undefined ? "other" : oneOf(body.dayType, "dayType", DAY_TYPES);
   const validFrom = dateValue(body.validFrom, "validFrom");
   const validTo = dateValue(body.validTo, "validTo");
   if (validFrom > validTo) {
@@ -1030,39 +1029,8 @@ function shanghaiWeekday(date: string): string {
     .toLowerCase();
 }
 
-/** 客户端日型标签的取值。与 0025 迁移的 CHECK 枚举一致（'other' 不出现在标签里）。 */
+/** 客户端日型标签的取值。由**校历**判定（worker/lib/daytype.ts 的 resolveCampusDayType）。 */
 export type PublicDayType = "weekday" | "weekend" | "holiday" | "winter_break" | "summer_break";
-
-/**
- * 当日日型：由**管理端的服务日历**决定，不再由客户端算。
- *
- * 此前客户端读 `data/academic-calendar.json`（2026-03-11 提交 1ee1733 手写的草稿，
- * 无生成脚本、worker 侧零引用、假日只列到 2026-06-19）算这个标签，而班次归属早就
- * 按 service_calendars 过滤了——两套数据没有任何代码连通，于是会出现「页面说今天是
- * 假日、但假日班次一个都不出」。日型上收到日历表（0025 的 day_type 列）之后，
- * 运营改一处即可，两边一致。
- *
- * 命中规则与 publicCampusLines 的班次过滤**完全一致**（有效期 + 星期标记 or added
- * 例外，再排除 removed 例外）——否则标签和班次会各说各话。
- *
- * 优先级：holiday > winter_break > summer_break > weekend > weekday。
- * 现有数据里日历有效期是重叠的（「工作日」日历覆盖了整个寒暑假），同一天可能命中
- * 多条，所以必须有确定的优先级，否则标签随查询顺序漂。假日排最前是因为它是最specific
- * 的声明（逐日列举的例外日）；寒暑假优先于周末，因为寒假里的周六该显示「寒假」。
- *
- * 一条都没命中时（例如学年之间的空档）回落到按星期判周末/工作日——只是标签，
- * 不影响任何班次。
- */
-export function resolveDayType(
-  calendars: Array<{ dayType: string }>,
-  weekday: string,
-): PublicDayType {
-  const present = new Set(calendars.map((calendar) => calendar.dayType));
-  for (const candidate of ["holiday", "winter_break", "summer_break", "weekend", "weekday"] as const) {
-    if (present.has(candidate)) return candidate;
-  }
-  return weekday === "saturday" || weekday === "sunday" ? "weekend" : "weekday";
-}
 
 // 日型随 campus-lines 一起下发，不单开端点：两端在切日期时本来就会重拉 campus-lines，
 // 多一个端点只是多一次往返和多一处要维护的契约。

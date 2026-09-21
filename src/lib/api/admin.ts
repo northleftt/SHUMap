@@ -848,8 +848,9 @@ export interface TransitCalendarCreateInput {
   name: string;
   validFrom: string;
   validTo: string;
-  /** 日型：决定客户端的「今天是工作日/假日……」标签，'other' 表示不参与标签。 */
-  dayType: ServiceCalendarDayType;
+  /** 历史遗留：日型标签已由校历判定（GET /api/public/transit/campus-lines 的 dayType），
+      此列不再驱动行为；省略时 worker 写 'other'。 */
+  dayType?: ServiceCalendarDayType;
   weekdays: Record<"monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday", boolean>;
   exceptions: TransitCalendarExceptionInput[];
   sourceId: string | null;

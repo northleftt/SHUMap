@@ -94,16 +94,13 @@ test("日型判定：周末 / 工作日 / 法定节假日 / 调休工作日 / �
   assert.equal(await dayType(db, "2026-08-10"), "summer_break"); // 暑假区间
 });
 
-test("日型判定：临时规则日历覆盖校历，'other' 不覆盖", async () => {
+test("日型判定：服务日历的 day_type 不影响标签（校历为准）", async () => {
   const db = database();
-  // 2026-09-19 周六本是 weekend，命中一条 holiday 临时规则 → holiday
+  // 服务日历只是班次调度规则，不再参与日型标签：即便同一天命中一条 holiday 日历，
+  // 标签仍按校历（2026-09-19 周六 → weekend）。
   db.exec(`insert into service_calendars(id,name,timezone,valid_from,valid_to,day_type,monday,tuesday,wednesday,thursday,friday,saturday,sunday)
     values('cal_rule','国庆调班','Asia/Shanghai','2026-09-19','2026-09-19','holiday',0,0,0,0,0,1,0)`);
-  assert.equal(await dayType(db, "2026-09-19"), "holiday");
-  // 'other' 日历不参与标签，落回校历
-  db.exec(`insert into service_calendars(id,name,timezone,valid_from,valid_to,day_type,monday,tuesday,wednesday,thursday,friday,saturday,sunday)
-    values('cal_other','考试周加开','Asia/Shanghai','2026-09-21','2026-09-21','other',1,0,0,0,0,0,0)`);
-  assert.equal(await dayType(db, "2026-09-21"), "weekday");
+  assert.equal(await dayType(db, "2026-09-19"), "weekend");
 });
 
 test("shanghaiWeekday 不受运行环境 TZ 影响", () => {

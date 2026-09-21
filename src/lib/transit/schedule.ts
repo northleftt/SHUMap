@@ -7,7 +7,7 @@
 // 预/非班次合并成一格展示（旧版 mergeSchedulesByTime 语义）。
 //
 // 日型（工作日/周末/假日/寒暑假）**由服务端按管理端的服务日历给出**
-// （CampusLinesResponse.dayType，见 worker/modules/transit.ts 的 resolveDayType）。
+// （CampusLinesResponse.dayType，由校历判定，见 worker/lib/daytype.ts）。
 // 这里曾经自己算：读 data/academic-calendar.json —— 2026-03-11 提交 1ee1733 手写的
 // 一份草稿，没有生成脚本、worker 侧零引用、假日只列到 2026-06-19。而班次归属早就
 // 按 service_calendars 过滤了，两套数据没有代码连通，于是会出现「页面说今天是假日、

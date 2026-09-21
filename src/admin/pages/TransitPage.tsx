@@ -4,7 +4,6 @@ import * as admin from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
 import type {
   ReferenceDataResponse,
-  ServiceCalendarDayType,
   ServiceCalendarRow,
   SpacesResponse,
   TransitBookingPolicy,
@@ -76,22 +75,6 @@ const TABS: Array<{ key: Tab; label: string }> = [
 const WEEK_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
 const WEEK_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
-/**
- * 日历的日型（0025 迁移的 day_type 列）。客户端校车页那句「今天是工作日 / 假日……」
- * 直接读它，所以这是运营唯一需要维护的地方——此前那个标签算在前端、数据源是一份
- * 手写草稿（data/academic-calendar），和班次归属所依据的服务日历没有任何连通。
- *
- * 「不参与日型」= 'other'：考试周、临时加开这类不属于五种日型的日历选它，班次照常
- * 运营，只是不影响标签。
- */
-const DAY_TYPE_OPTIONS: Array<{ value: ServiceCalendarDayType; label: string }> = [
-  { value: "weekday", label: "工作日" },
-  { value: "weekend", label: "周末" },
-  { value: "holiday", label: "假日" },
-  { value: "winter_break", label: "寒假" },
-  { value: "summer_break", label: "暑假" },
-  { value: "other", label: "不参与日型标签" },
-];
 
 /** 站点自身的锚点：候车点，外加可选的导航终点。上 / 下车安排归线路（pattern 的 pickup/dropoff），不归站点。 */
 const STOP_LOCATION_ROLES: readonly LocationRole[] = ["boarding_point", "navigation_target"];
@@ -1561,8 +1544,6 @@ interface CalendarFormState {
   name: string;
   validFrom: string;
   validTo: string;
-  /** 日型：决定客户端「今天是工作日/假日……」标签；'other' 表示不参与标签。 */
-  dayType: ServiceCalendarDayType;
   weekdays: boolean[];
   exceptions: Array<{ date: string; type: "added" | "removed"; label: string }>;
   sourceId: string;
@@ -1598,7 +1579,6 @@ function CalendarsPanel({
       name: calendar.name,
       validFrom: calendar.validFrom,
       validTo: calendar.validTo,
-      dayType: calendar.dayType,
       weekdays: WEEK_KEYS.map((key) => calendar[key] === 1),
       exceptions: exceptionsByCalendar.get(calendar.id) ?? [],
       sourceId: calendar.sourceId ?? "",
@@ -1632,7 +1612,6 @@ function CalendarsPanel({
                   name: form.name,
                   validFrom: form.validFrom,
                   validTo: form.validTo,
-                  dayType: form.dayType,
                   weekdays: Object.fromEntries(WEEK_KEYS.map((key, index) => [key, form.weekdays[index]])) as Record<
                     (typeof WEEK_KEYS)[number], boolean
                   >,
@@ -1666,7 +1645,6 @@ function CalendarsPanel({
                           name: form.name,
                           validFrom: form.validFrom,
                           validTo: form.validTo,
-                          dayType: form.dayType,
                           weekdays: Object.fromEntries(WEEK_KEYS.map((key, index) => [key, form.weekdays[index]])) as Record<
                             (typeof WEEK_KEYS)[number], boolean
                           >,
@@ -1703,14 +1681,6 @@ function CalendarsPanel({
                   </span>
                   <span className="w-40 shrink-0 text-aux text-sub">
                     {fmtDay(calendar.validFrom)} 至 {fmtDay(calendar.validTo)}
-                  </span>
-                  {/* 规则来源徽章：'other' = 跟随校历（日型按校历判定），其余 = 临时规则覆盖校历。 */}
-                  <span className="w-32 shrink-0">
-                    {calendar.dayType === "other" ? (
-                      <Pill tone="info">跟随校历</Pill>
-                    ) : (
-                      <Pill>临时规则 · {DAY_TYPE_OPTIONS.find((option) => option.value === calendar.dayType)?.label ?? calendar.dayType}</Pill>
-                    )}
                   </span>
                   <span className="w-24 shrink-0 text-aux text-sub">{exceptions.length ? `${exceptions.length} 个例外` : "无例外"}</span>
                   <span className="flex-1" />
@@ -1787,10 +1757,6 @@ function CalendarEditor({
   const [validTo, setValidTo] = useState(initial?.validTo ?? `${new Date().getFullYear()}-12-31`);
   // 新建默认 'weekday'：最常见的日历就是工作日班表。不默认 'other' 是因为
   // 'other' 不参与客户端日型标签，静默选它会让「今天是什么日子」这行字消失。
-  const [dayType, setDayType] = useState<ServiceCalendarDayType>(initial?.dayType ?? "weekday");
-  // 规则来源是 UI 糖：跟随校历 = day_type 固定 'other'（日型交给 worker 按校历判定）；
-  // 临时规则 = day_type 自选，非 'other' 的日历会覆盖校历。
-  const [ruleSource, setRuleSource] = useState<"calendar" | "temporary">(initial?.dayType === "other" ? "calendar" : "temporary");
   const [weekdays, setWeekdays] = useState(initial?.weekdays ?? [true, true, true, true, true, false, false]);
   const [exceptions, setExceptions] = useState(initial?.exceptions ?? []);
   const [sourceId, setSourceId] = useState(initial?.sourceId ?? "");
@@ -1812,7 +1778,6 @@ function CalendarEditor({
       name: name.trim(),
       validFrom,
       validTo,
-      dayType: ruleSource === "calendar" ? "other" : dayType,
       weekdays,
       exceptions: filled,
       sourceId,
@@ -1825,26 +1790,6 @@ function CalendarEditor({
         <Field label="日历名称" onChange={setName} placeholder="如 2025-2026 工作日" value={name} />
         <Field label="开始日期" onChange={setValidFrom} type="date" value={validFrom} />
         <Field label="结束日期" onChange={setValidTo} type="date" value={validTo} />
-        <div>
-          <span className="mb-1.5 block text-label text-sub">规则来源</span>
-          <div className="flex h-10 items-center gap-2">
-            <Chip active={ruleSource === "calendar"} onClick={() => { setRuleSource("calendar"); setDayType("other"); }}>
-              跟随校历
-            </Chip>
-            <Chip active={ruleSource === "temporary"} onClick={() => setRuleSource("temporary")}>
-              临时规则
-            </Chip>
-          </div>
-        </div>
-        {/* 日型决定客户端「今天是工作日/假日……」那句标签。跟随校历时固定 'other'，
-            由后端按校历判定；临时规则才在这里选日型。 */}
-        <SelectField
-          disabled={ruleSource === "calendar"}
-          label="日型"
-          onChange={(value) => setDayType(value as ServiceCalendarDayType)}
-          options={ruleSource === "calendar" ? [{ value: "other", label: "按校历判定" }] : DAY_TYPE_OPTIONS}
-          value={ruleSource === "calendar" ? "other" : dayType}
-        />
         <SelectField
           label="数据来源（可选）"
           onChange={setSourceId}
