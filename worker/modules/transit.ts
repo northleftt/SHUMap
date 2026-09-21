@@ -15,6 +15,7 @@ import {
   requiredString,
 } from "../lib/values";
 import { normalizeLocationInputs } from "../lib/revision-contracts";
+import { resolveCampusDayType, type WeekdayColumn } from "../lib/daytype";
 import { audit } from "./audit";
 import { listEntityLocationsByType, planLocation } from "./locations";
 import { estimateStopArrivals, loadSegmentMedians, scopeSegmentMedians } from "./travel-time";
@@ -1063,22 +1064,6 @@ export function resolveDayType(
   return weekday === "saturday" || weekday === "sunday" ? "weekend" : "weekday";
 }
 
-/** 某天生效的服务日历（日型解析用；过滤规则与班次查询一致）。 */
-async function loadActiveCalendars(env: Env, date: string, weekday: string): Promise<Array<{ dayType: string }>> {
-  return all<{ dayType: string }>(
-    env.DB,
-    `select day_type as dayType from service_calendars c
-      where c.valid_from<=? and c.valid_to>=?
-        and (c.${weekday}=1 or exists(
-          select 1 from service_calendar_exceptions a
-           where a.calendar_id=c.id and a.service_date=? and a.exception_type='added'
-        ))
-        and not exists(select 1 from service_calendar_exceptions e
-           where e.calendar_id=c.id and e.service_date=? and e.exception_type='removed')`,
-    [date, date, date, date],
-  );
-}
-
 // 日型随 campus-lines 一起下发，不单开端点：两端在切日期时本来就会重拉 campus-lines，
 // 多一个端点只是多一次往返和多一处要维护的契约。
 
@@ -1101,8 +1086,8 @@ export async function publicCampusLines(request: Request, env: Env): Promise<Res
   const weekday = shanghaiWeekday(date);
   if (!(WEEKDAYS as readonly string[]).includes(weekday)) throw new HttpError(400, "validation_error", "Invalid date");
   const headers = { "cache-control": "public, max-age=60" };
-  // 日型和班次用同一套日历判定，一起下发，客户端不再自己算（见 resolveDayType）。
-  const dayType = resolveDayType(await loadActiveCalendars(env, date, weekday), weekday);
+  // 日型走校园级共享判定（校历 + 临时规则，worker/lib/daytype.ts），与就餐页同口径。
+  const dayType = await resolveCampusDayType(env, date, weekday as WeekdayColumn);
   const payload = {
     date,
     timezone: "Asia/Shanghai",

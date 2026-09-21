@@ -41,6 +41,11 @@ import { createSubmission, getSubmissionStatus, listSubmissions, reviewSubmissio
 import { listFeatureFeedback, submitFeatureFeedback } from "./modules/feature-feedback";
 import { createOrganization, deleteOrganization, listOrganizations, updateOrganization } from "./modules/organizations";
 import { createFloor, deleteFloor, getFloorDetail, listFloorsForBuilding, updateFloor, uploadFloorImage } from "./modules/floors";
+import {
+  createAcademicYear, createDiningSchedule, deleteAcademicYear, deleteDiningSchedule,
+  listAcademicYears, listDiningAdmin, publicDiningSchedule, publicMerchantStatus,
+  replaceMealPeriods, updateAcademicYear, updateDiningSchedule,
+} from "./modules/dining";
 import { createDataSource, listCampusesAndSpaces, listReferenceData } from "./modules/spaces";
 import { createUser, listUsers, updateUser } from "./modules/users";
 import {
@@ -163,6 +168,9 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   }
   if (method === "GET" && path === "/api/public/facility-types") return listPublicFacilityTypes(env);
   if (method === "GET" && path === "/api/public/facility-status") return publicFacilityStatus(env);
+  // 商户营业状态与就餐安排都走实时通道（不进 release）：关店/周末安排要当天生效。
+  if (method === "GET" && path === "/api/public/merchant-status") return publicMerchantStatus(env);
+  if (method === "GET" && path === "/api/public/dining/schedule") return publicDiningSchedule(request, env);
   // 自定义设施图标（后台上传的 SVG）。?ink=primary|white 决定上色，
   // 对应图钉未选中 / 选中两态；两端都从这里取图。
   const publicFacilityIcon = match(path, "/api/public/facility-icons/:key");
@@ -257,6 +265,46 @@ async function routeAdmin(request: Request, env: Env, requestId: string, path: s
   if (method === "GET" && path === "/api/admin/reference-data") {
     await requireSession(request, env, "read:admin");
     return listReferenceData(env);
+  }
+  // 校历（校园级日型数据源，0035）：读用 read:admin，写用 write:content。
+  if (method === "GET" && path === "/api/admin/calendar/years") {
+    await requireSession(request, env, "read:admin");
+    return listAcademicYears(env);
+  }
+  if (method === "POST" && path === "/api/admin/calendar/years") {
+    principal = await requireSession(request, env, "write:content");
+    return createAcademicYear(request, env, principal, requestId);
+  }
+  const academicYear = match(path, "/api/admin/calendar/years/:id");
+  if (method === "PUT" && academicYear) {
+    principal = await requireSession(request, env, "write:content");
+    return updateAcademicYear(request, env, principal, academicYear.id, requestId);
+  }
+  if (method === "DELETE" && academicYear) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteAcademicYear(env, principal, academicYear.id, requestId);
+  }
+  // 就餐：供餐时段 + 开放安排（0036），即时生效不进 release。
+  if (method === "GET" && path === "/api/admin/dining") {
+    await requireSession(request, env, "read:admin");
+    return listDiningAdmin(env);
+  }
+  if (method === "PUT" && path === "/api/admin/dining/meal-periods") {
+    principal = await requireSession(request, env, "write:content");
+    return replaceMealPeriods(request, env, principal, requestId);
+  }
+  if (method === "POST" && path === "/api/admin/dining/schedules") {
+    principal = await requireSession(request, env, "write:content");
+    return createDiningSchedule(request, env, principal, requestId);
+  }
+  const diningSchedule = match(path, "/api/admin/dining/schedules/:id");
+  if (method === "PUT" && diningSchedule) {
+    principal = await requireSession(request, env, "write:content");
+    return updateDiningSchedule(request, env, principal, diningSchedule.id, requestId);
+  }
+  if (method === "DELETE" && diningSchedule) {
+    principal = await requireSession(request, env, "write:content");
+    return deleteDiningSchedule(env, principal, diningSchedule.id, requestId);
   }
   // 品牌 / 机构维护。读用 read:admin，增改删用 write:content。
   if (method === "GET" && path === "/api/admin/organizations") {

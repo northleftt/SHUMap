@@ -86,6 +86,16 @@ export function MapPage() {
     () => (state.releaseData ? facilityIconKeyMap(state.releaseData.manifest.facilityTypes) : null),
     [state.releaseData],
   );
+  // 有公开楼层的楼宇集合：食堂 POI 的「查看楼层图 ›」入口（去就餐详情页）按它显示。
+  const placesWithFloors = useMemo(() => {
+    const set = new Set<string>();
+    if (state.releaseData) {
+      for (const floor of state.releaseData.manifest.floors) {
+        if (floor.isPublic !== 0) set.add(floor.buildingPlaceId);
+      }
+    }
+    return set;
+  }, [state.releaseData]);
   const eventById = (id: string | null) =>
     id ? (overlayItems.find((item) => item.event.id === id)?.event ?? null) : null;
   const selectedEvent = eventById(selectedEventId);
@@ -541,6 +551,7 @@ export function MapPage() {
                 facilityStatus={state.facilityStatus}
                 iconKeyByTypeCode={facilityIconKeys}
                 initialMerchantId={state.selectedMerchantId}
+                hasFloors={placesWithFloors.has(state.selectedPoi.entityId)}
               />
             </div>
           </div>
@@ -629,6 +640,7 @@ export function MapPage() {
                       facilityStatus={state.facilityStatus}
                       iconKeyByTypeCode={facilityIconKeys}
                       initialMerchantId={state.selectedMerchantId}
+                      hasFloors={placesWithFloors.has(state.selectedPoi.entityId)}
                     />
                   </div>
                 </div>

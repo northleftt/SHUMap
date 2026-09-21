@@ -27,6 +27,7 @@ import {
   MarkerScaleField,
   TextArea,
   errorMessage,
+  fmtDateTime,
   useAsyncData,
 } from "../components/primitives";
 
@@ -70,6 +71,13 @@ interface MerchantEditorRevision {
 }
 
 const MERCHANT_LIFECYCLES = ["planned", "active", "temporarily_closed", "retired"] as const;
+
+interface MerchantRevisionRow {
+  id: string;
+  revision_no: number;
+  editorial_status: string;
+  created_at: string;
+}
 
 const LIFECYCLE_LABELS: Record<admin.MerchantLifecycle, string> = {
   planned: "筹备中",
@@ -197,6 +205,7 @@ export function MerchantEditorPage() {
   const data = state.data!;
   const editor = data.editor;
   const reviewLocked = editor?.editorialStatus === "in_review";
+  const revisions = ((data.detail?.revisions ?? []) as unknown as MerchantRevisionRow[]).slice(0, 8);
   const floors = data.spaces.floors.filter((f) => !hostPlaceId || f.buildingPlaceId === hostPlaceId);
   // 校区跟着所在地点走：选了楼就锁在那栋楼的校区，没选楼时让用户自己在画布上切。
   const hostCampusId = data.places.find((place) => place.id === hostPlaceId)?.campusId ?? null;
@@ -454,6 +463,22 @@ export function MerchantEditorPage() {
             </div>
           </Panel>
         )}
+
+        {!isNew ? (
+          <Panel title="修订历史" padded={false}>
+            <div className="divide-y divide-line px-5 py-2">
+              {revisions.map((rev) => (
+                <div key={rev.id} className="flex items-center gap-3 py-2.5 text-body">
+                  <span className="w-8 font-medium">#{rev.revision_no}</span>
+                  <EditorialPill status={rev.editorial_status} />
+                  <span className="flex-1 text-aux text-sub">{fmtDateTime(rev.created_at)}</span>
+                  {rev.editorial_status === "approved" ? <span className="text-aux text-sub">当前线上</span> : null}
+                </div>
+              ))}
+              {revisions.length === 0 ? <p className="py-4 text-body text-sub">暂无修订记录</p> : null}
+            </div>
+          </Panel>
+        ) : null}
       </div>
     </div>
   );

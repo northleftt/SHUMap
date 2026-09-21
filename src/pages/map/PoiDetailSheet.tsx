@@ -26,6 +26,7 @@ export function PoiDetailSheet({
   facilityStatus,
   iconKeyByTypeCode = null,
   initialMerchantId = null,
+  hasFloors = false,
 }: {
   building: MapPoi;
   events: OperationalEvent[] | null;
@@ -40,6 +41,12 @@ export function PoiDetailSheet({
   iconKeyByTypeCode?: ReadonlyMap<string, string | null> | null;
   /** 深链/搜索命中商户时直接展开该商户视图。 */
   initialMerchantId?: string | null;
+  /**
+   * 该 POI 在 release 里是否有公开楼层。食堂（kindId === 'canteen'）的
+   * 「查看楼层图 ›」入口改去就餐详情页，显示条件放宽为「有楼层」，不要求有设施；
+   * 其他楼宇照旧按「有设施」显示整节。
+   */
+  hasFloors?: boolean;
 }) {
   const navigate = useNavigate();
   const [navTarget, setNavTarget] = useState<MapTarget | null>(null);
@@ -192,12 +199,21 @@ export function PoiDetailSheet({
           </div>
         ) : null}
 
-        {/* 楼宇专属的楼层设施入口。未录入设施时整节不显示（连同楼层图入口）。 */}
-        {building.entityType === "building" && facilities.length > 0 ? <div className="mt-4">
+        {/* 楼宇专属的楼层设施入口。未录入设施时整节不显示（连同楼层图入口）——
+            食堂例外：有楼层就显示，入口去就餐详情页。 */}
+        {building.entityType === "building" && (facilities.length > 0 || (building.kindId === "canteen" && hasFloors)) ? <div className="mt-4">
           <SectionHeader
             title="楼内设施指引"
             action={
-              <button type="button" className="text-primary" onClick={() => navigate(`/places/${building.entityId}/floors`)}>
+              <button
+                type="button"
+                className="text-primary"
+                onClick={() => navigate(
+                  building.kindId === "canteen"
+                    ? `/places/${building.entityId}/dining`
+                    : `/places/${building.entityId}/floors`,
+                )}
+              >
                 查看楼层图 ›
               </button>
             }

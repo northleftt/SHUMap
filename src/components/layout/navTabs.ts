@@ -1,4 +1,4 @@
-import { Bus, Globe, Map, UserRound, type LucideIcon } from "lucide-react";
+import { Bus, Map, UserRound, UtensilsCrossed, type LucideIcon } from "lucide-react";
 
 export interface NavTab {
   to: string;
@@ -10,6 +10,6 @@ export interface NavTab {
 export const NAV_TABS: NavTab[] = [
   { to: "/map", label: "地图", Icon: Map },
   { to: "/shuttle", label: "校车", Icon: Bus },
-  { to: "/offcampus", label: "校外", Icon: Globe },
+  { to: "/offcampus", label: "就餐", Icon: UtensilsCrossed },
   { to: "/profile", label: "我的", Icon: UserRound },
 ];

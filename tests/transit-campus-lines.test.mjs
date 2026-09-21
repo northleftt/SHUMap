@@ -344,9 +344,10 @@ test("resolveDayType 忽略 'other'，并在无命中时按星期回落", () => 
 
 test("campus-lines 响应带 dayType，且与班次读同一批日历", async () => {
   const db = database();
-  // cal_a 建表时没给 day_type → 默认 'other' → 回落按星期（2026-08-21 是周五）
+  // cal_a 建表时没给 day_type → 默认 'other' → 临时规则不生效，回落到**校历**判定：
+  // 2026-08-21 落在 0035 种子的暑假区间（2026-08-03 – 2026-09-13）→ summer_break。
   const fallback = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-21");
-  assert.equal(fallback.dayType, "weekday", "day_type='other' 时按星期回落");
+  assert.equal(fallback.dayType, "summer_break", "day_type='other' 时回落到校历");
 
   // 把 cal_a 标成假日日历：同一天的标签必须跟着变（而班次不变——同一批日历）
   db.prepare("update service_calendars set day_type='holiday' where id='cal_a'").run();
@@ -358,17 +359,17 @@ test("campus-lines 响应带 dayType，且与班次读同一批日历", async ()
     "改日型不该改变班次归属",
   );
 
-  // 日历没命中的那天（周六 saturday=0）：标签回落按星期，而不是沿用 holiday
+  // 日历没命中的那天（周六 saturday=0）：标签回落到校历（8/22 同在暑假），而不是沿用 holiday
   const saturday = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-22");
-  assert.equal(saturday.dayType, "weekend", "日历没命中时不该沿用它的日型");
+  assert.equal(saturday.dayType, "summer_break", "日历没命中时不该沿用它的日型");
 
   // added 例外日（2026-08-23 周日加开）：日历命中 → 标签用日历的日型，不按星期
   const added = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-23");
   assert.equal(added.dayType, "holiday", "added 例外日命中日历，标签要跟日历走");
 
-  // removed 例外日（2026-08-28 周五停运）：日历被排除 → 标签回落，班次也为空
+  // removed 例外日（2026-08-28 周五停运）：日历被排除 → 标签回落到校历（8/28 同在暑假），班次也为空
   const removed = await callJson(db, "from=campus_baoshan&to=campus_jiading&date=2026-08-28");
-  assert.equal(removed.dayType, "weekday", "removed 例外日排除日历，标签要回落");
+  assert.equal(removed.dayType, "summer_break", "removed 例外日排除日历，标签要回落到校历");
   assert.deepEqual(removed.lines.flatMap((line) => line.journeys), [], "removed 当天不该有班次");
   db.close();
 });
