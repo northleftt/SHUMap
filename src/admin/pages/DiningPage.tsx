@@ -176,6 +176,18 @@ interface PanelProps {
   mutate: (action: () => Promise<unknown>, fallback: string) => Promise<boolean>;
 }
 
+/** 区间覆盖到的全部日型（按 DAY_TYPE_OPTIONS 顺序去重），用于两次点击选区间后的默认值。 */
+function dayTypesInRange(from: string, to: string, dayTypeOf: (date: string) => CampusDayType): DiningDayType[] {
+  const found = new Set<string>();
+  const cursor = new Date(`${from}T12:00:00+08:00`);
+  const end = new Date(`${to}T12:00:00+08:00`);
+  while (cursor <= end) {
+    found.add(dayTypeOf(cursor.toISOString().slice(0, 10)));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return DAY_TYPE_OPTIONS.map((option) => option.value).filter((value) => found.has(value));
+}
+
 /** 某天命中的安排：日期落在区间内且当天日型在适用日型里；多条命中取最近更新的（与公开读端一致）。 */
 function arrangementFor(
   schedules: DiningScheduleRow[],
@@ -206,7 +218,7 @@ function SchedulesPanel({
   const [validTo, setValidTo] = useState("");
   const [dayTypes, setDayTypes] = useState<DiningDayType[]>([]);
   const [floors, setFloors] = useState<Record<string, { noBreakfast: boolean }>>({});
-  const [selectedDate, setSelectedDate] = useState("");
+  const [rangeAnchor, setRangeAnchor] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [formError, setFormError] = useState("");
@@ -236,24 +248,37 @@ function SchedulesPanel({
     (() => { const d = new Date(now.getFullYear(), now.getMonth() + 1, 1); return { year: d.getFullYear(), month: d.getMonth() }; })(),
   ];
 
-  function loadDate(date: string) {
-    setSelectedDate(date);
+  /**
+   * 日历点击：已有安排的日期载入编辑；否则两次点击选区间——第一下锚定（预填单日），
+   * 第二下闭合（起止取两端，适用日型取区间覆盖到的全部日型）。再点锚点本身 = 单日。
+   */
+  function handleDayClick(date: string) {
     setConfirmDelete(false);
     setNotice("");
     setFormError("");
     const hit = arrangementFor(schedules, date, dayTypeOf(date));
     if (hit) {
+      setRangeAnchor(null);
       setEditingId(hit.id);
       setValidFrom(hit.validFrom);
       setValidTo(hit.validTo);
       setDayTypes(hit.dayTypes);
       setFloors(Object.fromEntries(hit.floors.map((floor) => [floor.floorId, { noBreakfast: floor.noBreakfast }])));
-    } else {
-      setEditingId(null);
+      return;
+    }
+    setEditingId(null);
+    setFloors({});
+    if (rangeAnchor === null || rangeAnchor === date) {
+      setRangeAnchor(rangeAnchor === date ? null : date);
       setValidFrom(date);
       setValidTo(date);
       setDayTypes([dayTypeOf(date)]);
-      setFloors({});
+    } else {
+      const [from, to] = rangeAnchor < date ? [rangeAnchor, date] : [date, rangeAnchor];
+      setRangeAnchor(null);
+      setValidFrom(from);
+      setValidTo(to);
+      setDayTypes(dayTypesInRange(from, to, dayTypeOf));
     }
   }
 
@@ -263,7 +288,7 @@ function SchedulesPanel({
     setValidTo("");
     setDayTypes([]);
     setFloors({});
-    setSelectedDate("");
+    setRangeAnchor(null);
     setConfirmDelete(false);
     setFormError("");
   }
@@ -335,13 +360,15 @@ function SchedulesPanel({
   function calendarCell(date: string) {
     const dayType = dayTypeOf(date);
     const hit = arrangementFor(schedules, date, dayType);
+    const inRange = validFrom !== "" && validTo !== "" && date >= validFrom && date <= validTo;
     let className = "text-ink";
-    if (date === selectedDate) className = "bg-primary text-white font-semibold";
+    if (date === rangeAnchor) className = "bg-primary text-white font-semibold";
+    else if (inRange) className = "bg-primary-container text-primary font-semibold";
     else if (hit) className = "bg-primary-container text-primary";
     else if (dayType !== "weekday") className = "bg-chip text-sub";
     return {
       className,
-      onClick: () => loadDate(date),
+      onClick: () => handleDayClick(date),
       title: hit ? "已有安排，点击载入编辑" : dayType !== "weekday" ? "周末 / 假日未录入就餐安排" : undefined,
     };
   }
