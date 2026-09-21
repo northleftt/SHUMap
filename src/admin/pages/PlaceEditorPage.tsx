@@ -5,6 +5,7 @@ import * as admin from "../../lib/api/admin";
 import {
   arrayValue,
   jsonObject,
+  nullableJsonObject,
   nullableString,
   objectValue,
   oneOf,
@@ -12,7 +13,7 @@ import {
   requiredString,
   stringValue,
 } from "../../lib/dataContract";
-import type { Floor, PlaceDetailResponse, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
+import type { FacilityDetailResponse, Floor, MerchantDetailResponse, PlaceDetailResponse, ReferenceDataResponse, SpacesResponse } from "../adminTypes";
 import {
   EditorialPill,
   ErrorBanner,
@@ -34,7 +35,7 @@ import {
 import { LocationEditor, ALL_ROLES, isLocationDraftBlank, locationDraftFromApi, locationInput, type LocationDraft } from "../components/LocationEditor";
 import { MediaPanel, readMedia, type MediaRow } from "../components/MediaPanel";
 import { markerScaleFromContent } from "../../lib/map/markerScale";
-import type { PlaceContent } from "../../../shared/revision-contract";
+import type { FacilityRevisionWrite, MerchantRevisionWrite, PlaceContent } from "../../../shared/revision-contract";
 
 // ---------------------------------------------------------------------------
 // A7 地点编辑器
@@ -792,77 +793,81 @@ function FloorPanel({
                 );
               }
               return (
-                <div key={floorId} className="flex items-center gap-3 py-2.5 text-body">
-                  {floor.imageUrl ? (
-                    <img
-                      alt={`${label} 平面图`}
-                      className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover"
-                      src={floor.imageUrl}
-                    />
-                  ) : (
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary-container text-primary">
-                      <Layers size={16} />
-                    </span>
-                  )}
-                  <div className="min-w-0">
-                    <span className="font-medium text-ink">{label}</span>
-                    <span className="ml-1.5 text-label text-sub">{code}</span>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      {floor.imageUrl ? <Pill tone="ok">有平面图</Pill> : <Pill tone="neutral">无平面图</Pill>}
-                      {hidden ? <Pill>不对外展示</Pill> : null}
+                <div key={floorId} className="py-2.5 text-body">
+                  <div className="flex items-center gap-3">
+                    {floor.imageUrl ? (
+                      <img
+                        alt={`${label} 平面图`}
+                        className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover"
+                        src={floor.imageUrl}
+                      />
+                    ) : (
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary-container text-primary">
+                        <Layers size={16} />
+                      </span>
+                    )}
+                    <div className="min-w-0">
+                      <span className="font-medium text-ink">{label}</span>
+                      <span className="ml-1.5 text-label text-sub">{code}</span>
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        {floor.imageUrl ? <Pill tone="ok">有平面图</Pill> : <Pill tone="neutral">无平面图</Pill>}
+                        {hidden ? <Pill>不对外展示</Pill> : null}
+                      </div>
                     </div>
                   </div>
-                  <span className="flex-1" />
-                  <button
-                    className="shrink-0 text-aux font-medium text-primary"
-                    onClick={() => setManageFloor(floor)}
-                    type="button"
-                  >
-                    设施·商户
-                  </button>
-                  <label
-                    className={`inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-label text-ink transition-colors ${
-                      busy ? "cursor-wait opacity-60" : "cursor-pointer hover:border-primary hover:text-primary"
-                    }`}
-                  >
-                    <Upload size={13} />
-                    {floor.imageUrl ? "替换平面图" : "上传平面图"}
-                    <input
-                      accept="image/png,image/jpeg,image/webp"
-                      className="hidden"
+                  {/* 操作按钮单独一行并允许换行：右栏窄，挤在标题行会溢出面板。 */}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 pl-12">
+                    <button
+                      className="shrink-0 text-aux font-medium text-primary"
+                      onClick={() => setManageFloor(floor)}
+                      type="button"
+                    >
+                      设施·商户
+                    </button>
+                    <label
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-label text-ink transition-colors ${
+                        busy ? "cursor-wait opacity-60" : "cursor-pointer hover:border-primary hover:text-primary"
+                      }`}
+                    >
+                      <Upload size={13} />
+                      {floor.imageUrl ? "替换平面图" : "上传平面图"}
+                      <input
+                        accept="image/png,image/jpeg,image/webp"
+                        className="hidden"
+                        disabled={busy}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (file) void uploadPlan(floor, file);
+                        }}
+                        type="file"
+                      />
+                    </label>
+                    <button
+                      className="shrink-0 text-aux font-medium text-primary"
                       disabled={busy}
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        if (file) void uploadPlan(floor, file);
-                      }}
-                      type="file"
-                    />
-                  </label>
-                  <button
-                    className="shrink-0 text-aux font-medium text-primary"
-                    disabled={busy}
-                    onClick={() => togglePublic(floor)}
-                    type="button"
-                  >
-                    {hidden ? "对外显示" : "对外隐藏"}
-                  </button>
-                  <button
-                    className="shrink-0 text-aux font-medium text-primary"
-                    disabled={busy}
-                    onClick={() => { setEditingId(floorId); setEditingName(label); setError(""); }}
-                    type="button"
-                  >
-                    重命名
-                  </button>
-                  <button
-                    className="shrink-0 text-aux font-medium text-primary"
-                    disabled={busy}
-                    onClick={() => removeFloor(floor)}
-                    type="button"
-                  >
-                    删除
-                  </button>
+                      onClick={() => togglePublic(floor)}
+                      type="button"
+                    >
+                      {hidden ? "对外显示" : "对外隐藏"}
+                    </button>
+                    <button
+                      className="shrink-0 text-aux font-medium text-primary"
+                      disabled={busy}
+                      onClick={() => { setEditingId(floorId); setEditingName(label); setError(""); }}
+                      type="button"
+                    >
+                      重命名
+                    </button>
+                    <button
+                      className="shrink-0 text-aux font-medium text-primary"
+                      disabled={busy}
+                      onClick={() => removeFloor(floor)}
+                      type="button"
+                    >
+                      删除
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -883,7 +888,8 @@ function FloorPanel({
 // 数据来自 getFloorDetail：设施与商户按 floor_id 反查，和内容管理页是同一份
 // 数据——在编辑器里改了楼层归属，回到这里刷新即变，无需同步动作。
 // 新建跳到设施/商户编辑器并带上 buildingPlaceId+floorId 预填，保存后即为
-// 该楼层挂上新的地点对象。
+// 该楼层挂上新的地点对象。「移出本层」是修改归属（floorId 置空）而非删除，
+// 克隆当前修订走正常修订流，有 review:content 权限时顺带批准当场生效。
 // ---------------------------------------------------------------------------
 
 function FloorContentModal({
@@ -896,7 +902,65 @@ function FloorContentModal({
   onClose: () => void;
 }) {
   const navigate = useNavigate();
-  const { state } = useAsyncData((signal) => admin.getFloorDetail(floor.id, signal), [floor.id]);
+  const { state, reload } = useAsyncData((signal) => admin.getFloorDetail(floor.id, signal), [floor.id]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [actionNote, setActionNote] = useState("");
+
+  // 「移出本层」= 修改归属而非删除：克隆当前修订、把 structure.floorId 置空，
+  // 走正常修订流（草稿 → 送审 → 有 review:content 权限时顺带批准）。设施/商户
+  // 本身仍在，hostPlaceId 不变，只是不再挂这一层；要彻底删除请到各自编辑页。
+  // 修订是整份克隆的，locations 等字段原样保留，不会顺带清掉已标注的位置。
+  async function unassign(entityType: "facility" | "merchant", entityId: string, label: string) {
+    const kind = entityType === "facility" ? "设施" : "商户";
+    if (!window.confirm(`将${kind}「${label}」移出 ${floor.displayName}？\n${kind}本身保留（仍属于本楼），只是不再挂靠这一层；要彻底删除请到${kind}编辑页操作。`)) return;
+    setBusyId(entityId);
+    setActionError("");
+    setActionNote("");
+    try {
+      let revisionId: string;
+      if (entityType === "facility") {
+        const detail = await admin.getFacility<FacilityDetailResponse>(entityId);
+        const row = detail.facility;
+        if (row.editorial_status === "in_review") throw new Error("该设施有待审核的修订，请先在审核中心处理完再移出");
+        const created = await admin.createFacilityRevision(entityId, {
+          displayName: requiredString(row.display_name, "display_name"),
+          serviceHours: nullableJsonObject(row.service_hours_json, "service_hours_json") as FacilityRevisionWrite["serviceHours"],
+          content: jsonObject(row.content_json, "content_json") as FacilityRevisionWrite["content"],
+          sourceId: nullableString(row.source_id, "source_id"),
+          structure: { ...(jsonObject(row.structure_json, "structure_json") as unknown as FacilityRevisionWrite["structure"]), floorId: null },
+        });
+        revisionId = created.id;
+      } else {
+        const detail = await admin.getMerchant<MerchantDetailResponse>(entityId);
+        const row = detail.merchant;
+        if (row.editorial_status === "in_review") throw new Error("该商户有待审核的修订，请先在审核中心处理完再移出");
+        const created = await admin.createMerchantRevision(entityId, {
+          displayName: requiredString(row.display_name, "display_name"),
+          businessType: nullableString(row.business_type, "business_type"),
+          openingHours: nullableJsonObject(row.opening_hours_json, "opening_hours_json") as MerchantRevisionWrite["openingHours"],
+          contact: nullableJsonObject(row.contact_json, "contact_json") as MerchantRevisionWrite["contact"],
+          content: jsonObject(row.content_json, "content_json") as MerchantRevisionWrite["content"],
+          sourceId: nullableString(row.source_id, "source_id"),
+          structure: { ...(jsonObject(row.structure_json, "structure_json") as unknown as MerchantRevisionWrite["structure"]), floorId: null },
+        });
+        revisionId = created.id;
+      }
+      await admin.submitRevision(entityType, revisionId);
+      try {
+        await admin.reviewRevision(entityType, revisionId, { decision: "approve", note: `楼层管理：移出 ${floor.displayName}` });
+        setActionNote(`已将「${label}」移出本层`);
+      } catch {
+        // 没有 review:content 权限时停在送审：审核通过后自动从本层消失。
+        setActionNote(`「${label}」的移出修订已送审，审核通过后生效`);
+      }
+      reload();
+    } catch (err) {
+      setActionError(errorMessage(err, "移出失败"));
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-8" onClick={onClose} role="presentation">
@@ -934,16 +998,26 @@ function FloorContentModal({
                 ) : (
                   <div className="mt-1.5 divide-y divide-line rounded-lg border border-line">
                     {state.data.facilities.map((facility) => (
-                      <button
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-body hover:bg-primary-container/40"
+                      <div
+                        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-body hover:bg-primary-container/40"
                         key={facility.id}
                         onClick={() => navigate(`/admin/content/facilities/${facility.id}`)}
-                        type="button"
                       >
                         <span className="min-w-0 flex-1 truncate text-ink">{facility.displayName}</span>
                         <span className="shrink-0 text-label text-sub">{facility.facilityTypeName}</span>
                         <EditorialPill status={facility.editorialStatus} />
-                      </button>
+                        <button
+                          className="shrink-0 text-aux font-medium text-primary disabled:opacity-50"
+                          disabled={busyId !== null}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void unassign("facility", facility.id, facility.displayName);
+                          }}
+                          type="button"
+                        >
+                          {busyId === facility.id ? "移出中…" : "移出本层"}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -955,22 +1029,34 @@ function FloorContentModal({
                 ) : (
                   <div className="mt-1.5 divide-y divide-line rounded-lg border border-line">
                     {state.data.merchants.map((merchant) => (
-                      <button
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-body hover:bg-primary-container/40"
+                      <div
+                        className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-body hover:bg-primary-container/40"
                         key={merchant.id}
                         onClick={() => navigate(`/admin/content/merchants/${merchant.id}`)}
-                        type="button"
                       >
                         <span className="min-w-0 flex-1 truncate text-ink">{merchant.displayName ?? "未命名商户"}</span>
                         {merchant.businessType ? <span className="shrink-0 text-label text-sub">{merchant.businessType}</span> : null}
                         <EditorialPill status={merchant.editorialStatus} />
-                      </button>
+                        <button
+                          className="shrink-0 text-aux font-medium text-primary disabled:opacity-50"
+                          disabled={busyId !== null}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void unassign("merchant", merchant.id, merchant.displayName ?? "未命名商户");
+                          }}
+                          type="button"
+                        >
+                          {busyId === merchant.id ? "移出中…" : "移出本层"}
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
               </div>
             </>
           ) : null}
+          {actionNote ? <InfoNote>{actionNote}</InfoNote> : null}
+          <ErrorBanner message={actionError} />
         </div>
       </div>
     </div>

@@ -566,6 +566,12 @@ test("the place editor floor panel uploads plan images directly", () => {
   assert.match(page, /getFloorDetail/);
   assert.match(page, /\/admin\/content\/facilities\/new\?buildingPlaceId=/);
   assert.match(page, /\/admin\/content\/merchants\/new\?buildingPlaceId=/);
+  // 「移出本层」是修改归属而非删除：克隆修订置空 floorId，送审后有审核权限则顺带批准。
+  assert.match(page, /createFacilityRevision/);
+  assert.match(page, /createMerchantRevision/);
+  assert.match(page, /floorId: null/);
+  assert.match(page, /submitRevision/);
+  assert.match(page, /reviewRevision/);
 
   // 设施与商户编辑器都支持 buildingPlaceId+floorId 预填（从楼层弹层进入时）。
   for (const editor of ["src/admin/pages/FacilityEditorPage.tsx", "src/admin/pages/MerchantEditorPage.tsx"]) {
