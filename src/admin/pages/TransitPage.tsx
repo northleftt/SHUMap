@@ -1821,7 +1821,7 @@ function CalendarEditor({
 
   return (
     <div className="space-y-3 rounded-xl bg-page p-4">
-      <div className="grid grid-cols-6 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Field label="日历名称" onChange={setName} placeholder="如 2025-2026 工作日" value={name} />
         <Field label="开始日期" onChange={setValidFrom} type="date" value={validFrom} />
         <Field label="结束日期" onChange={setValidTo} type="date" value={validTo} />
