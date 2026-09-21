@@ -562,6 +562,18 @@ test("the place editor floor panel uploads plan images directly", () => {
   assert.doesNotMatch(page, /createImportJob/);
   assert.doesNotMatch(page, /floor_svg/);
 
+  // 每层有设施/商户管理弹层：按 floor_id 反查列表，新建跳到对应编辑器并带上楼层预填。
+  assert.match(page, /getFloorDetail/);
+  assert.match(page, /\/admin\/content\/facilities\/new\?buildingPlaceId=/);
+  assert.match(page, /\/admin\/content\/merchants\/new\?buildingPlaceId=/);
+
+  // 设施与商户编辑器都支持 buildingPlaceId+floorId 预填（从楼层弹层进入时）。
+  for (const editor of ["src/admin/pages/FacilityEditorPage.tsx", "src/admin/pages/MerchantEditorPage.tsx"]) {
+    const source = read(editor);
+    assert.match(source, /searchParams\.get\("buildingPlaceId"\)/, `${editor} must prefill buildingPlaceId`);
+    assert.match(source, /searchParams\.get\("floorId"\)/, `${editor} must prefill floorId`);
+  }
+
   // 独立的「楼层与楼层图」入口已撤掉；旧路径重定向到内容管理。
   const adminShell = read("src/admin/AdminPage.tsx");
   assert.doesNotMatch(adminShell, /FloorsPage/);

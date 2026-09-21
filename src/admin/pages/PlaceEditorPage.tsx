@@ -606,7 +606,8 @@ export function PlaceEditorPage() {
 }
 
 // ---------------------------------------------------------------------------
-// 楼层管理：列出 / 新增 / 改显示名
+// 楼层管理：列出 / 新增 / 重命名 / 平面图上传 / 对外显隐 / 删除。
+// 每层的设施与商户由 FloorContentModal 弹层管理（按 floor_id 反查，与内容管理同源）。
 // ---------------------------------------------------------------------------
 
 /** "3" → "3 层"、"B1" → "地下 1 层"，其余原样。 */
@@ -645,6 +646,7 @@ function FloorPanel({
   const [displayName, setDisplayName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [manageFloor, setManageFloor] = useState<Floor | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -811,6 +813,13 @@ function FloorPanel({
                     </div>
                   </div>
                   <span className="flex-1" />
+                  <button
+                    className="shrink-0 text-aux font-medium text-primary"
+                    onClick={() => setManageFloor(floor)}
+                    type="button"
+                  >
+                    设施·商户
+                  </button>
                   <label
                     className={`inline-flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-label text-ink transition-colors ${
                       busy ? "cursor-wait opacity-60" : "cursor-pointer hover:border-primary hover:text-primary"
@@ -861,6 +870,109 @@ function FloorPanel({
         )}
         <ErrorBanner message={error} />
       </div>
+      {manageFloor ? (
+        <FloorContentModal floor={manageFloor} onClose={() => setManageFloor(null)} placeId={placeId} />
+      ) : null}
     </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 楼层设施/商户弹层
+//
+// 数据来自 getFloorDetail：设施与商户按 floor_id 反查，和内容管理页是同一份
+// 数据——在编辑器里改了楼层归属，回到这里刷新即变，无需同步动作。
+// 新建跳到设施/商户编辑器并带上 buildingPlaceId+floorId 预填，保存后即为
+// 该楼层挂上新的地点对象。
+// ---------------------------------------------------------------------------
+
+function FloorContentModal({
+  placeId,
+  floor,
+  onClose,
+}: {
+  placeId: string;
+  floor: Floor;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const { state } = useAsyncData((signal) => admin.getFloorDetail(floor.id, signal), [floor.id]);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-8" onClick={onClose} role="presentation">
+      <div
+        aria-label={`${floor.displayName} 设施与商户`}
+        aria-modal="true"
+        className="flex max-h-[80vh] w-[520px] flex-col rounded-xl bg-surface p-6 shadow-card"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="flex items-center gap-3">
+          <p className="text-emphasis">{floor.displayName} · 设施与商户</p>
+          <span className="flex-1" />
+          <GhostButton onClick={onClose}>关闭</GhostButton>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <GhostButton onClick={() => navigate(`/admin/content/facilities/new?buildingPlaceId=${placeId}&floorId=${floor.id}`)}>
+            <Plus size={14} />
+            新建设施
+          </GhostButton>
+          <GhostButton onClick={() => navigate(`/admin/content/merchants/new?buildingPlaceId=${placeId}&floorId=${floor.id}`)}>
+            <Plus size={14} />
+            新建商户
+          </GhostButton>
+        </div>
+        <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto">
+          {state.status === "loading" ? <LoadingState label="加载楼层内容…" /> : null}
+          {state.status === "error" ? <ErrorBanner message={state.message ?? "加载失败"} /> : null}
+          {state.status === "ready" ? (
+            <>
+              <div>
+                <p className="text-label text-sub">设施（{state.data.facilities.length}）</p>
+                {state.data.facilities.length === 0 ? (
+                  <InfoNote>该层还没有设施</InfoNote>
+                ) : (
+                  <div className="mt-1.5 divide-y divide-line rounded-lg border border-line">
+                    {state.data.facilities.map((facility) => (
+                      <button
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-body hover:bg-primary-container/40"
+                        key={facility.id}
+                        onClick={() => navigate(`/admin/content/facilities/${facility.id}`)}
+                        type="button"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-ink">{facility.displayName}</span>
+                        <span className="shrink-0 text-label text-sub">{facility.facilityTypeName}</span>
+                        <EditorialPill status={facility.editorialStatus} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <p className="text-label text-sub">商户（{state.data.merchants.length}）</p>
+                {state.data.merchants.length === 0 ? (
+                  <InfoNote>该层还没有商户</InfoNote>
+                ) : (
+                  <div className="mt-1.5 divide-y divide-line rounded-lg border border-line">
+                    {state.data.merchants.map((merchant) => (
+                      <button
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-body hover:bg-primary-container/40"
+                        key={merchant.id}
+                        onClick={() => navigate(`/admin/content/merchants/${merchant.id}`)}
+                        type="button"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-ink">{merchant.displayName ?? "未命名商户"}</span>
+                        {merchant.businessType ? <span className="shrink-0 text-label text-sub">{merchant.businessType}</span> : null}
+                        <EditorialPill status={merchant.editorialStatus} />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }

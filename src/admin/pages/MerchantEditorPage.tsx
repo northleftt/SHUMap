@@ -1,6 +1,6 @@
 import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
 import {
   arrayValue,
@@ -127,6 +127,9 @@ export function MerchantEditorPage() {
   const { id = "" } = useParams();
   const isNew = id === "new";
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialBuildingPlaceId = isNew ? searchParams.get("buildingPlaceId") ?? "" : "";
+  const initialFloorId = isNew ? searchParams.get("floorId") ?? "" : "";
 
   const { state } = useAsyncData(async (signal) => {
     const [ref, spaces, places, detail, maps] = await Promise.all([
@@ -170,7 +173,16 @@ export function MerchantEditorPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (state.status !== "ready" || isNew) return;
+    if (state.status !== "ready") return;
+    if (isNew) {
+      // 从楼层管理弹窗进来时带上楼宇与楼层，免得手选一遍。
+      const floor = state.data.spaces.floors.find((candidate) => candidate.id === initialFloorId);
+      if (initialFloorId && floor && floor.buildingPlaceId === initialBuildingPlaceId) {
+        setHostPlaceId(initialBuildingPlaceId);
+        setFloorId(initialFloorId);
+      }
+      return;
+    }
     const editor = state.data!.editor;
     if (!editor) throw new Error("Merchant detail is missing");
     setName(editor.displayName);
@@ -190,7 +202,7 @@ export function MerchantEditorPage() {
     setSourceId(editor.sourceId);
     setLocationDrafts(editor.locations);
     setLifecycleStatus(editor.lifecycleStatus);
-  }, [state, id, isNew]);
+  }, [state, id, initialBuildingPlaceId, initialFloorId, isNew]);
 
   if (state.status === "loading") return <LoadingState label="加载商户…" />;
   if (state.status === "error") return <ErrorBanner message={state.message ?? "加载失败"} />;
