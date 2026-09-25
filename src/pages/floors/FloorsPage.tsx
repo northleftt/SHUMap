@@ -288,7 +288,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           ) : facilityStatus.status === "loading" && facilities.length > 0 ? (
             <div className="mx-4 mt-3 rounded-2xl bg-page px-4 py-3 text-aux text-sub">正在加载设施实时状态…</div>
           ) : null}
-          {notes && (wide || effectiveMode === "list") ? (
+          {notes && !wide && effectiveMode === "list" ? (
             <div className="mx-4 mt-3 rounded-2xl bg-primary-container px-4 py-3.5">
               <div className="text-label text-sub">信息提示</div>
               <div className="mt-1 whitespace-pre-line text-body font-medium leading-relaxed text-primary">
@@ -344,6 +344,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           {wide || effectiveMode !== "plan" || !floorImageUrl ? (
             /* 设施列表 */
             <div data-testid="floor-facility-pane" className="mx-4 mt-3 overflow-hidden rounded-2xl bg-surface shadow-card lg:m-0 lg:min-h-0 lg:overflow-y-auto">
+              {wide && notes ? <div className="m-4 rounded-xl bg-primary-container p-3 text-body text-primary"><h2 className="mb-2 text-emphasis">楼层说明</h2><p className="whitespace-pre-line break-words">{notes}</p></div> : null}
               {wide ? <h2 className="px-4 pb-1 pt-4 text-emphasis">{selectedFloor ? `${floorLabel(selectedFloor)} · 本层设施` : "楼层设施"}</h2> : null}
               {visibleFacilities.length === 0 ? (
                 <EmptyState

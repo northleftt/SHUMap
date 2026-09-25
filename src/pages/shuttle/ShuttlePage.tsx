@@ -651,8 +651,8 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
           </button>
         </header>
 
-        {isDesktop ? <div className="shrink-0 px-5 pb-4"><FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" /></div> : null}
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
+        <div className="mb-4"><FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" /></div>
         {/* 校区选择卡 */}
         <div className="rounded-2xl bg-surface px-4 py-3.5 shadow-card">
           <div className="flex items-center">
@@ -776,10 +776,6 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
           </>
         )}
 
-        {/* 功能评分入口：提交过或关掉一次就不再出现（见 FeatureFeedback）。 */}
-        <div className={isDesktop ? "hidden" : "mt-6"}>
-          {!isDesktop && <FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" />}
-        </div>
         </div>
       </div>
 
