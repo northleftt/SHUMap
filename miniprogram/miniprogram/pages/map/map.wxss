@@ -1591,3 +1591,7 @@
   line-height: 21px;
   color: #0f172a;
 }
+.search-feedback {
+  padding-left: 12px;
+  flex-shrink: 0;
+}

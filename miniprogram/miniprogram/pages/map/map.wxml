@@ -556,7 +556,9 @@
             </scroll-view>
           </block>
 
-          <feature-feedback wx:if="{{!searchQuery}}" page="search" prompt="你觉得搜索好用吗？" />
+          <view wx:if="{{!searchQuery}}" class="search-feedback">
+            <feature-feedback page="search" prompt="你觉得搜索好用吗？" />
+          </view>
           <!-- 结果区：搜索/筛选生效时是结果列表，否则是最近查看 -->
           <block wx:if="{{searchActive}}">
             <view wx:if="{{searchStatus === 'loading'}}" class="state-block">
