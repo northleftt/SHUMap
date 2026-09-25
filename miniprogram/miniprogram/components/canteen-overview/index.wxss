@@ -1,0 +1,21 @@
+:host { display: block; }
+.section { margin-top: 16px; }
+.head,.row { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.head { justify-content: space-between; }
+.heading { font-size: 15px; font-weight: 600; color: #0f172a; }
+.action { font-size: 12px; color: #1e80c1; padding: 8px 0; }
+.grow { flex: 1; min-width: 0; }
+.name { font-size: 15px; font-weight: 600; color: #0f172a; overflow-wrap: anywhere; }
+.muted { font-size: 12px; color: #64748b; line-height: 19px; overflow-wrap: anywhere; }
+.hint,.error { margin-top: 8px; }
+.error { color: #dc2626; font-size: 12px; }
+.floor-row { display: flex; flex-direction: row; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e8ebef; }
+.floor-row:last-child { border-bottom: 0; }
+.floor-row .row { flex-wrap: wrap; }
+.floor-label { flex-shrink: 0; width: 40px; height: 40px; background: #e8f1f8; color: #1e80c1; border-radius: 9px; text-align: center; line-height: 40px; font-size: 15px; font-weight: 600; }
+.chips { display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { max-width: 100%; box-sizing: border-box; border-radius: 16px; background: #e8f1f8; color: #1e80c1; font-size: 12px; line-height: 18px; padding: 4px 10px; overflow-wrap: anywhere; }
+.closed { background: #f5f6f8; color: #64748b; text-decoration: line-through; }
+.other,.facility { padding: 12px 0; border-bottom: 1px solid #e8ebef; }
+.facility-icon { width: 32px; height: 32px; padding: 4px; background: #e8f1f8; border-radius: 50%; flex-shrink: 0; }
+.status { color: #a16207; font-size: 12px; }

@@ -1,6 +1,6 @@
 import { LayoutList, Map as MapIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { FloorImageViewer } from "../../components/map/FloorImageViewer";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
@@ -146,9 +146,10 @@ export function FloorsPage() {
 }
 
 function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; placeId: string }) {
-  const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const [activeFloorId, setActiveFloorId] = useState<string | null>(searchParams.get("floor"));
   const [activeType, setActiveType] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [viewMode, setViewMode] = useState<ViewMode>(searchParams.get("view") === "plan" ? "plan" : "list");
   usePageView("floors");
   // 运营状态盖在快照基线上，读取失败时在列表上方明确提示。
   const facilityStatus = useFacilityStatus();
@@ -169,7 +170,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
   }, [floors]);
 
   // 默认选中一层（levelOrder 最小且非地下）
-  const selectedFloorId = activeFloorId ?? floors[0]?.id ?? null;
+  const selectedFloorId = floors.some(floor => floor.id === activeFloorId) ? activeFloorId : floors[0]?.id ?? null;
   const floorImageUrl = selectedFloorId ? imageByFloor.get(selectedFloorId) ?? null : null;
   // 该楼层无平面图 → 平面图入口隐藏，内容回退列表版。
   const effectiveMode: ViewMode = floorImageUrl ? viewMode : "list";

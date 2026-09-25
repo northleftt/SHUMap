@@ -1,5 +1,6 @@
 import { getDiningSchedule, getMerchantStatus } from "../api/public";
 import { shanghaiToday, type DiningScheduleResponse, type MerchantLifecycle } from "../dining/schedule";
+import { useNow } from "./useNow";
 import { useAsyncData } from "./useAsyncData";
 
 export type DiningScheduleState =
@@ -12,8 +13,9 @@ export type DiningScheduleState =
  * 日期取上海时区的今天，与 worker 判定口径一致。
  */
 export function useDiningSchedule(): DiningScheduleState {
-  const date = shanghaiToday();
-  const { state } = useAsyncData((signal) => getDiningSchedule(date, signal), [date]);
+  const now = useNow();
+  const date = shanghaiToday(now);
+  const { state } = useAsyncData((signal) => getDiningSchedule(date, signal), [date, Math.floor(now / 30_000)]);
   if (state.status === "loading") return { status: "loading" };
   if (state.status === "error") return { status: "error", message: state.message };
   return { status: "ready", schedule: state.data };
@@ -26,7 +28,8 @@ export type MerchantStatusState =
 
 /** 商户营业状态实时通道（GET /api/public/merchant-status）。 */
 export function useMerchantStatus(): MerchantStatusState {
-  const { state } = useAsyncData((signal) => getMerchantStatus(signal), []);
+  const now = useNow();
+  const { state } = useAsyncData((signal) => getMerchantStatus(signal), [Math.floor(now / 30_000)]);
   if (state.status === "loading") return { status: "loading" };
   if (state.status === "error") return { status: "error", message: state.message };
   return { status: "ready", statuses: state.data.statuses };

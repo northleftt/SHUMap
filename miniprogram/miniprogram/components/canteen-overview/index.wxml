@@ -1,0 +1,16 @@
+<view class="section">
+  <view class="head"><text class="heading">楼层与档口</text><text class="action" bindtap="openFloor">查看供餐详情 ›</text></view>
+  <view wx:if="{{scheduleError}}" class="error" bindtap="retry">{{scheduleError}}</view>
+  <view wx:if="{{merchantError}}" class="error" bindtap="retry">{{merchantError}}</view>
+  <view wx:if="{{noArrangement}}" class="muted hint">今日暂无就餐安排信息</view>
+  <view wx:if="{{!floors.length}}" class="muted hint">该食堂的楼层信息正在完善中</view>
+  <view wx:for="{{floors}}" wx:key="floorId" wx:for-item="floor" class="floor-row">
+    <view class="floor-label" data-floor="{{floor.floorId}}" bindtap="openFloor">{{floor.shortLabel}}</view>
+    <view class="grow">
+      <view data-floor="{{floor.floorId}}" bindtap="openFloor"><view class="row"><text class="name grow">{{floor.displayName}}</text><text class="muted">{{floor.statusText}}</text></view><view class="muted">{{floor.stallText}}</view></view>
+      <view class="chips"><view wx:for="{{floor.merchants}}" wx:key="id" class="chip {{item.closed ? 'closed' : ''}}" data-id="{{item.id}}" catchtap="openMerchant">{{item.name}} {{item.openingHours}}</view></view>
+    </view>
+  </view>
+</view>
+<view wx:if="{{others.length}}" class="section"><view class="heading">其他商户</view><view class="other row" wx:for="{{others}}" wx:key="id" data-id="{{item.id}}" bindtap="openMerchant"><view class="grow"><view class="name {{item.closed ? 'closed' : ''}}">{{item.name}}</view><view class="muted">未标注公开楼层 · {{item.openingHours}}</view></view><text class="muted">›</text></view></view>
+<view wx:if="{{facilityRows.length}}" class="section"><view class="head"><text class="heading">公共设施</text><text class="action" bindtap="openFacilities">全部设施 ›</text></view><view wx:if="{{facilityError}}" class="error" bindtap="retry">{{facilityError}}</view><view wx:for="{{facilityRows}}" wx:key="id" class="facility row"><image class="facility-icon" src="/images/poi/{{item.icon}}.png"/><view class="grow"><view class="name">{{item.name}}</view><view class="muted">{{item.location}}</view></view><text class="status">{{item.statusLabel}}</text></view></view>

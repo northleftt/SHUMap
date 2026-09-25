@@ -1,3 +1,4 @@
+import { canteensOf } from "../../lib/dining/view";
 // 校园地图页（Part 2 核心：canvas 引擎）。
 //
 // 渲染模型（对齐 Web 端 MapCanvas 的 ViewWindow 模型，见 lib/map/viewport.ts）：
@@ -358,6 +359,7 @@ Page({
     detailOpen: false,
     detailSheet: null as DetailSheetData | null,
     detail: null as DetailSheetData | null,
+    canteenOverview: null as any,
     photoIndex: 0,
     merchantPhotoIndex: 0,
 
@@ -2462,6 +2464,9 @@ Page({
   },
 
   openDetailSheet(poi: MapPoi, merchantId: string | null, source: AnalyticsPoiSource = "search_result") {
+    const isCanteen = poi.entityType === "building" && this.loadedRelease?.manifest.places.some((place: any) => place.id === poi.entityId && place.kindId === "canteen");
+    const canteen = isCanteen ? canteensOf(this.loadedRelease).find(c => c.placeId === poi.entityId) : null;
+    this.setData({ canteenOverview: canteen ? { canteen, placeId: poi.entityId, merchants: poi.merchants, facilities: poi.facilities } : null });
     // 详情打开即报 poi_view（对齐 Web 端 openPoi；所有入口都汇到这里，只此一处）。
     recordAnalyticsEvent({
       eventType: "poi_view",
@@ -2709,6 +2714,16 @@ Page({
       name: point.displayName,
       scale: 18,
     });
+  },
+
+  onCanteenResize() {
+    if (this.data.sheetMode !== "poi") return;
+    this.measurePoiContentHeight(() => { this.configureSheet("poi", false); this.measureSheetScrollable(); });
+  },
+
+  onCanteenMerchant(e: any) {
+    if (this.consumeSheetTap()) return;
+    this.openMerchantRow({ currentTarget: { dataset: { id: e.detail.id } } });
   },
 
   openFloors() {

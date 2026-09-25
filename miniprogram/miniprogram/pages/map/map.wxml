@@ -135,7 +135,7 @@
     <!-- 已发布返校指南入口；关闭按 revisionNo 记忆，新版发布后会重新出现。
          results（近全屏）档抽屉顶边与横幅同高，不隐藏会盖住搜索条。
          标题/副标题/图标都来自后台（content.meta.banner），图标没配就不占位。 -->
-    <view wx:if="{{guideVisible && sheetMode !== 'results'}}" class="guide-banner" style="top: {{capsuleTop + 44}}px;">
+    <view wx:if="{{guideVisible && sheetMode !== 'results' && sheetMode !== 'poi'}}" class="guide-banner" style="top: {{capsuleTop + 44}}px;">
       <view class="guide-banner-main" bindtap="openGuide">
         <image wx:if="{{guideIconUrl}}" class="guide-banner-icon" src="{{guideIconUrl}}" mode="aspectFit" />
         <view class="guide-banner-copy {{guideIconUrl ? '' : 'guide-banner-copy-flush'}}">
@@ -450,8 +450,9 @@
                   </view>
                 </view>
 
+                <canteen-overview id="canteen-overview" wx:if="{{detail.isCanteen && canteenOverview}}" canteen="{{canteenOverview.canteen}}" place-id="{{canteenOverview.placeId}}" merchants="{{canteenOverview.merchants}}" facilities="{{canteenOverview.facilities}}" bind:resize="onCanteenResize" bind:merchant="onCanteenMerchant" />
                 <!-- 楼内设施指引（圆形图标徽章横滑）+ 楼层图入口；未录入设施时整节不显示 -->
-                <block wx:if="{{detail.isBuilding && (detail.facilities.length > 0 || (detail.isCanteen && detail.hasFloors))}}">
+                <block wx:if="{{detail.isBuilding && !detail.isCanteen && detail.facilities.length > 0}}">
                   <view class="section-head">
                     <view class="section-title">{{detail.isCanteen ? '楼层与档口' : '楼内设施指引'}}</view>
                     <view class="section-action" bindtap="openFloors">{{detail.isCanteen ? '查看供餐详情 ›' : '查看楼层图 ›'}}</view>
@@ -469,7 +470,7 @@
                 </block>
 
                 <!-- 楼内商户 -->
-                <block wx:if="{{detail.isBuilding && detail.merchants.length > 0}}">
+                <block wx:if="{{detail.isBuilding && !detail.isCanteen && detail.merchants.length > 0}}">
                   <view class="section-head">
                     <view class="section-title">{{detail.isCanteen ? '食堂商户' : '楼内商户'}} ({{detail.merchants.length}})</view>
                   </view>
