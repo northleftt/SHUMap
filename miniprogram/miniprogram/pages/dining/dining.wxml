@@ -1,0 +1,44 @@
+<view class="page detail-page">
+  <view wx:if="{{loading}}" class="empty">正在加载食堂信息…</view>
+  <view wx:elif="{{error}}" class="empty" bindtap="retry">食堂信息加载失败，点击重试</view>
+  <view wx:elif="{{!canteen}}" class="empty">暂无该食堂信息</view>
+  <block wx:else>
+    <view class="detail-header row"><view class="grow"><view class="title">{{canteen.name}}</view><view class="muted">{{canteen.campusLabel}} · 食堂</view></view><text wx:if="{{wholeDayRest}}" class="muted">今日休息</text></view>
+    <view wx:if="{{scheduleError}}" class="notice error" bindtap="retry">{{scheduleError}}</view>
+    <view wx:if="{{merchantError}}" class="notice error" bindtap="retry">{{merchantError}}</view>
+    <view wx:if="{{arrangementText}}" class="notice info">{{arrangementText}}</view>
+    <view wx:if="{{noArrangement}}" class="notice warning">今日暂无就餐安排信息，请以食堂现场公告为准</view>
+    <view wx:if="{{wholeDayRest}}" class="notice muted">该食堂今日暂停营业{{alternatives.length ? '，看看附近还在营业的食堂' : ''}}</view>
+    <view class="{{wholeDayRest ? 'resting' : ''}}">
+      <scroll-view wx:if="{{floorTabs.length > 1}}" scroll-x class="tabs">
+        <view wx:for="{{floorTabs}}" wx:key="id" class="floor-tab {{item.active ? 'active' : ''}}" data-id="{{item.id}}" bindtap="switchFloor">{{item.label}}</view>
+      </scroll-view>
+      <block wx:if="{{floor}}">
+        <view class="card padded">
+          <view class="row"><view class="heading grow">{{floor.shortLabel}} · {{floor.displayName}}</view><text class="muted">{{floor.statusText}}</text></view>
+          <view wx:for="{{floor.mealRows}}" wx:key="meal" class="meal-row {{item.served ? '' : 'unserved'}}">
+            <image class="icon" src="/images/sheet/{{item.icon}}.png" />
+            <view class="meal-name">{{item.label}}</view><view class="grow muted">{{item.served ? floor.stallText : '不供应'}}</view><view class="meal-times">{{item.times}}</view>
+          </view>
+        </view>
+        <view wx:if="{{floor.merchants.length}}" class="card padded">
+          <view class="heading">本层商家 ({{floor.merchants.length}})</view>
+          <view wx:for="{{floor.merchants}}" wx:key="id" wx:for-item="merchant">
+            <view class="merchant-row row" data-id="{{merchant.id}}" bindtap="toggleMerchant"><image class="icon" src="/images/poi/store.png" /><view class="grow"><view class="floor-name">{{merchant.name}} <text wx:if="{{merchant.closed}}" class="warning badge">暂停营业</text></view><view class="muted">{{merchant.subtitle}}</view></view><text>›</text></view>
+            <view wx:if="{{openMerchantId === merchant.id}}">
+              <scroll-view scroll-x class="photo-strip"><view wx:for="{{merchantPhotos}}" wx:key="url" class="photo-item"><image wx:if="{{item.url}}" class="photo" src="{{item.url}}" mode="aspectFill" data-merchant="{{true}}" data-url="{{item.url}}" bindtap="previewImage" /></view></scroll-view>
+              <view class="fact-row row" wx:for="{{merchant.facts}}" wx:key="label" data-label="{{item.label}}" data-value="{{item.value}}" bindtap="callPhone"><text class="grow muted">{{item.label}}</text><text class="fact-value {{item.label === '联系电话' ? 'phone' : ''}}">{{item.value}}</text></view>
+              <view wx:if="{{merchant.summary}}" class="summary">{{merchant.summary}}</view>
+              <view wx:if="{{merchant.menu.length}}" class="muted">菜单</view>
+              <view class="fact-row row" wx:for="{{merchant.menu}}" wx:key="index"><view class="grow"><view>{{item.name}}</view><view wx:if="{{item.description}}" class="muted">{{item.description}}</view></view><text>{{item.price}}</text></view>
+            </view>
+          </view>
+        </view>
+        <view wx:if="{{photos.length}}" class="card padded"><view class="heading">本层图片</view><scroll-view scroll-x class="photo-strip"><view wx:for="{{photos}}" wx:key="sourceUrl" class="photo-item"><image wx:if="{{item.url}}" class="photo" src="{{item.url}}" mode="aspectFill" data-url="{{item.url}}" bindtap="previewImage" /><view class="muted">{{item.label}}</view></view></scroll-view></view>
+        <view wx:if="{{mediaError}}" class="notice error" bindtap="loadImages">部分图片加载失败，点击重试</view>
+      </block>
+      <view wx:else class="card empty">该食堂暂无楼层信息</view>
+    </view>
+    <block wx:if="{{alternatives.length}}"><view class="group-heading">今天这些食堂营业</view><view class="card"><view wx:for="{{alternatives}}" wx:key="placeId" class="floor-row" data-place="{{item.placeId}}" bindtap="openDetail"><text class="grow">{{item.name}}</text><text>›</text></view></view></block>
+  </block>
+</view>

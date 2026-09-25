@@ -1,0 +1,7 @@
+<view class="page"><view class="title">{{prompt}}</view>
+  <view wx:if="{{done}}" class="thanks"><view class="title">感谢反馈！</view><view class="muted">我们会认真看待每一条评价</view><button bindtap="finish">完成</button></view>
+  <block wx:else><view class="stars"><text wx:for="{{stars}}" wx:key="*this" class="star {{item <= rating ? 'selected' : ''}}" data-value="{{item}}" bindtap="selectRating" aria-label="{{item}} 星">{{item <= rating ? '★' : '☆'}}</text></view>
+    <textarea wx:if="{{rating > 0 && rating <= 3}}" value="{{reason}}" bindinput="onReason" maxlength="-1" placeholder="哪里不好用？告诉我们，方便改进（可选）" />
+    <view wx:if="{{error}}" class="error">{{error}}</view><button disabled="{{!rating || busy}}" loading="{{busy}}" bindtap="submit">{{busy ? '提交中…' : '提交'}}</button><view wx:if="{{!rating}}" class="muted">请先选择星级</view>
+  </block>
+</view>

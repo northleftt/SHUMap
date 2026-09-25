@@ -3,5 +3,7 @@
   "navigationStyle": "custom",
   "renderer": "skyline",
   "disableScroll": true,
-  "usingComponents": {}
+  "usingComponents": {
+    "feature-feedback": "/components/feature-feedback/index"
+  }
 }

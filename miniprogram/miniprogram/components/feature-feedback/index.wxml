@@ -1,0 +1,1 @@
+<view wx:if="{{!hidden}}" class="feedback-row"><view class="feedback-open" bindtap="open"><text class="star">☆</text><text>{{prompt}}</text></view><view class="dismiss" catchtap="dismiss" aria-label="不再提示">×</view></view>

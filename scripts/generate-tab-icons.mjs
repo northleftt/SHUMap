@@ -72,7 +72,7 @@ async function render(nodes, color, outPath, filled = false) {
 
 for (const dir of [TAB_OUT, MENU_OUT, POI_OUT, POI_W_OUT, SHEET_OUT]) mkdirSync(dir, { recursive: true });
 
-for (const name of ["map", "bus", "globe", "user-round"]) {
+for (const name of ["map", "bus", "globe", "utensils", "user-round"]) {
   const nodes = await iconNode(name);
   await render(nodes, COLOR_SUB, path.join(TAB_OUT, `${name}.png`));
   await render(nodes, COLOR_PRIMARY, path.join(TAB_OUT, `${name}-active.png`));
@@ -123,6 +123,9 @@ for (const [key, lucideName] of Object.entries(POI_ICONS)) {
 
 // 抽屉/详情卡 / 地图浮层 UI 图标（按使用场景分色）。
 const SHEET_ICONS = [
+  ["sunrise", "sunrise", COLOR_PRIMARY],
+  ["sun", "sun", COLOR_PRIMARY],
+  ["moon", "moon", COLOR_PRIMARY],
   ["search", "search", COLOR_SUB],
   ["x", "x", COLOR_FACT],
   ["chevron-right", "chevron-right", COLOR_SUB],

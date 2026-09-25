@@ -451,10 +451,10 @@
                 </view>
 
                 <!-- 楼内设施指引（圆形图标徽章横滑）+ 楼层图入口；未录入设施时整节不显示 -->
-                <block wx:if="{{detail.isBuilding && detail.facilities.length > 0}}">
+                <block wx:if="{{detail.isBuilding && (detail.facilities.length > 0 || (detail.isCanteen && detail.hasFloors))}}">
                   <view class="section-head">
                     <view class="section-title">楼内设施指引</view>
-                    <view class="section-action" bindtap="openFloors">查看楼层图 ›</view>
+                    <view class="section-action" bindtap="openFloors">{{detail.isCanteen ? '楼层与就餐详情 ›' : '查看楼层图 ›'}}</view>
                   </view>
                   <scroll-view scroll-x class="badge-row" enhanced show-scrollbar="{{false}}">
                     <view class="badge-row-inner">
@@ -556,6 +556,9 @@
             </scroll-view>
           </block>
 
+          <view wx:if="{{!searchQuery}}" class="search-feedback">
+            <feature-feedback page="search" prompt="你觉得搜索好用吗？" />
+          </view>
           <!-- 结果区：搜索/筛选生效时是结果列表，否则是最近查看 -->
           <block wx:if="{{searchActive}}">
             <view wx:if="{{searchStatus === 'loading'}}" class="state-block">

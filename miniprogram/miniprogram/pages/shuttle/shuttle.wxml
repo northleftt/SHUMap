@@ -121,6 +121,7 @@
     </block>
   </block>
 
+  <feature-feedback page="shuttle" prompt="你觉得校车查询好用吗？" />
   <view class="page-footer-space"></view>
 </scroll-view>
 

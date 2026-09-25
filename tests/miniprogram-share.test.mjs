@@ -109,7 +109,9 @@ assert.ok(appJson.pages.length >= 9, "页面清单读取异常");
 const TIMELINE_EXEMPT = new Set(["pages/webview/webview"]);
 
 for (const page of appJson.pages) {
-  const source = readFileSync(join(miniRoot, `${page}.ts`), "utf8");
+  const pageSource = readFileSync(join(miniRoot, `${page}.ts`), "utf8");
+  const source = /Page\(diningPage\((true|false)\)\)/.test(pageSource)
+    ? readFileSync(join(miniRoot, "lib/dining/page.ts"), "utf8") : pageSource;
   assert.match(
     source,
     /\bonShareAppMessage\s*\(/,
