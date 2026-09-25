@@ -38,9 +38,12 @@ export function shanghaiWeekday(date: string): WeekdayColumn | null {
  * （shanghaiWeekday 的结果）。
  */
 export async function resolveCampusDayType(env: Env, date: string, weekday: WeekdayColumn): Promise<CampusDayType> {
+  // 同一天可能同时录了 holiday 与 workday_override（unique 含 kind，管理端也
+  // 不拦）：必须有确定性优先级，且与管理端预览（src/lib/calendar/dayType.ts）
+  // 同口径——调休工作日优先于法定节假日。
   const special = await first<{ kind: string }>(
     env.DB,
-    "select kind from academic_dates where service_date=? limit 1",
+    "select kind from academic_dates where service_date=? order by case kind when 'workday_override' then 0 else 1 end limit 1",
     [date],
   );
   if (special?.kind === "workday_override") return "weekday";

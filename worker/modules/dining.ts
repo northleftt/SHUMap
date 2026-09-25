@@ -92,8 +92,10 @@ export async function publicDiningSchedule(request: Request, env: Env): Promise<
 /**
  * GET /api/public/merchant-status — 商户营业状态的实时读端（facility-status 的商户版）。
  *
- * 关店/暂停营业必须立刻对用户生效，而 release 快照里商户没有 lifecycle 字段
- * （加进 manifest 会破坏已发布小程序的 exactObject 白名单），所以走实时通道。
+ * 暂停营业（temporarily_closed）必须立刻对用户生效，而 release 快照里商户没有
+ * lifecycle 字段（加进 manifest 会破坏已发布小程序的 exactObject 白名单），所以走
+ * 实时通道。retired（关店）不下发：关店改变的是商户清单本身，随下一次 release 生效；
+ * 实时通道只承载不变清单、只变状态的 temporarily_closed。
  */
 export async function publicMerchantStatus(env: Env): Promise<Response> {
   const rows = await all<{ id: string; lifecycleStatus: string }>(
@@ -203,8 +205,9 @@ export async function updateAcademicYear(request: Request, env: Env, principal: 
 }
 
 /**
- * 删除学年的两道保护（A18 设计）：覆盖今天的学年不可删（今天的日型判定不能落空）；
- * 有未来临时规则日历落在其区间内的不可删（规则解析依赖校历兜底）。
+ * 删除保护：今天落在该学年的任一区间（学期/假期）或逐日特殊日期（节假日/调休）
+ * 里时不可删——删掉后今天的日型判定会退化成纯星期判断。校车服务日历只是班次
+ * 调度规则、不经校历解析，删除学年不影响它，无需额外保护。
  */
 export async function deleteAcademicYear(env: Env, principal: SessionPrincipal, yearId: string, requestId: string): Promise<Response> {
   const before = await first<{ id: string; name: string }>(env.DB, "select id,name from academic_years where id=?", [yearId]);
@@ -215,7 +218,12 @@ export async function deleteAcademicYear(env: Env, principal: SessionPrincipal, 
     "select id from academic_terms where year_id=? and valid_from<=? and valid_to>=? limit 1",
     [yearId, today, today],
   );
-  if (covering) throw new HttpError(409, "academic_year_current", "当前学年不可删除");
+  const coveringDate = await first<{ id: string }>(
+    env.DB,
+    "select id from academic_dates where year_id=? and service_date=? limit 1",
+    [yearId, today],
+  );
+  if (covering || coveringDate) throw new HttpError(409, "academic_year_current", "当前学年不可删除");
   await env.DB.batch([
     env.DB.prepare("delete from academic_terms where year_id=?").bind(yearId),
     env.DB.prepare("delete from academic_dates where year_id=?").bind(yearId),

@@ -707,15 +707,17 @@ function FloorPanel({
     setBusy(true);
     setError("");
     try {
-      await admin.createFloor({
+      const created = await admin.createFloor({
         buildingPlaceId: placeId,
         levelCode: code,
         levelOrder: suggestFloorOrder(code),
         displayName: displayName.trim() || suggestFloorName(code),
         isPublic: true,
       });
-      // 新楼层的供餐行默认空餐别空品类，让管理员自己填。
-      dining?.onChange([...dining.rows, { levelCode: canonicalFloorLevelCode(code) ?? code, meals: [], stallTypes: [] }]);
+      // 新楼层的供餐行默认空餐别空品类，让管理员自己填。key 必须用服务端落库的
+      // 原始 levelCode（worker 只 trim 不规范化），否则填 "3" 时行挂到 "F3" 上，
+      // 之后按 floor.levelCode 永远匹配不到，餐别/品类静默丢失。
+      dining?.onChange([...dining.rows, { levelCode: created.levelCode, meals: [], stallTypes: [] }]);
       setLevelCode("");
       setDisplayName("");
       setAdding(false);

@@ -103,6 +103,16 @@ test("日型判定：服务日历的 day_type 不影响标签（校历为准）"
   assert.equal(await dayType(db, "2026-09-19"), "weekend");
 });
 
+test("日型判定：同一天双 kind 记录时确定性地调休优先（与管理端预览同口径）", async () => {
+  const db = database();
+  // 管理端保存时 holidays 在 dates 数组前部（先插入）；无确定性排序时 worker 会返回
+  // holiday，而预览恒为 workday_override 优先——口径分裂。修复后两种插入序都必须判 weekday。
+  db.exec(`insert into academic_dates(id,year_id,service_date,kind) values
+    ('ad_dup_h','ay_2025-2026','2026-09-26','holiday'),
+    ('ad_dup_o','ay_2025-2026','2026-09-26','workday_override')`);
+  assert.equal(await dayType(db, "2026-09-26"), "weekday");
+});
+
 test("shanghaiWeekday 不受运行环境 TZ 影响", () => {
   assert.equal(handlers.shanghaiWeekday("2026-09-19"), "saturday");
   assert.equal(handlers.shanghaiWeekday("2026-09-21"), "monday");
@@ -258,6 +268,18 @@ test("学年删除保护：覆盖今天的学年 409，非当前学年可删", a
   const gone = await handlers.deleteAcademicYear(envOf(db), principal, id, "req-3");
   assert.equal(gone.status, 204);
   assert.equal(db.prepare("select count(*) as c from academic_terms where year_id=?").get(id).c, 0);
+});
+
+test("学年删除保护：今天仅由该学年的逐日特殊日期命中时同样 409", async () => {
+  const db = database();
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
+  // 无区间覆盖今天、只有一条 holiday 日期：删除后今天的日型判定同样落空，必须拦住。
+  db.exec(`insert into academic_years(id,name,created_at,updated_at) values('ay_dates','2097-2098','2026-01-01','2026-01-01')`);
+  db.prepare(`insert into academic_dates(id,year_id,service_date,kind) values('ad_today','ay_dates',?,'holiday')`).run(today);
+  await assert.rejects(
+    handlers.deleteAcademicYear(envOf(db), principal, "ay_dates", "req-1"),
+    (error) => { assert.equal(error.status, 409); assert.equal(error.code, "academic_year_current"); return true; },
+  );
 });
 
 // --- place content.dining 校验 ---

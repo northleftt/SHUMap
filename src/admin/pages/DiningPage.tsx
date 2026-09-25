@@ -1,7 +1,7 @@
 import { Check, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import * as admin from "../../lib/api/admin";
-import type { DiningDayType, DiningMeal, DiningScheduleRow } from "../../lib/api/admin";
+import type { DiningDayType, DiningMeal, DiningScheduleRow, ListResponse } from "../../lib/api/admin";
 import { ApiError } from "../../lib/api/client";
 import { deriveDayType, type CampusDayType } from "../../lib/calendar/dayType";
 import type { PlaceDetailResponse, PlaceListItem, SpacesResponse } from "../adminTypes";
@@ -83,10 +83,15 @@ export function DiningPage() {
 
   // reload 会把 useAsyncData 重置回 loading；若此时直接渲染 LoadingState，整个
   // 编辑面板会被卸载重挂，表单草稿全部丢失。留住最近一次成功数据（TransitPage 同款处理）。
+  // 三个数据源都要留：保存任何一项都会广播 admin 数据变更，calendar/meta 也会同时回 loading。
   const [lastDining, setLastDining] = useState<admin.DiningAdminResponse | null>(null);
   useEffect(() => {
     if (dining.state.status === "ready") setLastDining(dining.state.data);
   }, [dining.state]);
+  const [lastCalendar, setLastCalendar] = useState<ListResponse<admin.AcademicYearRow> | null>(null);
+  useEffect(() => {
+    if (calendar.state.status === "ready") setLastCalendar(calendar.state.data);
+  }, [calendar.state]);
 
   const meta = useAsyncData<DiningMeta>(async (signal) => {
     const [places, spaces] = await Promise.all([
@@ -109,6 +114,10 @@ export function DiningPage() {
       })),
     };
   }, []);
+  const [lastMeta, setLastMeta] = useState<DiningMeta | null>(null);
+  useEffect(() => {
+    if (meta.state.status === "ready") setLastMeta(meta.state.data);
+  }, [meta.state]);
 
   const [tab, setTab] = useState<Tab>("schedules");
   const [error, setError] = useState("");
@@ -130,14 +139,14 @@ export function DiningPage() {
   }
 
   if (dining.state.status === "error" && lastDining === null) return <ErrorBanner message={dining.state.message} />;
-  if (calendar.state.status === "error") return <ErrorBanner message={calendar.state.message} />;
-  if (meta.state.status === "error") return <ErrorBanner message={meta.state.message} />;
-  if (lastDining === null || calendar.state.status !== "ready" || meta.state.status !== "ready") {
+  if (calendar.state.status === "error" && lastCalendar === null) return <ErrorBanner message={calendar.state.message} />;
+  if (meta.state.status === "error" && lastMeta === null) return <ErrorBanner message={meta.state.message} />;
+  if (lastDining === null || lastCalendar === null || lastMeta === null) {
     return <LoadingState label="加载就餐安排…" />;
   }
 
-  const terms = calendar.state.data.items.flatMap((year) => year.terms);
-  const dates = calendar.state.data.items.flatMap((year) => year.dates);
+  const terms = lastCalendar.items.flatMap((year) => year.terms);
+  const dates = lastCalendar.items.flatMap((year) => year.dates);
   const dayTypeOf = (date: string): CampusDayType => deriveDayType(date, terms, dates);
 
   return (
@@ -156,7 +165,7 @@ export function DiningPage() {
         <SchedulesPanel
           busy={busy}
           dayTypeOf={dayTypeOf}
-          meta={meta.state.data}
+          meta={lastMeta}
           mutate={mutate}
           schedules={lastDining.schedules}
         />
