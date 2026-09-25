@@ -153,6 +153,12 @@ test("periodBarText appends the arrangement suffix on weekends with a schedule",
     arrangement: { scheduleId: "ds_1", floors: [] },
   });
   assert.equal(periodBarText(holiday, minutesOf("12:00")), "当前：午餐时段（至 13:00） · 节假日营业安排");
+  // 工作日例外安排同样标注
+  const weekdayException = scheduleResponse({
+    dayType: "weekday",
+    arrangement: { scheduleId: "ds_2", floors: [] },
+  });
+  assert.equal(periodBarText(weekdayException, minutesOf("12:00")), "当前：午餐时段（至 13:00） · 工作日营业安排");
   // 无安排不加后缀（页面此时走「暂无安排信息」空态）
   const noSchedule = scheduleResponse({ dayType: "weekend" });
   assert.equal(periodBarText(noSchedule, minutesOf("12:00")), "当前：午餐时段（至 13:00）");
@@ -230,11 +236,24 @@ test("noBreakfast removes the breakfast segment for that floor", () => {
     status({ dayType: "weekend", arrangement, meals: ["breakfast"], nowMinutes: minutesOf("08:00") }),
     { kind: "rest" },
   );
-  // 工作日不受 noBreakfast 影响（arrangement 只约束周末/节假日）
+  // 工作日安排同样生效（weekday 安排 = 例外覆盖默认全开），noBreakfast 一样剥掉早餐段
   assert.deepEqual(
     status({ dayType: "weekday", arrangement, meals: ["breakfast"], nowMinutes: minutesOf("08:00") }),
-    { kind: "open" },
+    { kind: "rest" },
   );
+});
+
+test("weekday arrangement overrides the default-all-open (exception days)", () => {
+  const arrangement = {
+    scheduleId: "ds_9",
+    floors: [{ floorId: "floor_1", noBreakfast: false }],
+  };
+  // 命中白名单 → 正常判定
+  assert.deepEqual(status({ arrangement }), { kind: "open" });
+  // 不在白名单 → 今日休息（工作日默认全开被例外覆盖）
+  assert.deepEqual(status({ arrangement, floorId: "floor_2" }), { kind: "rest" });
+  // 无安排 → 工作日默认全开
+  assert.deepEqual(status({ arrangement: null }), { kind: "open" });
 });
 
 // ---------------------------------------------------------------------------

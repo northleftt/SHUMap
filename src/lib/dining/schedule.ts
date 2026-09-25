@@ -202,7 +202,7 @@ export function mealNow(periods: readonly DiningMealPeriod[], nowMinutes: number
 /**
  * 顶部时段条文案（纯文字）：
  * 「当前：午餐时段（至 13:00）」/「当前：午休中 · 晚餐 16:40 开始」/「当前：今日供餐已结束」。
- * 周末/节假日有开放安排时加「· 周末营业安排」类后缀。
+ * 有开放安排命中时加「· 周末营业安排」类后缀（工作日例外安排同样标注）。
  */
 export function periodBarText(schedule: DiningScheduleResponse, nowMinutes: number): string {
   const state = mealNow(schedule.mealPeriods, nowMinutes);
@@ -217,7 +217,7 @@ export function periodBarText(schedule: DiningScheduleResponse, nowMinutes: numb
   } else {
     text = "当前：今日供餐已结束";
   }
-  if (schedule.dayType !== "weekday" && schedule.arrangement) {
+  if (schedule.arrangement) {
     text += ` · ${DAY_TYPE_LABELS[schedule.dayType]}营业安排`;
   }
   return text;
@@ -229,7 +229,7 @@ export function periodBarText(schedule: DiningScheduleResponse, nowMinutes: numb
 
 export type FloorOpenStatus =
   | { kind: "open" }
-  /** 「今日休息」（灰）：整楼关闭，或周末/节假日白名单未命中。 */
+  /** 「今日休息」（灰）：整楼关闭，或开放安排白名单未命中。 */
   | { kind: "rest" }
   /** 「晚餐 16:40 开」类（灰）：当前时刻该层不供餐，但今天还有它的餐段。 */
   | { kind: "upcoming"; meal: string; startTime: string };
@@ -237,10 +237,11 @@ export type FloorOpenStatus =
 /**
  * 楼层行状态聚合。规则：
  * - 整楼关闭（place lifecycle 非 active）→ 今日休息；
- * - 周末/节假日（dayType≠weekday）按 arrangement 白名单，未命中 → 今日休息，
- *   命中但 noBreakfast 时当天早餐段不算该层供餐（arrangement 为 null 属页面级空态，
- *   调用方不应走到这里；走到时按未命中兜底，不猜）；
- * - 工作日无 arrangement 视为全部开放；
+ * - 有开放安排命中当天（不论日型）→ 按白名单：未命中 → 今日休息，命中但
+ *   noBreakfast 时当天早餐段不算该层供餐。工作日的安排就是「例外覆盖默认全开」
+ *   的通道（台风/维修等），与周末/假日安排同一机制；
+ * - 无安排：工作日默认全开；周末/假日按未命中兜底（页面级空态「暂无安排信息」
+ *   会先兜住，真走到这里也不猜）；
  * - 其余按「该层 meals ∩ 餐段」判定：在餐段内 = 正常（不标注），
  *   今天还有它的餐段 = 「X餐 HH:MM 开」，今天已没有 = 今日休息。
  */
@@ -255,10 +256,12 @@ export function floorOpenStatus(input: {
 }): FloorOpenStatus {
   if (input.placeClosed) return { kind: "rest" };
   let meals = input.meals;
-  if (input.dayType !== "weekday") {
-    const entry = input.arrangement?.floors.find((floor) => floor.floorId === input.floorId) ?? null;
+  if (input.arrangement) {
+    const entry = input.arrangement.floors.find((floor) => floor.floorId === input.floorId) ?? null;
     if (!entry) return { kind: "rest" };
     if (entry.noBreakfast) meals = meals.filter((meal) => meal !== "breakfast");
+  } else if (input.dayType !== "weekday") {
+    return { kind: "rest" };
   }
   const segments = sortedPeriods(input.periods).filter((period) => meals.includes(period.meal));
   for (const period of segments) {

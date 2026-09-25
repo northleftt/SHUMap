@@ -35,9 +35,10 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "periods", label: "供餐时段" },
 ];
 
-// 适用日型不含「工作日」：工作日默认全开是常态，worker 也拒录 weekday（DINING_DAY_TYPES）。
-// 台风天这类例外应录进校历当特殊日，再由 holiday 类安排承接。
+// 五种日型都可录：工作日无安排时默认全开，weekday 安排 = 例外覆盖（台风/维修等
+// 单日情形，与校车例外日期同思路）；周末/假日/寒暑假无安排时前台显示「暂无安排」。
 const DAY_TYPE_OPTIONS: Array<{ value: DiningDayType; label: string }> = [
+  { value: "weekday", label: "工作日" },
   { value: "weekend", label: "周末" },
   { value: "holiday", label: "假日" },
   { value: "winter_break", label: "寒假" },

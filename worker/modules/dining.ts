@@ -34,14 +34,12 @@ function nameValue(value: unknown, field: string, max = 100): string {
   return value.trim();
 }
 
-// 开放安排的适用日型：weekday 不录——工作日默认全开是常态，台风天这类例外应录进
-// 校历当特殊日、由 holiday 类安排承接；允许录 weekday 会得到一条前台永远不生效的安排
-// （前台只在非工作日应用白名单），管理端给了开关却静默无效。
-const DINING_DAY_TYPES = CAMPUS_DAY_TYPES.filter((type) => type !== "weekday");
-
+// 开放安排的适用日型：五种日型都可录。工作日无安排时默认全开（常态）；
+// 录一条 weekday 安排就是「例外覆盖默认」的通道（台风/维修等单日例外），
+// 与校车服务日历的例外日期同思路——校历仍是唯一日型来源，安排只是命中规则。
 function dayTypeSet(value: unknown, field: string): CampusDayType[] {
   if (!Array.isArray(value) || value.length === 0) throw new HttpError(400, "validation_error", `${field} must be a non-empty array`);
-  return value.map((item, index) => oneOf(item, `${field}[${index}]`, DINING_DAY_TYPES));
+  return value.map((item, index) => oneOf(item, `${field}[${index}]`, CAMPUS_DAY_TYPES));
 }
 
 function shanghaiToday(): string {

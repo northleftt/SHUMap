@@ -83,13 +83,12 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
   const schedule = scheduleState.status === "ready" ? scheduleState.schedule : null;
 
   const floorIds = useMemo(() => new Set((canteen?.floors ?? []).map((floor) => floor.floorId)), [canteen]);
-  // 整楼休息（D7）：食堂 lifecycle 关闭，或周末/节假日白名单整楼未命中。
+  // 整楼休息（D7）：食堂 lifecycle 关闭，或开放安排白名单整楼未命中（工作日例外安排同机制）。
   // 无楼层数据的食堂不参与白名单判定（some 恒 false 会把「暂无楼层信息」误标成「今日休息」）。
   const wholeDayRest = Boolean(
     canteen && (
       canteen.closed
       || (schedule
-        && schedule.dayType !== "weekday"
         && schedule.arrangement
         && floorIds.size > 0
         && !schedule.arrangement.floors.some((floor) => floorIds.has(floor.floorId)))
@@ -157,8 +156,8 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
             </div>
           ) : null}
 
-          {/* 周末/节假日安排 banner */}
-          {schedule && schedule.dayType !== "weekday" && schedule.arrangement && !wholeDayRest ? (
+          {/* 开放安排 banner（周末/假日安排与工作日例外安排同机制） */}
+          {schedule && schedule.arrangement && !wholeDayRest ? (
             <div className="mx-4 mt-3 rounded-2xl bg-primary-container px-4 py-3.5">
               <div className="text-label text-sub">{DAY_TYPE_LABELS[schedule.dayType]}安排</div>
               <div className="mt-1 text-body font-medium leading-relaxed text-primary">

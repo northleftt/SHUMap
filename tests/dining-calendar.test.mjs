@@ -197,16 +197,18 @@ test("dining schedule 创建 → 公开接口按日型命中；非法输入 400"
   }
 });
 
-test("dining schedule：weekday 不录（工作日默认全开，例外走校历）", async () => {
+test("dining schedule：weekday 安排生效（例外覆盖工作日默认全开）", async () => {
   const db = database();
   seedCanteenFloor(db);
-  await assert.rejects(
-    handlers.createDiningSchedule(
-      scheduleRequest({ validFrom: "2026-09-21", validTo: "2026-09-25", dayTypes: ["weekday"], floors: [{ floorId: "floor_ct_1f" }] }),
-      envOf(db), principal, "req-1",
-    ),
-    (error) => { assert.equal(error.status, 400); return true; },
+  const created = await handlers.createDiningSchedule(
+    scheduleRequest({ validFrom: "2026-09-21", validTo: "2026-09-21", dayTypes: ["weekday"], floors: [{ floorId: "floor_ct_1f" }] }),
+    envOf(db), principal, "req-1",
   );
+  assert.equal(created.status, 201);
+  // 2026-09-21 是周一（工作日）：安排命中即下发，前台按白名单显示
+  const body = await (await handlers.publicDiningSchedule(new Request("http://x/api/public/dining/schedule?date=2026-09-21"), envOf(db))).json();
+  assert.equal(body.dayType, "weekday");
+  assert.deepEqual(body.arrangement.floors, [{ floorId: "floor_ct_1f", noBreakfast: false }]);
 });
 
 test("dining schedule：重复楼层去重（不落成 PK 冲突 500）", async () => {
