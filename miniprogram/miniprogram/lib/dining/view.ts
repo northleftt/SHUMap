@@ -8,7 +8,7 @@ export function canteensOf(release: LoadedRelease): CanteenView[] {
 }
 
 export function floorView(canteen: CanteenView, floor: DiningFloorView, schedule: DiningScheduleResponse | null, statuses: MerchantStatusResponse["statuses"], nowMinutes: number) {
-  const status = schedule ? floorOpenStatus({ ...schedule, periods: schedule.mealPeriods, floorId: floor.floorId, meals: floor.meals, nowMinutes, placeClosed: canteen.closed }) : null;
+  const status = schedule && (canteen.closed || schedule.dayType === "weekday" || schedule.arrangement) ? floorOpenStatus({ ...schedule, periods: schedule.mealPeriods, floorId: floor.floorId, meals: floor.meals, nowMinutes, placeClosed: canteen.closed }) : null;
   const noBreakfast = Boolean(schedule?.arrangement?.floors.find(row => row.floorId === floor.floorId)?.noBreakfast);
   return {
     ...floor,

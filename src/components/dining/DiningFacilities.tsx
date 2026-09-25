@@ -14,7 +14,7 @@ export function DiningFacilities({ facilities, floors, statuses, error, loading,
   return <section className="mt-4" data-testid="dining-facilities">
     <SectionHeader title={floorId ? "本层设施" : "公共设施"} action={
       floorId ? hasPlan && <button type="button" className="text-primary" onClick={() => navigate(`/places/${encodeURIComponent(placeId)}/floors?floor=${encodeURIComponent(floorId)}&view=plan`)}>查看平面图 ›</button>
-        : <button type="button" className="text-primary" onClick={() => navigate(`/places/${encodeURIComponent(placeId)}/floors`)}>全部设施 ›</button>
+        : <button type="button" className="text-primary" onClick={() => navigate(`/places/${encodeURIComponent(placeId)}/floors?floor=all`)}>全部设施 ›</button>
     } />
     {error ? <p className="mt-2 text-aux text-error">设施状态加载失败，请稍后重试</p> : loading ? <p className="mt-2 text-aux text-sub">正在加载设施状态…</p> : null}
     <div className="mt-2 divide-y divide-line">

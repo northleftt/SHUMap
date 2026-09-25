@@ -283,7 +283,7 @@ function FloorMealCard({
   schedule: DiningScheduleResponse | null;
   nowMinutes: number;
 }) {
-  const status = schedule
+  const status = schedule && (canteen.closed || schedule.dayType === "weekday" || schedule.arrangement)
     ? floorOpenStatus({
       dayType: schedule.dayType,
       arrangement: schedule.arrangement,

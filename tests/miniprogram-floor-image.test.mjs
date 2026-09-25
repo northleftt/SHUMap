@@ -34,3 +34,9 @@ test('failed floor image fetch is retryable and unloaded request cannot write a 
  page.onUnload();pending[1].success({statusCode:200,data:new ArrayBuffer(1),header:{}});
  await new Promise(r=>setTimeout(r,0));assert.equal(writes.length,0);
 });
+
+test('all floors includes unassigned facilities and clears the previous floor plan',async()=>{
+ const removed=[];globalThis.wx={getFileSystemManager:()=>({unlink:o=>removed.push(o.filePath)})};
+ const page={...options,planRequest:0,planFile:'old.png',floorRows:[{id:'f1',displayName:'一层'}],poi:{facilities:[{id:'known',displayName:'卫生间',typeName:'卫生间',floorId:'f1',content:{locationDescription:'东侧'},operationalStatus:'available'},{id:'unknown',displayName:'充电宝',typeName:'充电宝',floorId:null,content:{},operationalStatus:'unavailable'}]},data:{},setData(o){Object.assign(this.data,o);},updateReport(){}};
+ await page.setupFloor('all');assert.equal(page.data.hasPlan,false);assert.equal(page.data.view,'list');assert.deepEqual(page.data.floorFacilities.map(f=>f.id),['known','unknown']);assert.equal(page.data.floorFacilities[1].location,'楼层待完善');assert.equal(page.data.floorFacilities[1].statusLabel,'暂停使用');assert.ok(removed.includes('old.png'));
+});
