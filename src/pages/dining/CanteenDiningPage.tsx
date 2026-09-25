@@ -301,7 +301,9 @@ function FloorMealCard({
       </div>
       <div className="mt-2 divide-y divide-line">
         {MEAL_ORDER.map((meal) => {
-          const served = floor.meals.includes(meal);
+          const noBreakfast = meal === "breakfast"
+            && Boolean(schedule?.arrangement?.floors.find(row => row.floorId === floor.floorId)?.noBreakfast);
+          const served = floor.meals.includes(meal) && !noBreakfast;
           const Icon = MEAL_ICONS[meal];
           const periods = periodsByMeal.get(meal) ?? [];
           return (
@@ -309,7 +311,7 @@ function FloorMealCard({
               <Icon className="shrink-0 text-primary" size={18} />
               <span className="shrink-0 text-body font-semibold text-ink">{MEAL_LABELS[meal]}</span>
               <span className="min-w-0 flex-1 truncate text-aux text-sub">
-                {served ? floor.stallTypes.join(" · ") : "不供应"}
+                {served ? floor.stallTypes.join(" · ") : noBreakfast ? "今日不供应" : "不供应"}
               </span>
               <span className="shrink-0 text-[11px] text-sub">
                 {served ? periods.map((period) => `${period.startTime}–${period.endTime}`).join(" · ") : ""}
