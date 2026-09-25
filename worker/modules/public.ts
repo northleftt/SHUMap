@@ -1,7 +1,8 @@
+import { resolveClientContract, projectReleaseManifest, contractHeaders, type ClientContract } from "../lib/client-contracts";
 import type { Env, R2ObjectBody } from "../types/cloudflare";
 import { all, first } from "../lib/db";
 import { HttpError, json } from "../lib/http";
-import { isoNow, parseJsonArray, parseJsonObject } from "../lib/values";
+import { isoNow, parseJsonArray, parseJsonObject, sha256 } from "../lib/values";
 import type { ReleaseManifest } from "./releases";
 
 const MAX_RELEASE_ARTIFACT_BYTES = 16 * 1024 * 1024;
@@ -43,41 +44,37 @@ async function activeReleaseManifest(env: Env): Promise<ReleaseManifest> {
   return manifest;
 }
 
-export async function getCurrentRelease(env: Env): Promise<Response> {
-  const { release, object } = await activeReleaseArtifact(env);
-  return new Response(object.body, {
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "content-length": String(object.size),
-      "cache-control": "public, max-age=60, stale-while-revalidate=300",
-      "etag": `"${release.artifact_sha256}"`,
-      "x-shumap-release": release.id,
-      "x-shumap-version": release.version,
-      "x-content-type-options": "nosniff",
-    },
-  });
+async function releaseResponse(object: R2ObjectBody, releaseId: string, version: string, contract: ClientContract, request: Request | undefined, immutable: boolean): Promise<Response> {
+  const manifest = await object.json<ReleaseManifest>();
+  if (manifest.release.id !== releaseId) throw new Error("Release artifact identity mismatch");
+  const text = JSON.stringify(projectReleaseManifest(manifest, contract));
+  const etag = `"${await sha256(text)}"`;
+  const headers = {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": immutable ? "public, max-age=31536000, immutable" : "public, max-age=60, stale-while-revalidate=300",
+    etag, "x-shumap-release": releaseId, "x-shumap-version": version,
+    "x-content-type-options": "nosniff", ...contractHeaders(contract),
+  };
+  console.info(JSON.stringify({ event: "client_contract_read", contract, endpoint: immutable ? "versioned" : "current" }));
+  if (request?.headers.get("if-none-match")?.split(",").map(value => value.trim()).some(value => value === "*" || value.replace(/^W\//, "") === etag)) return new Response(null, { status: 304, headers });
+  return new Response(text, { headers: { ...headers, "content-length": String(new TextEncoder().encode(text).byteLength) } });
 }
 
-export async function getVersionedRelease(env: Env, releaseId: string): Promise<Response> {
-  const release = await first<{ artifact_key: string | null; artifact_sha256: string | null; version: string }>(
-    env.DB,
-    "select artifact_key,artifact_sha256,version from releases where id=? and status in ('active','superseded')",
-    [releaseId],
-  );
+export async function getCurrentRelease(env: Env, request?: Request): Promise<Response> {
+  const contract = resolveClientContract(request);
+  const { release, object } = await activeReleaseArtifact(env);
+  return releaseResponse(object, release.id, release.version, contract, request, false);
+}
+
+export async function getVersionedRelease(env: Env, releaseId: string, request?: Request): Promise<Response> {
+  const contract = resolveClientContract(request);
+  const release = await first<{ artifact_key: string | null; artifact_sha256: string | null; version: string }>(env.DB,
+    "select artifact_key,artifact_sha256,version from releases where id=? and status in ('active','superseded')", [releaseId]);
   if (!release?.artifact_key || !release.artifact_sha256) throw new HttpError(404, "not_found", "Release does not exist");
   const object = await env.SHUMAP_BUCKET.get(release.artifact_key);
   if (!object) throw new HttpError(503, "release_unavailable", "Release artifact is missing");
   assertObjectSizeWithin(object.size, MAX_RELEASE_ARTIFACT_BYTES, `Release ${releaseId}`);
-  return new Response(object.body, {
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "content-length": String(object.size),
-      "cache-control": "public, max-age=31536000, immutable",
-      "etag": `"${release.artifact_sha256}"`,
-      "x-shumap-release": releaseId,
-      "x-content-type-options": "nosniff",
-    },
-  });
+  return releaseResponse(object, releaseId, release.version, contract, request, true);
 }
 
 /** 允许经公共底图通道流出的类型；其余（PDF/CAD/GeoJSON 源文件等）一律 404。 */
@@ -91,9 +88,9 @@ const MAP_ASSET_CONTENT_TYPES: Record<string, string> = {
 /**
  * GET /api/public/maps/:mapVersionId/asset — 楼层/校区底图的公共读端。
  *
- * 唯一放行条件：该 map version 是**当前 active release** 的成员
- * （release_map_versions ⋈ releases.status='active'）。因此导入完成但未发布的
- * 版本、被 superseded 的版本都读不到。底图对象仍留在原 private key，不做
+ * 放行当前 active release 成员，或拥有未过期显式读取租约的 superseded 成员。
+ * 导入但未发布、租约过期的旧版均拒绝；租约不能覆盖媒体撤销。
+ * 底图对象仍留在原 private key，不做
  * 公共拷贝；这里只是按 release 成员资格代理读取，并额外要求媒体行处于
  * private/public scope 且已 approved/published——隔离区对象因此不可能经此泄漏。
  * 响应强制 nosniff + sandbox CSP，避免 SVG 被当作可执行文档直接导航。
@@ -103,11 +100,11 @@ export async function getPublicMapAsset(env: Env, mapVersionId: string): Promise
     env.DB,
     `select me.object_key,me.content_type,me.byte_size,me.sha256,me.bucket_scope,me.status
        from release_map_versions rmv
-       join releases rel on rel.id=rmv.release_id and rel.status='active'
+       join releases rel on rel.id=rmv.release_id and (rel.status='active' or (rel.status='superseded' and exists (select 1 from release_asset_leases lease where lease.release_id=rel.id and julianday(lease.expires_at)>julianday('now'))))
        join map_versions mv on mv.id=rmv.map_version_id
        join map_assets ma on ma.id=mv.map_asset_id
        join media_assets me on me.id=ma.media_asset_id
-      where rmv.map_version_id=?`,
+      where rmv.map_version_id=? limit 1`,
     [mapVersionId],
   );
   if (!row) throw new HttpError(404, "not_found", "Map asset is not part of the current release");
@@ -186,7 +183,8 @@ export async function publicSearch(request: Request, env: Env): Promise<Response
   })) }, { headers: { "cache-control": "public, max-age=30" } });
 }
 
-export async function publicPlace(env: Env, placeId: string): Promise<Response> {
+export async function publicPlace(env: Env, placeId: string, request?: Request): Promise<Response> {
+  const contract = resolveClientContract(request);
   const manifest = await activeReleaseManifest(env);
   const place = manifest.places.find((item) => item.id === placeId);
   if (!place) throw new HttpError(404, "not_found", "Place is not part of the current release");
@@ -214,7 +212,7 @@ export async function publicPlace(env: Env, placeId: string): Promise<Response> 
       levelCode: floor.levelCode,
       levelOrder: floor.levelOrder,
       displayName: floor.displayName,
-      imageUrl: floor.imageUrl,
+      ...(contract === "map-2026-09" && floor.imageUrl !== undefined ? { imageUrl: floor.imageUrl } : {}),
     }));
   return json({
     releaseId: manifest.release.id,
@@ -234,7 +232,7 @@ export async function publicPlace(env: Env, placeId: string): Promise<Response> 
     locations,
     facilities,
     floors,
-  }, { headers: { "cache-control": "public, max-age=60" } });
+  }, { headers: { "cache-control": "public, max-age=60", ...contractHeaders(contract) } });
 }
 
 export async function listPublicPlaces(env: Env): Promise<Response> {

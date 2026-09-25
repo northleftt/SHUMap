@@ -315,7 +315,9 @@ const deps = {
   },
 };
 
+storage.set("release-release_test_1", JSON.stringify({ brokenLegacyCache: true }));
 const loaded = await loader.loadReleaseWithCache(deps);
+assert.equal(loaded.manifest.brokenLegacyCache, undefined, "new contract must not consume pre-upgrade cache");
 assert.equal(loaded.releaseId, "release_test_1");
 assert.equal(loaded.version, "test-1");
 assert.equal(loaded.campuses.length, 3, "应装配出三校区");
@@ -371,8 +373,8 @@ assert.throws(() => loader.selectCampus(loaded, "qingpu"), /未知校区/, "未�
 // ---------------------------------------------------------------------------
 // 4. 缓存 key 规则
 // ---------------------------------------------------------------------------
-assert.equal(loader.CURRENT_RELEASE_KEY, "release-current-id");
-assert.equal(loader.releaseCacheKey("release_abc"), "release-release_abc");
-assert.equal(loader.mapAssetCacheKey("mapver_xyz"), "map-asset-mapver_xyz");
+assert.equal(loader.CURRENT_RELEASE_KEY, "release-prod-map-2026-09-current-id");
+assert.equal(loader.releaseCacheKey("release_abc"), "release-prod-map-2026-09-release_abc");
+assert.equal(loader.mapAssetCacheKey("mapver_xyz"), "map-asset-prod-map-2026-09-mapver_xyz");
 
 console.log("miniprogram-release: all assertions passed");

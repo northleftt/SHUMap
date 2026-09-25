@@ -1,3 +1,4 @@
+import { retainReleaseAssets } from "../lib/release-asset-lease";
 import type {
   FacilityContent,
   MerchantContent,
@@ -538,6 +539,7 @@ export class ReleaseCoordinator {
 
       const previous = await first<{ id: string }>(this.env.DB, "select id from releases where status='active'");
       const statements = [];
+      if (previous) statements.push(retainReleaseAssets(this.env, previous.id, isoNow()));
       if (previous) statements.push(this.env.DB.prepare("update releases set status='superseded' where id=?").bind(previous.id));
       statements.push(this.env.DB.prepare(
         "update releases set status='active',artifact_key=?,artifact_sha256=?,activated_at=?,supersedes_release_id=? where id=?",
@@ -587,6 +589,7 @@ export class ReleaseCoordinator {
     const current = await first<{ id: string }>(this.env.DB, "select id from releases where status='active'");
     if (current?.id === targetReleaseId) return json({ id: targetReleaseId, status: "active", unchanged: true });
     await this.env.DB.batch([
+      ...(current ? [retainReleaseAssets(this.env, current.id, isoNow())] : []),
       ...(current ? [this.env.DB.prepare("update releases set status='superseded' where id=?").bind(current.id)] : []),
       this.env.DB.prepare("update releases set status='active',activated_at=? where id=?").bind(isoNow(), targetReleaseId),
       this.env.DB.prepare(

@@ -28,7 +28,8 @@
     "test:split": "node scripts/diagnose_split_completeness.mjs --self-test",
     "test:guide-icons": "node scripts/guide-icons-to-assets.mjs --self-test",
     "guide:icons:migrate": "node scripts/guide-icons-to-assets.mjs",
-    "test:all": "npm run typecheck && npm test && npm run build"
+    "test:all": "npm run typecheck && npm test && npm run build",
+    "deploy:backend:preserve-web": "node scripts/deploy-backend-preserve-web.mjs"
   },
   "keywords": [],
   "author": "",

@@ -1,3 +1,4 @@
+import { CLIENT_CONTRACT } from "../../../shared/client-contracts/client";
 // Typed client for the v2 public API surface. All content is release-derived;
 // bundled static data is never consulted. When no release is active the Worker
 // returns 503 release_unavailable, surfaced as ApiError.isReleaseUnavailable.
@@ -32,7 +33,7 @@ import type { CollectionPayload } from "../../../shared/submission-contract";
 
 /** GET /api/public/releases/current — the sole production content source. */
 export async function getCurrentRelease(signal?: AbortSignal): Promise<ReleaseManifest> {
-  const value = await apiFetch<unknown>("/api/public/releases/current", { signal });
+  const value = await apiFetch<unknown>("/api/public/releases/current", { query: { contract: CLIENT_CONTRACT }, signal });
   return parseReleaseManifest(value);
 }
 
@@ -102,7 +103,7 @@ function objectOf(value: unknown): Record<string, unknown> {
 export async function getAdminReleaseSummary(signal?: AbortSignal): Promise<AdminReleaseSummary | null> {
   let raw: unknown;
   try {
-    raw = await apiFetch<unknown>("/api/public/releases/current", { signal });
+    raw = await apiFetch<unknown>("/api/public/releases/current", { query: { contract: CLIENT_CONTRACT }, signal });
   } catch (error) {
     if (error instanceof ApiError && error.isReleaseUnavailable) return null;
     throw error;
@@ -130,7 +131,7 @@ export async function getAdminReleaseSummary(signal?: AbortSignal): Promise<Admi
 
 /** GET /api/public/releases/:id — immutable versioned artifact. */
 export async function getRelease(releaseId: string, signal?: AbortSignal): Promise<ReleaseManifest> {
-  const value = await apiFetch<unknown>(`/api/public/releases/${encodeURIComponent(releaseId)}`, { signal });
+  const value = await apiFetch<unknown>(`/api/public/releases/${encodeURIComponent(releaseId)}`, { query: { contract: CLIENT_CONTRACT }, signal });
   return parseReleaseManifest(value);
 }
 
@@ -168,7 +169,7 @@ export function listPlaces(signal?: AbortSignal): Promise<PublicPlaceListRespons
 
 /** GET /api/public/places/:id — place detail assembled from the active release. */
 export function getPlace(placeId: string, signal?: AbortSignal): Promise<PublicPlaceResponse> {
-  return apiFetch<PublicPlaceResponse>(`/api/public/places/${encodeURIComponent(placeId)}`, { signal });
+  return apiFetch<PublicPlaceResponse>(`/api/public/places/${encodeURIComponent(placeId)}`, { query: { contract: CLIENT_CONTRACT }, signal });
 }
 
 /** GET /api/public/transit/journeys — GTFS-like journeys between two stops on a date. */
@@ -197,7 +198,7 @@ export function getCampusLines(
   signal?: AbortSignal,
 ): Promise<CampusLinesResponse> {
   return apiFetch<CampusLinesResponse>("/api/public/transit/campus-lines", {
-    query: { from: params.from, to: params.to, date: params.date },
+    query: { from: params.from, to: params.to, date: params.date, contract: CLIENT_CONTRACT },
     signal,
   });
 }

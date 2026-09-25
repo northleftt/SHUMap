@@ -1,3 +1,5 @@
+import { CLIENT_CONTRACT } from "../client-contract";
+import { config } from "../../config";
 // Release 装配流水线 + 本地缓存。入口 loadReleaseWithCache()：
 //   1. GET /api/public/releases/current 拿 manifest 原文（releaseId 就在里面）；
 //   2. 缓存命中（同一 releaseId 已校验过）则读缓存的解析结果，跳过 parseReleaseManifest
@@ -6,9 +8,10 @@
 //   4. buildMapPois 装配，输出与 Web 端 LoadedRelease 一致的结构。
 //
 // 缓存 key 约定（wx storage）：
-//   release-current-id        → 上次成功装配的 releaseId（指针，便于排查与清理）
-//   release-<releaseId>       → 该 release 的 manifest（JSON.stringify 后的解析结果）
-//   map-asset-<mapVersionId>  → 该底图版本的 SVG 原文
+//   release-<env>-<contract>-current-id → 上次成功装配的 releaseId
+//   release-<env>-<contract>-<releaseId> → 当前契约 manifest
+//   map-asset-<env>-<contract>-<mapVersionId> → SVG 原文
+// 旧包的 release-* 缓存不被新契约读取；切环境的 debug 清理仍覆盖这些前缀。
 //
 // 失效逻辑：release 与 map version 都是不可变工件（id 变即内容变），
 // 按 id 作 key 天然失效，不做 TTL。releaseId 变化时清掉旧 release-* 键；
@@ -29,14 +32,15 @@ import {
 import { parseSvgViewBox, type SvgViewBox } from "../svg-geometry";
 import type { CampusConfig, MapBuilding, ReleaseManifest } from "./types";
 
-export const CURRENT_RELEASE_KEY = "release-current-id";
+export function releaseCacheNamespace(env = config.appEnv): string { return `release-${env}-${CLIENT_CONTRACT}`; }
+export const CURRENT_RELEASE_KEY = `${releaseCacheNamespace()}-current-id`;
 
 export function releaseCacheKey(releaseId: string): string {
-  return `release-${releaseId}`;
+  return `${releaseCacheNamespace()}-${releaseId}`;
 }
 
 export function mapAssetCacheKey(mapVersionId: string): string {
-  return `map-asset-${mapVersionId}`;
+  return `map-asset-${config.appEnv}-${CLIENT_CONTRACT}-${mapVersionId}`;
 }
 
 /** 字符串 KV 存储抽象：小程序里是 wx.*StorageSync，单测里注入内存 Map。 */
@@ -99,7 +103,7 @@ function manifestFromCache(storage: KeyValueStorage, releaseId: string): Release
 
 export async function loadReleaseWithCache(deps: LoadReleaseDeps = {}): Promise<LoadedRelease> {
   const storage = deps.storage ?? wxStorage;
-  const fetchManifestRaw = deps.fetchManifestRaw ?? (() => apiGet<unknown>("/api/public/releases/current"));
+  const fetchManifestRaw = deps.fetchManifestRaw ?? (() => apiGet<unknown>("/api/public/releases/current", { contract: CLIENT_CONTRACT }));
   const fetchSvg = deps.fetchSvg ?? ((id: string) => apiGetText(`/api/public/maps/${encodeURIComponent(id)}/asset`));
 
   // manifest 每次都拉（200~300KB，release 切换靠它发现）；省掉的是重复校验与 SVG 重拉。
