@@ -47,9 +47,9 @@ export function MapPage() {
 
   // D1 桌面端详情面板（移动端走底部抽屉）
   const [desktopDetailOpen, setDesktopDetailOpen] = useState(false);
-  // 换 POI 时收起；搜索直接命中商户时自动展开到该商户
+  // 宽屏选中地点即展示完整信息；关闭后保留小卡入口。
   useEffect(() => {
-    setDesktopDetailOpen(Boolean(state.selectedPoi && state.selectedMerchantId));
+    setDesktopDetailOpen(Boolean(state.selectedPoi));
   }, [state.selectedPoi?.poiKey, state.selectedMerchantId]);
 
   // M8 事件叠加层 + 图层浮卡
@@ -525,7 +525,7 @@ export function MapPage() {
         ) : null}
 
         {/* D1 选中 POI 的地图小卡（桌面端） */}
-        {!isMobile && state.selectedPoi ? (
+        {!isMobile && state.selectedPoi && !desktopDetailOpen ? (
           <PoiMapCard
             building={state.selectedPoi}
             onClose={state.closePoi}
@@ -535,16 +535,18 @@ export function MapPage() {
 
         {/* D1 桌面端详情浮层：复用 M2 版式（商户区块 + 内嵌商户详情） */}
         {!isMobile && desktopDetailOpen && state.selectedPoi ? (
-          <div className="absolute right-6 top-6 z-40 flex max-h-[calc(100%-3rem)] w-[380px] flex-col overflow-hidden rounded-2xl bg-surface shadow-floating">
-            <button
+          <div data-testid="desktop-poi-detail" className="absolute right-4 top-4 z-40 flex max-h-[calc(100%-2rem)] w-[calc(100%-2rem)] max-w-[380px] flex-col overflow-hidden rounded-2xl bg-surface shadow-floating">
+            <div className="flex shrink-0 justify-end px-3 pt-3">
+              <button
               type="button"
               aria-label="关闭详情"
-              className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-full bg-page text-sub"
+              className="grid h-8 w-8 place-items-center rounded-full bg-page text-sub"
               onClick={() => setDesktopDetailOpen(false)}
             >
-              <X size={15} />
-            </button>
-            <div className="min-h-0 flex-1 overflow-y-auto pt-4">
+                <X size={15} />
+              </button>
+            </div>
+            <div data-testid="desktop-poi-scroll" className="min-h-0 flex-1 overflow-y-auto pb-2 pt-1">
               <PoiDetailSheet
                 building={state.selectedPoi}
                 events={operations.status === "ready" ? operations.activeEvents : null}

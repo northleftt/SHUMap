@@ -80,7 +80,11 @@ interface FloorImageViewerProps {
   alt: string;
 }
 
-export function FloorImageViewer({ src, alt }: FloorImageViewerProps) {
+export function FloorImageViewer(props: FloorImageViewerProps) {
+  return <FloorImageCanvas key={props.src} {...props} />;
+}
+
+function FloorImageCanvas({ src, alt }: FloorImageViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const transformRef = useRef<Transform>(IDENTITY);
   const gestureRef = useRef({
@@ -103,18 +107,7 @@ export function FloorImageViewer({ src, alt }: FloorImageViewerProps) {
     setTransform(next);
   }
 
-  // 换楼层 = 换 src：重置视野与加载状态
-  useEffect(() => {
-    transformRef.current = IDENTITY;
-    setTransform(IDENTITY);
-    setImageSize(null);
-    setLoadError("");
-    gestureRef.current.pointers.clear();
-    gestureRef.current.panFrom = null;
-    gestureRef.current.pinch = null;
-    gestureRef.current.lastTap = null;
-  }, [src]);
-
+  // 每张图拥有独立状态，缓存命中的 onLoad 不会被后续初始化覆盖。
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
@@ -225,7 +218,15 @@ export function FloorImageViewer({ src, alt }: FloorImageViewerProps) {
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full touch-none overflow-hidden bg-surface"
+      className="relative h-full w-full touch-none overflow-hidden bg-surface outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      tabIndex={0}
+      role="region"
+      aria-label={alt}
+      onKeyDown={event => {
+        if (!base) return;
+        if (event.key === "0") { event.preventDefault(); applyTransform(IDENTITY); }
+        if (["+", "=", "-"].includes(event.key)) { event.preventDefault(); applyTransform(zoomTransformAt(transformRef.current, {x: container.width / 2, y: container.height / 2}, event.key === "-" ? 1 / ZOOM_STEP : ZOOM_STEP, base, container)); }
+      }}
       onPointerCancel={handlePointerUp}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -259,7 +260,8 @@ export function FloorImageViewer({ src, alt }: FloorImageViewerProps) {
         }}
       />
 
-      <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-xl bg-surface shadow-card">
+      <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-xl bg-surface shadow-card" onPointerDown={event => event.stopPropagation()}>
+        <button type="button" aria-label="适应窗口" className="grid h-9 min-w-9 place-items-center px-2 text-label text-ink hover:bg-page" onClick={() => applyTransform(IDENTITY)}>适应</button>
         <button
           aria-label="放大"
           className="grid h-9 w-9 place-items-center text-ink active:bg-page"

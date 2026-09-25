@@ -2,15 +2,14 @@ import { Star, X } from "lucide-react";
 import { useState } from "react";
 import { submitFeatureFeedback } from "../../lib/api/public";
 import { useLocalStore } from "../../lib/storage/localStore";
-import { SheetModal } from "../ui/SheetModal";
+import { FeedbackDialog } from "./FeedbackDialog";
 
 /**
  * 「你觉得这个功能好用吗？」星级评分入口。
  *
  * 频率控制（shumap.feature-feedback，按 page 记）：提交过或点过 ✕ 的页面，
  * 入口整行消失，不再出现——没有 dwell 计时器、没有冷却天数，一次了结。
- * 提交成功的「感谢」状态在关弹卡时才落 submittedAt，否则成功提示会被
- * 入口消失连带卸载掉。
+ * 提交成功立即记录 submittedAt；已打开的感谢画面保留至用户关闭。
  *
  * 校验刻意只做「先选星级」这一件（禁用时说明原因）；长度等限制交给服务端，
  * 客户端不自造更严的规则（HANDOFF 6.5）。
@@ -46,7 +45,7 @@ export function FeatureFeedback({
   const [done, setDone] = useState(false);
 
   const pageState = store[page];
-  if (pageState?.submittedAt || pageState?.dismissedAt) return null;
+  if ((pageState?.submittedAt || pageState?.dismissedAt) && !open) return null;
 
   const dismiss = () => {
     setStore((prev) => ({
@@ -57,24 +56,17 @@ export function FeatureFeedback({
 
   const closeSheet = () => {
     setOpen(false);
-    // 提交过的在关弹卡这一刻才落 submittedAt：既保住「感谢」画面，
-    // 也保证下次进来入口消失。
-    if (done) {
-      setStore((prev) => ({
-        ...prev,
-        [page]: { ...prev[page], submittedAt: new Date().toISOString() },
-      }));
-    }
   };
 
   const submit = async () => {
-    if (rating === 0 || busy) return;
+    if (rating === 0 || busy || done || pageState?.submittedAt) return;
     setBusy(true);
     setError("");
     try {
       const trimmed = reason.trim();
       await submitFeatureFeedback({ page, rating, ...(trimmed ? { reason: trimmed } : {}) });
       setDone(true);
+      setStore(prev => ({ ...prev, [page]: { ...prev[page], submittedAt: new Date().toISOString() } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "提交失败，请稍后重试");
     } finally {
@@ -104,7 +96,7 @@ export function FeatureFeedback({
         </button>
       </div>
 
-      <SheetModal open={open} onClose={closeSheet} initialHeight={rating > 0 && rating <= LOW_RATING_THRESHOLD ? 0.5 : 0.38}>
+      <FeedbackDialog open={open} onClose={closeSheet} title={prompt} height={rating > 0 && rating <= LOW_RATING_THRESHOLD ? 0.5 : 0.38}>
         <div className="px-5 pb-6 pt-1">
           <h2 className="text-card text-ink">{prompt}</h2>
           {done ? (
@@ -160,7 +152,7 @@ export function FeatureFeedback({
             </>
           )}
         </div>
-      </SheetModal>
+      </FeedbackDialog>
     </>
   );
 }

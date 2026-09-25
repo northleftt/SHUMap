@@ -138,7 +138,7 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
 
   return (
     <div className="flex h-full flex-col bg-page">
-      <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
+      <div className="mx-auto flex h-full w-full max-w-[780px] flex-col lg:max-w-[1280px]">
         <PageHeader
           title={canteen.name}
           subtitle={`${canteen.campusLabel} · 食堂`}
@@ -149,7 +149,7 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
           }
         />
 
-        <div className="flex-1 overflow-y-auto pb-6">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-6 lg:px-4 lg:pb-8">
           {scheduleState.status === "error" ? (
             <div className="mx-4 mt-3 rounded-2xl bg-error-bg px-4 py-3 text-aux text-error">
               就餐时段与开放安排加载失败：{scheduleState.message}
@@ -191,7 +191,7 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
           <div className={wholeDayRest ? "opacity-50 grayscale" : undefined}>
             {/* 楼层 pills（与 FloorsPage 同式） */}
             {canteen.floors.length > 1 ? (
-              <div className="scrollbar-hidden flex shrink-0 gap-2 overflow-x-auto px-4 pt-3">
+              <div className="scrollbar-hidden flex shrink-0 gap-2 overflow-x-auto px-4 pt-3 lg:flex-wrap">
                 {canteen.floors.map((floor) => {
                   const active = floor.floorId === selectedFloorId;
                   return (
@@ -211,7 +211,8 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
             ) : null}
 
             {selectedFloor ? (
-              <>
+              <div data-testid="dining-desktop-grid" className="lg:grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-start lg:gap-x-2">
+                <div className="min-w-0">
                 <FloorMealCard
                   canteen={canteen}
                   floor={selectedFloor}
@@ -221,6 +222,8 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
                 {facilities.some(facility => facility.floorId === selectedFloor.floorId) ? <div className="mx-4 rounded-2xl bg-surface px-4 pb-1">
                   <DiningFacilities facilities={facilities} floors={canteen.floors} floorId={selectedFloor.floorId} placeId={placeId} statuses={facilitiesState.status === "ready" ? facilitiesState.statuses : null} loading={facilitiesState.status === "loading"} error={facilitiesState.status === "error" ? facilitiesState.message : undefined} hasPlan={Boolean(selectedFloor.imageUrl)} iconKeyByTypeCode={new Map(release.manifest.facilityTypes.map(type => [type.code, type.iconKey]))} />
                 </div> : null}
+                </div>
+                <div className="min-w-0">
                 <FloorMerchants
                   floor={selectedFloor}
                   merchantStatus={merchantStatus}
@@ -228,8 +231,9 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
                     setOpenMerchantId((current) => (current === merchantId ? null : merchantId))}
                   openMerchantId={openMerchantId}
                 />
-                <FloorMedia canteen={canteen} floor={selectedFloor} />
-              </>
+                </div>
+                <div className="min-w-0 lg:col-span-2"><FloorMedia canteen={canteen} floor={selectedFloor} /></div>
+              </div>
             ) : (
               <div className="mx-4 mt-3 rounded-2xl bg-surface shadow-card">
                 <EmptyState title="该食堂暂无楼层信息" subtitle="楼层信息正在完善中" />
@@ -473,12 +477,12 @@ function FloorMedia({ canteen, floor }: { canteen: CanteenView; floor: DiningFlo
       <div className="px-4">
         <SectionHeader title="本层图片" />
       </div>
-      <div className="scrollbar-hidden mt-2 flex gap-2 overflow-x-auto px-4">
+      <div className="scrollbar-hidden mt-2 flex gap-2 overflow-x-auto px-4 lg:grid lg:grid-cols-3 lg:gap-4">
         {items.map((item, index) => (
           <div className="shrink-0" key={`${item.url}:${index}`}>
             <ImagePreview
               alt={`${canteen.name} ${levelShortLabel(floor.levelCode)} ${item.label}`}
-              buttonClassName="h-28 w-40 rounded-xl"
+              buttonClassName="h-28 w-40 rounded-xl lg:h-44 lg:w-full"
               imageClassName="h-full w-full rounded-xl object-cover"
               loading={index === 0 ? "eager" : "lazy"}
               src={item.url}
