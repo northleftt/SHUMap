@@ -1,5 +1,5 @@
-import { CalendarX2, ChevronRight, Globe, MapPin, Store } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CalendarX2, ChevronRight, MapPin, Store } from "lucide-react";
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { usePageView } from "../../lib/analytics";
@@ -22,7 +22,7 @@ import { groupMerchantsByPlace } from "../../lib/release/merchants";
 import { useRelease } from "../../lib/release/ReleaseContext";
 import type { LoadedRelease } from "../../lib/release/mapData";
 
-/** 校内外就餐（D1/D2/D8）。校内 = 校区分组食堂卡片；校外 = 筹备中空态。 */
+/** 校内外就餐（D1/D2/D8）。校内 = 校区分组食堂卡片；校外就餐先下线（git 历史可查）。 */
 export function OffCampusPage() {
   const releaseState = useRelease();
   if (releaseState.status === "loading") {
@@ -47,55 +47,16 @@ export function OffCampusPage() {
 
 function ReadyDiningPage({ release }: { release: LoadedRelease }) {
   usePageView("dining");
-  const [scope, setScope] = useState<"campus" | "offcampus">("campus");
 
   return (
     <div className="flex h-full flex-col bg-page">
       <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
         <header className="flex items-end justify-between px-5 pb-3 pt-6">
           <h1 className="text-title">校内外就餐</h1>
-          <div className="flex shrink-0 overflow-hidden rounded-full bg-page p-0.5">
-            {(
-              [
-                ["campus", "校内"],
-                ["offcampus", "校外"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                aria-pressed={scope === value}
-                className={`flex h-8 items-center rounded-full px-4 text-aux ${
-                  scope === value ? "bg-primary text-white" : "text-sub"
-                }`}
-                key={value}
-                onClick={() => setScope(value)}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
         </header>
 
-        {scope === "offcampus" ? (
-          <div className="flex flex-1 items-center justify-center">
-            <EmptyState
-              icon={<Globe size={26} />}
-              title="校外就餐信息筹备中"
-              subtitle={"周边美食信息正在整理，\n先看看校内食堂吧！"}
-              action={
-                <button
-                  className="rounded-full bg-primary px-5 py-2.5 text-body font-semibold text-white active:bg-primary-pressed"
-                  onClick={() => setScope("campus")}
-                  type="button"
-                >
-                  先看看校内食堂
-                </button>
-              }
-            />
-          </div>
-        ) : (
-          <CampusDining release={release} />
-        )}
+        {/* 校外就餐与校内/校外 switch 先下线，需要时再开（git 历史里有完整实现）。 */}
+        <CampusDining release={release} />
       </div>
     </div>
   );
