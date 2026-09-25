@@ -34,9 +34,14 @@ function nameValue(value: unknown, field: string, max = 100): string {
   return value.trim();
 }
 
+// 开放安排的适用日型：weekday 不录——工作日默认全开是常态，台风天这类例外应录进
+// 校历当特殊日、由 holiday 类安排承接；允许录 weekday 会得到一条前台永远不生效的安排
+// （前台只在非工作日应用白名单），管理端给了开关却静默无效。
+const DINING_DAY_TYPES = CAMPUS_DAY_TYPES.filter((type) => type !== "weekday");
+
 function dayTypeSet(value: unknown, field: string): CampusDayType[] {
   if (!Array.isArray(value) || value.length === 0) throw new HttpError(400, "validation_error", `${field} must be a non-empty array`);
-  return value.map((item, index) => oneOf(item, `${field}[${index}]`, CAMPUS_DAY_TYPES));
+  return value.map((item, index) => oneOf(item, `${field}[${index}]`, DINING_DAY_TYPES));
 }
 
 function shanghaiToday(): string {
@@ -153,13 +158,20 @@ function termInputs(value: unknown): TermInput[] {
 
 function dateInputs(value: unknown): DateInput[] {
   if (!Array.isArray(value)) throw new HttpError(400, "validation_error", "dates must be an array");
-  return value.map((raw, index) => {
+  const dates: DateInput[] = [];
+  const seen = new Set<string>();
+  for (const [index, raw] of value.entries()) {
     const row = exactObject(raw, `dates[${index}]`, ["serviceDate", "kind"]);
-    return {
+    const date: DateInput = {
       serviceDate: dateValue(row.serviceDate, `dates[${index}].serviceDate`),
       kind: oneOf(row.kind, `dates[${index}].kind`, DATE_KINDS),
     };
-  });
+    const key = `${date.serviceDate}:${date.kind}`;
+    if (seen.has(key)) continue; // 同学年同日同 kind 有 unique 约束，重复去重避免落 500
+    seen.add(key);
+    dates.push(date);
+  }
+  return dates;
 }
 
 async function replaceYearRows(env: Env, yearId: string, terms: TermInput[], dates: DateInput[]) {
@@ -183,6 +195,9 @@ export async function createAcademicYear(request: Request, env: Env, principal: 
   const name = nameValue(body.name, "name");
   const terms = termInputs(body.terms);
   const dates = dateInputs(body.dates ?? []);
+  // name 有 unique 约束；撞名时给可读的 409 而不是约束错误落 500
+  const duplicate = await first<{ id: string }>(env.DB, "select id from academic_years where name=?", [name]);
+  if (duplicate) throw new HttpError(409, "academic_year_exists", "同名学年已存在");
   const id = makeId("ay");
   const now = isoNow();
   await env.DB.prepare("insert into academic_years(id,name,created_at,updated_at) values(?,?,?,?)").bind(id, name, now, now).run();
@@ -198,6 +213,8 @@ export async function updateAcademicYear(request: Request, env: Env, principal: 
   const name = nameValue(body.name, "name");
   const terms = termInputs(body.terms);
   const dates = dateInputs(body.dates ?? []);
+  const duplicate = await first<{ id: string }>(env.DB, "select id from academic_years where name=? and id<>?", [name, yearId]);
+  if (duplicate) throw new HttpError(409, "academic_year_exists", "同名学年已存在");
   await env.DB.prepare("update academic_years set name=?,updated_at=? where id=?").bind(name, isoNow(), yearId).run();
   await replaceYearRows(env, yearId, terms, dates);
   await audit(env, principal, "academic_year.update", "academic_year", yearId, requestId, before, { name, terms, dates });
@@ -300,11 +317,15 @@ async function scheduleInputs(request: Request): Promise<{ validFrom: string; va
   if (validFrom > validTo) throw new HttpError(400, "validation_error", "validFrom must not exceed validTo");
   const dayTypes = dayTypeSet(body.dayTypes, "dayTypes");
   if (!Array.isArray(body.floors)) throw new HttpError(400, "validation_error", "floors must be an array");
-  const floors: ScheduleFloorInput[] = body.floors.map((raw, index) => {
+  const floors: ScheduleFloorInput[] = [];
+  const seenFloors = new Set<string>();
+  for (const [index, raw] of body.floors.entries()) {
     const row = exactObject(raw, `floors[${index}]`, ["floorId"], ["noBreakfast"]);
     if (typeof row.floorId !== "string" || !row.floorId) throw new HttpError(400, "validation_error", `floors[${index}].floorId is required`);
-    return { floorId: row.floorId, noBreakfast: row.noBreakfast === true };
-  });
+    if (seenFloors.has(row.floorId)) continue; // 重复楼层去重，避免 PK 冲突落 500
+    seenFloors.add(row.floorId);
+    floors.push({ floorId: row.floorId, noBreakfast: row.noBreakfast === true });
+  }
   return { validFrom, validTo, dayTypes, floors };
 }
 

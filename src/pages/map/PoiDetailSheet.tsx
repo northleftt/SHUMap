@@ -214,7 +214,7 @@ export function PoiDetailSheet({
                     : `/places/${building.entityId}/floors`,
                 )}
               >
-                查看楼层图 ›
+                {building.kindId === "canteen" ? "楼层与就餐详情 ›" : "查看楼层图 ›"}
               </button>
             }
           />

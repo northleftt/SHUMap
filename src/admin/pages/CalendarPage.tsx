@@ -32,6 +32,7 @@ import { MonthCalendar } from "../components/MonthCalendar";
 
 const ERROR_TEXT: Record<string, string> = {
   academic_year_current: "这个学年覆盖了今天，删除后今天的日型判定会落空。请先建好学年的衔接，或改删别的学年。",
+  academic_year_exists: "已经存在同名学年，换个名字再试。",
   validation_error: "填写的内容不完整或不正确：区间名称与起止日期必填，开始日期不能晚于结束日期。",
   forbidden: "当前账号没有维护校历的权限。",
   unauthorized: "登录状态已失效，请重新登录。",
@@ -98,11 +99,14 @@ function draftFromYear(year: AcademicYearRow): YearDraft {
   };
 }
 
-/** 新增学年：名字预填下一学年，区间与日期以最近一学年为模板照抄，日期由管理员再调。 */
+/** 新增学年：名字预填下一学年，区间以最近一学年为模板照抄；逐日节假日/调休不照抄
+ *  ——去年的法定节假日几乎不会适用到新学年，照抄忘了改就是脏数据，留空让管理员逐年录。 */
 function draftFromTemplate(latest: AcademicYearRow | undefined): YearDraft {
   if (!latest) return { name: "", terms: [], holidays: [], workdays: [] };
   const draft = draftFromYear(latest);
   draft.name = nextAcademicYearName(latest.name);
+  draft.holidays = [];
+  draft.workdays = [];
   return draft;
 }
 

@@ -197,6 +197,35 @@ test("dining schedule 创建 → 公开接口按日型命中；非法输入 400"
   }
 });
 
+test("dining schedule：weekday 不录（工作日默认全开，例外走校历）", async () => {
+  const db = database();
+  seedCanteenFloor(db);
+  await assert.rejects(
+    handlers.createDiningSchedule(
+      scheduleRequest({ validFrom: "2026-09-21", validTo: "2026-09-25", dayTypes: ["weekday"], floors: [{ floorId: "floor_ct_1f" }] }),
+      envOf(db), principal, "req-1",
+    ),
+    (error) => { assert.equal(error.status, 400); return true; },
+  );
+});
+
+test("dining schedule：重复楼层去重（不落成 PK 冲突 500）", async () => {
+  const db = database();
+  seedCanteenFloor(db);
+  const created = await handlers.createDiningSchedule(
+    scheduleRequest({
+      validFrom: "2026-09-19",
+      validTo: "2026-09-19",
+      dayTypes: ["weekend"],
+      floors: [{ floorId: "floor_ct_1f" }, { floorId: "floor_ct_1f", noBreakfast: true }],
+    }),
+    envOf(db), principal, "req-1",
+  );
+  assert.equal(created.status, 201);
+  const body = await (await handlers.publicDiningSchedule(new Request("http://x/api/public/dining/schedule?date=2026-09-19"), envOf(db))).json();
+  assert.deepEqual(body.arrangement.floors, [{ floorId: "floor_ct_1f", noBreakfast: false }]);
+});
+
 test("dining schedule 更新替换楼层清单，删除后不再命中", async () => {
   const db = database();
   seedCanteenFloor(db);
@@ -280,6 +309,26 @@ test("学年删除保护：今天仅由该学年的逐日特殊日期命中时�
     handlers.deleteAcademicYear(envOf(db), principal, "ay_dates", "req-1"),
     (error) => { assert.equal(error.status, 409); assert.equal(error.code, "academic_year_current"); return true; },
   );
+});
+
+test("学年重名 409 而非约束错误 500；dates 重复去重", async () => {
+  const db = database();
+  const yearRequest = (name, dates) => new Request("http://x", { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, terms: [{ name: "秋季学期", dayType: "term", validFrom: "2099-09-01", validTo: "2100-01-15" }], dates }) });
+  const created = await handlers.createAcademicYear(yearRequest("2099-2100", []), envOf(db), principal, "req-1");
+  assert.equal(created.status, 201);
+  await assert.rejects(
+    handlers.createAcademicYear(yearRequest("2099-2100", []), envOf(db), principal, "req-2"),
+    (error) => { assert.equal(error.status, 409); assert.equal(error.code, "academic_year_exists"); return true; },
+  );
+  // 同日同 kind 重复条目去重后正常入库
+  const dup = await handlers.createAcademicYear(
+    yearRequest("2100-2101", [{ serviceDate: "2099-10-01", kind: "holiday" }, { serviceDate: "2099-10-01", kind: "holiday" }]),
+    envOf(db), principal, "req-3",
+  );
+  assert.equal(dup.status, 201);
+  const { id } = await dup.json();
+  assert.equal(db.prepare("select count(*) as c from academic_dates where year_id=?").get(id).c, 1);
 });
 
 // --- place content.dining 校验 ---

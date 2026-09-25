@@ -35,8 +35,9 @@ const TABS: Array<{ key: Tab; label: string }> = [
   { key: "periods", label: "供餐时段" },
 ];
 
+// 适用日型不含「工作日」：工作日默认全开是常态，worker 也拒录 weekday（DINING_DAY_TYPES）。
+// 台风天这类例外应录进校历当特殊日，再由 holiday 类安排承接。
 const DAY_TYPE_OPTIONS: Array<{ value: DiningDayType; label: string }> = [
-  { value: "weekday", label: "工作日" },
   { value: "weekend", label: "周末" },
   { value: "holiday", label: "假日" },
   { value: "winter_break", label: "寒假" },
@@ -197,7 +198,7 @@ function dayTypesInRange(from: string, to: string, dayTypeOf: (date: string) => 
   return DAY_TYPE_OPTIONS.map((option) => option.value).filter((value) => found.has(value));
 }
 
-/** 某天命中的安排：日期落在区间内且当天日型在适用日型里；多条命中取最近更新的（与公开读端一致）。 */
+/** 某天命中的安排：日期落在区间内且当天日型在适用日型里；多条命中取最近更新的（与公开读端一致，updated_at 相同按 id 决胜）。 */
 function arrangementFor(
   schedules: DiningScheduleRow[],
   date: string,
@@ -207,7 +208,7 @@ function arrangementFor(
     (schedule) => schedule.validFrom <= date && date <= schedule.validTo && schedule.dayTypes.includes(dayType),
   );
   if (hits.length === 0) return null;
-  return [...hits].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
+  return [...hits].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))[0] ?? null;
 }
 
 function SchedulesPanel({

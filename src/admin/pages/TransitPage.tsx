@@ -1755,8 +1755,8 @@ function CalendarEditor({
   const [name, setName] = useState(initial?.name ?? "");
   const [validFrom, setValidFrom] = useState(initial?.validFrom ?? today());
   const [validTo, setValidTo] = useState(initial?.validTo ?? `${new Date().getFullYear()}-12-31`);
-  // 新建默认 'weekday'：最常见的日历就是工作日班表。不默认 'other' 是因为
-  // 'other' 不参与客户端日型标签，静默选它会让「今天是什么日子」这行字消失。
+  // 新建默认勾周一到周五：最常见的日历就是工作日班表。日型标签不归服务日历管
+  // （只读校历），这里只选班次运行在星期几。
   const [weekdays, setWeekdays] = useState(initial?.weekdays ?? [true, true, true, true, true, false, false]);
   const [exceptions, setExceptions] = useState(initial?.exceptions ?? []);
   const [sourceId, setSourceId] = useState(initial?.sourceId ?? "");

@@ -153,7 +153,7 @@ CloudBase CLI 的登录凭据会过期（`tmp/cloudbase-cli` 里 2026-08-15 那�
 **7. 其他**
 - 商户视图不显示所在楼层（`floorId` 在 manifest 里有，UI 未用）
 - 曲线要素为端点采样近似，可查 `metadata_json.approximated`
-- M12 下拉刷新未实装；校外页仍是预留占位
+- M12 下拉刷新未实装；「校外」tab 已改造为「就餐」页（校内食堂营业状态 + 档口品类，校外部分下线，git 历史可查）
 - 小程序 `pages/debug/debug` 保留在 app.json：`miniprogram-release-automator.mjs` 靠它读装配摘要做发版验证，**不是遗留物**，提审前若要移除需同步改 automator
 
 ## 地理定标工作流（本批重做，重要）

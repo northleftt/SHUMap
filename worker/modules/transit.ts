@@ -1054,7 +1054,7 @@ export async function publicCampusLines(request: Request, env: Env): Promise<Res
   const weekday = shanghaiWeekday(date);
   if (!(WEEKDAYS as readonly string[]).includes(weekday)) throw new HttpError(400, "validation_error", "Invalid date");
   const headers = { "cache-control": "public, max-age=60" };
-  // 日型走校园级共享判定（校历 + 临时规则，worker/lib/daytype.ts），与就餐页同口径。
+  // 日型走校园级共享判定（纯校历，worker/lib/daytype.ts），与就餐页同口径。
   const dayType = await resolveCampusDayType(env, date, weekday as WeekdayColumn);
   const payload = {
     date,

@@ -84,12 +84,14 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
 
   const floorIds = useMemo(() => new Set((canteen?.floors ?? []).map((floor) => floor.floorId)), [canteen]);
   // 整楼休息（D7）：食堂 lifecycle 关闭，或周末/节假日白名单整楼未命中。
+  // 无楼层数据的食堂不参与白名单判定（some 恒 false 会把「暂无楼层信息」误标成「今日休息」）。
   const wholeDayRest = Boolean(
     canteen && (
       canteen.closed
       || (schedule
         && schedule.dayType !== "weekday"
         && schedule.arrangement
+        && floorIds.size > 0
         && !schedule.arrangement.floors.some((floor) => floorIds.has(floor.floorId)))
     ),
   );
@@ -171,9 +173,13 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
           ) : null}
           {wholeDayRest ? (
             <div className="mx-4 mt-3 rounded-2xl bg-page px-4 py-3 text-body text-sub">
-              {canteen.closed
-                ? "该食堂今日暂停营业，看看附近还在营业的食堂"
-                : `该食堂${schedule ? DAY_TYPE_LABELS[schedule.dayType] : "今日"}不开放，看看附近还在营业的食堂`}
+              {(() => {
+                // 就近引导列表为空（如 schedule 接口失败）时，文案不提「看看附近」
+                const suffix = alternatives.length > 0 ? "，看看附近还在营业的食堂" : "";
+                return canteen.closed
+                  ? `该食堂今日暂停营业${suffix}`
+                  : `该食堂${schedule ? DAY_TYPE_LABELS[schedule.dayType] : "今日"}不开放${suffix}`;
+              })()}
             </div>
           ) : null}
 
