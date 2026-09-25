@@ -2,8 +2,7 @@
 //
 // 平面图是楼层级位图（release manifest floors[].imageUrl，站内相对路径
 // /api/public/media/…，null = 该层无图纸，强制列表视图）：
-//   - <image> 直连全 URL（imageUrl 拼 config.apiBaseUrl，与 lib/guide.ts 的
-//     站内媒体解析同口径）；位图不再走 SVG asset / 本地写盘那套；
+//   - 站内位图通过 apiGetBinary 经云托管下载到本地文件，再交给 <image>；
 //   - 捏合缩放与拖动由 movable-area + movable-view（scale，1~5 倍）原生实现，
 //     替代旧的 JS 线程手势 + viewport.ts 方案（该方案为校区地图保留）；
 //   - movable-view 尺寸按图片宽高比实测（bindload 的 natural size × 容器宽），
@@ -42,7 +41,7 @@ interface FacilityRow {
   statusLabel: string;
 }
 
-/** imageUrl 是站内相对路径（/api/public/media/…），拼 apiBaseUrl 成全 URL 供 <image> 直连。 */
+/** 显示有图纸的标志与外部 URL；站内位图由 loadPlanImage 经代理落盘后交给 image。 */
 function resolvePlanImageUrl(imageUrl: string | null): string {
   if (!imageUrl || !imageUrl.trim()) return "";
   return imageUrl.startsWith("/") ? `${config.apiBaseUrl}${imageUrl}` : imageUrl;
@@ -94,11 +93,16 @@ Page({
     this.floorRows = [] as ReleaseFloor[];
     this.planAreaWidth = 0;
     this.mediaFilePaths = new Set<string>();
+    this.planRequest = 0;
+    this.planFile = "";
+    this.assetPrefix = `floor-plan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     this.boot();
   },
 
   onUnload() {
+    this.planRequest++;
+    removeLocalAsset(this.planFile);
     for (const path of this.mediaFilePaths) removeLocalAsset(path);
     this.mediaFilePaths.clear();
   },
@@ -207,7 +211,7 @@ Page({
       hasPlan: planImageUrl !== "",
       // 无图纸强制列表；有图纸默认平面图
       view: planImageUrl ? "plan" : "list",
-      planImageUrl,
+      planImageUrl: floor.imageUrl?.startsWith("/") ? "" : planImageUrl,
       planLoading: planImageUrl !== "",
       planError: false,
       planViewHeight: 0,
@@ -215,6 +219,7 @@ Page({
       floorMedia,
       floorFacilities,
     });
+    void this.loadPlanImage(floor);
     this.localizeFloorMedia(floor.id, floorMedia);
     this.updateReport();
   },
@@ -277,12 +282,28 @@ Page({
     this.updateReport();
   },
 
-  /** 加载失败重试：清 src 再置回，强制 <image> 重新拉取。 */
+  async loadPlanImage(floor: ReleaseFloor) {
+    const request = ++this.planRequest;
+    removeLocalAsset(this.planFile);
+    this.planFile = "";
+    if (!floor.imageUrl?.startsWith("/")) return;
+    try {
+      const response = await apiGetBinary(floor.imageUrl);
+      if (request !== this.planRequest) return;
+      const file = writeLocalBinaryAsset(this.assetPrefix, `${floor.id}-${request}`, response.data, mediaExtension(response.contentType));
+      this.planFile = file;
+      this.setData({ planImageUrl: file });
+    } catch {
+      if (request === this.planRequest) this.onPlanImageError();
+    }
+  },
+
   retryPlanImage() {
-    const url = this.data.planImageUrl;
-    if (!url) return;
+    const floor = this.floorRows.find((row: ReleaseFloor) => row.id === this.data.activeFloorId);
+    if (!floor?.imageUrl) return;
     this.setData({ planImageUrl: "", planLoading: true, planError: false }, () => {
-      this.setData({ planImageUrl: url });
+      if (floor.imageUrl.startsWith("/")) void this.loadPlanImage(floor);
+      else this.setData({ planImageUrl: resolvePlanImageUrl(floor.imageUrl) });
     });
     this.updateReport();
   },

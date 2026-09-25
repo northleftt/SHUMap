@@ -1,0 +1,4 @@
+.feedback-row { display: flex; flex-direction: row; align-items: center; background: #fff; border-radius: 16px; margin: 12px 0; padding: 8px 12px; }
+.feedback-open { flex: 1; display: flex; flex-direction: row; align-items: center; color: #64748b; font-size: 13px; padding: 8px 0; }
+.star { color: #1e80c1; margin-right: 8px; font-size: 20px; }
+.dismiss { padding: 8px; color: #64748b; font-size: 20px; }

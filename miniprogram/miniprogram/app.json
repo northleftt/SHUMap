@@ -9,7 +9,9 @@
     "pages/debug/debug",
     "pages/floors/floors",
     "pages/guide/guide",
-    "pages/shuttle-guide/shuttle-guide"
+    "pages/shuttle-guide/shuttle-guide",
+    "pages/dining/dining",
+    "pages/feature-feedback/feature-feedback"
   ],
   "window": {
     "backgroundColor": "#f5f6f8",
@@ -39,9 +41,9 @@
       },
       {
         "pagePath": "pages/offcampus/offcampus",
-        "text": "校外",
-        "iconPath": "images/tabs/globe.png",
-        "selectedIconPath": "images/tabs/globe-active.png"
+        "text": "就餐",
+        "iconPath": "images/tabs/utensils.png",
+        "selectedIconPath": "images/tabs/utensils-active.png"
       },
       {
         "pagePath": "pages/profile/profile",

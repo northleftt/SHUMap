@@ -26,9 +26,9 @@ Component({
       },
       {
         pagePath: "/pages/offcampus/offcampus",
-        text: "校外",
-        icon: "/images/tabs/globe.png",
-        activeIcon: "/images/tabs/globe-active.png",
+        text: "就餐",
+        icon: "/images/tabs/utensils.png",
+        activeIcon: "/images/tabs/utensils-active.png",
       },
       {
         pagePath: "/pages/profile/profile",

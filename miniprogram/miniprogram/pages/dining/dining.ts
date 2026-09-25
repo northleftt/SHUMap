@@ -1,2 +1,2 @@
 import { diningPage } from "../../lib/dining/page";
-Page(diningPage(false));
+Page(diningPage(true));

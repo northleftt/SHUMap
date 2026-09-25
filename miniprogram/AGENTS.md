@@ -323,8 +323,8 @@
     默认选最小层；**有无平面图看 manifest `floors[].imageUrl`**（楼层级位图，站内相对路径
     `/api/public/media/…`，null = 无图纸强制列表视图）。楼层图不再是 map_versions/SVG，
     `lib/release/floorPlans.ts` 与设施锚点徽章已整体删除。
-  - 平面图视图：`<image>` 直连全 URL（imageUrl 拼 `config.apiBaseUrl`，与 lib/guide.ts
-    站内媒体解析同口径；不再走 SVG asset / `map-asset-*` 缓存 / 本地写盘）；
+  - 平面图视图：站内 imageUrl 经 `apiGetBinary` 云托管代理下载后写本地文件，
+    `<image>` 读取本地路径；切层/卸载丢弃过期响应并清理文件，失败可重试。
     **捏合缩放与拖动由 movable-area + movable-view（scale，1~5 倍）原生实现**，
     不用 JS 线程手势 + viewport.ts（该方案仅为校区地图保留）。movable-view 高度按
     图片宽高比实测（bindload natural size × 容器宽），竖长图纸 1 倍下也能拖到底部；
@@ -336,7 +336,7 @@
 - 端到端：`scripts/miniprogram-map-automator.mjs` 5.5 节覆盖搜索→详情 sheet；
   `scripts/miniprogram-floors-automator.mjs` 覆盖楼层图页（node 侧选目标楼宇：
   优先有平面图的，没有则退到有楼层+设施的楼宇断言列表视图）。单测 `tests/miniprogram-search.test.mjs`。
-  ⚠️ floors automator 的 plan 视图断言（徽章/selectFacility/anchorCount）尚未随位图化改版更新。
+  floors automator 已改为位图路径/文件存在、列表/平面图及切层断言。
 - 未验证项：楼层位图化后 plan 视图（movable-view 捏合/拖动手感、imageUrl 直连）未端到端验证
   （Skyline 下 movable-view scale 行为需真机确认）；搜索商户折叠链路线上无商户数据，靠单测覆盖。
 
@@ -459,7 +459,7 @@
 
 ## 工程现状（Part 6：底部 Tab，对齐 Web 端）
 
-- `app.json` 已配 `tabBar` 四个 tab：**地图/校车/校外/我的**，顺序与文案对齐 Web 端
+- `app.json` 已配 `tabBar` 四个 tab：**地图/校车/就餐/我的**，顺序与文案对齐 Web 端
   `src/components/layout/navTabs.ts`；选中色 `#1e80c1`、普通色 `#94a3b8`。
   `pages/map/map` 是 pages 数组首项（启动直达地图 tab）。
 - **自定义 tabBar（`tabBar.custom: true`，2026-08-08 起）**：原生栏约 50px 太矮，
@@ -482,7 +482,11 @@
     `tmp/tab-test/`，直接看截图核对高度/选中态）。
 - tab 图标由 `scripts/generate-tab-icons.mjs` 生成（lucide `__iconNode` + sharp →
   81×81 PNG，普通/选中两态），改图标或配色后重跑即可，产物在 `images/tabs/`、`images/menu/`。
-- `pages/offcampus/offcampus`：占位页，对齐 Web 端 OffCampusPage（功能还在更新当中）。
+- `pages/offcampus/offcampus`：校内就餐 tab；`pages/dining/dining`：食堂楼层与商家详情。
+  逻辑在 `lib/dining/`，实时接口与 release 骨架分别加载，规则对齐 PR #7 最终修订。
+  图片经云托管下载到本地；隐藏页面停止轮询，跨上海午夜清旧安排。
+  `components/feature-feedback` 提供搜索/校车评分入口，打开原生评价页。
+  同步核对与验证说明：`docs/miniprogram-pr-sync.md`。
 - `pages/profile/profile`：Web ProfilePage 的子集——最近查看（条数，switchTab 回地图）、
   关于 SHUMap；页脚数据版本走 `loadReleaseWithCache().version`。（公测前已移除调试信息入口）
 - **tab 页之间/进入 tab 页必须 `wx.switchTab`**（navigateTo 打不开 tab 页）；

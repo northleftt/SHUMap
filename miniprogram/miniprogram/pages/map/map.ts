@@ -177,6 +177,8 @@ interface DetailSheetData {
   description: string;
   facts: DetailFactRow[];
   isBuilding: boolean;
+  isCanteen: boolean;
+  hasFloors: boolean;
   facilities: Array<{ id: string; label: string; iconUrl: string }>;
   merchants: Array<{ id: string; name: string; subtitle: string; stallCode: string }>;
   /** 楼内商户视图（点商户行或搜索命中商户时展开）；null = 楼宇/POI 主视图。 */
@@ -2489,6 +2491,8 @@ Page({
       description: poi.detail.description,
       facts,
       isBuilding: poi.entityType === "building",
+      isCanteen: Boolean(this.loadedRelease?.manifest.places.some((place: any) => place.id === poi.entityId && place.kindId === "canteen")),
+      hasFloors: Boolean(this.loadedRelease?.manifest.floors.some((floor: any) => floor.buildingPlaceId === poi.entityId && floor.isPublic !== 0)),
       facilities: poi.facilities.map((facility) => {
         const label = facilityStatusLabel(facility.operationalStatus);
         return {
@@ -2711,7 +2715,7 @@ Page({
     const sheet = this.data.detailSheet as DetailSheetData | null;
     const poi = sheet ? this.poiByKey.get(sheet.poiKey) : undefined;
     if (!poi || poi.entityType !== "building") return;
-    wx.navigateTo({ url: `/pages/floors/floors?placeId=${encodeURIComponent(poi.entityId)}` });
+    wx.navigateTo({ url: `${sheet?.isCanteen ? "/pages/dining/dining" : "/pages/floors/floors"}?placeId=${encodeURIComponent(poi.entityId)}` });
   },
 
   /** automator 核对用摘要。window 从共享变量读，手势拖动后也是实时值。 */

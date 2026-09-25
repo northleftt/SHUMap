@@ -1,0 +1,36 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { buildSync } from 'esbuild';
+import { createRequire } from 'node:module';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+const dir=mkdtempSync(path.join(tmpdir(),'mini-floor-image-'));
+const outfile=path.join(dir,'page.cjs');
+buildSync({entryPoints:['miniprogram/miniprogram/pages/floors/floors.ts'],outfile,bundle:true,platform:'node',format:'cjs',logLevel:'silent'});
+let options;globalThis.Page=o=>{options=o;};createRequire(import.meta.url)(outfile);
+test.after(()=>rmSync(dir,{recursive:true,force:true}));
+test('floor bitmap uses proxy bytes, ignores stale floor response and cleans up local file',async()=>{
+ const pending=[],writes=[],removed=[];
+ globalThis.wx={env:{USER_DATA_PATH:'/tmp/wx'},cloud:{callContainer:o=>pending.push(o)},getFileSystemManager:()=>({writeFileSync:(...args)=>writes.push(args),unlink:o=>removed.push(o.filePath)})};
+ const page={...options,planRequest:0,planFile:'',assetPrefix:'test',mediaFilePaths:new Set(),data:{},setData(o){Object.assign(this.data,o);},updateReport(){}};
+ const old=page.loadPlanImage({id:'f1',imageUrl:'/api/public/media/first'});
+ const latest=page.loadPlanImage({id:'f2',imageUrl:'/api/public/media/second'});
+ const response={statusCode:200,data:new ArrayBuffer(3),header:{'content-type':'image/png'}};
+ pending[0].success(response);await old;assert.equal(writes.length,0);
+ pending[1].success(response);await latest;
+ assert.equal(writes.length,1);assert.match(page.data.planImageUrl,/test-f2-2.png$/);
+ assert.equal(pending[1].path,'/api/public/media/second');
+ const file=page.planFile;page.onUnload();assert.ok(removed.includes(file));
+});
+test('failed floor image fetch is retryable and unloaded request cannot write a file',async()=>{
+ const pending=[],writes=[];
+ globalThis.wx={env:{USER_DATA_PATH:'/tmp/wx'},cloud:{callContainer:o=>pending.push(o)},getFileSystemManager:()=>({writeFileSync:(...args)=>writes.push(args),unlink(){}})};
+ const floor={id:'f1',imageUrl:'/api/public/media/first'};
+ const page={...options,planRequest:0,planFile:'',assetPrefix:'test',mediaFilePaths:new Set(),floorRows:[floor],data:{activeFloorId:'f1'},setData(o,cb){Object.assign(this.data,o);cb?.();},updateReport(){}};
+ let work=page.loadPlanImage(floor);pending[0].fail({errMsg:'offline'});await work;
+ assert.equal(page.data.planError,true);assert.equal(page.data.planLoading,false);
+ page.retryPlanImage();assert.equal(pending.length,2);assert.equal(page.data.planError,false);
+ page.onUnload();pending[1].success({statusCode:200,data:new ArrayBuffer(1),header:{}});
+ await new Promise(r=>setTimeout(r,0));assert.equal(writes.length,0);
+});

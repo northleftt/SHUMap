@@ -1,8 +1,36 @@
-<view class="page">
-  <view class="empty">
-    <image class="empty-icon" src="/images/tabs/globe.png" mode="aspectFit" />
-    <view class="empty-title">校外</view>
-    <view class="empty-sub">功能还在更新当中，</view>
-    <view class="empty-sub">以后再来吧！</view>
-  </view>
+<view class="page" style="padding-top: {{statusBarHeight}}px">
+  <view class="header"><view class="title">校内就餐</view></view>
+  <view wx:if="{{loading}}" class="empty">正在加载就餐信息…</view>
+  <view wx:elif="{{error}}" class="empty" bindtap="retry">就餐信息加载失败，点击重试</view>
+  <block wx:else>
+    <view class="period">{{periodText}}</view>
+    <view wx:if="{{scheduleError}}" class="notice error" bindtap="retry">{{scheduleError}}</view>
+    <view wx:if="{{merchantError}}" class="notice error" bindtap="retry">{{merchantError}}</view>
+    <view wx:if="{{noArrangement}}" class="card empty">
+      <view class="heading">今日暂无就餐安排信息</view>
+      <view class="muted">周末/节假日开放安排尚未发布，请以食堂现场公告为准</view>
+    </view>
+    <view wx:elif="{{!groups.length}}" class="card empty">暂无食堂信息，食堂信息正在完善中</view>
+    <block wx:if="{{!noArrangement && groups.length}}" wx:for="{{groups}}" wx:key="key" wx:for-item="group">
+      <view class="group-heading">{{group.label}} <text wx:if="{{group.located}}" class="badge">当前</text></view>
+      <view class="card" wx:for="{{group.canteens}}" wx:key="placeId" wx:for-item="canteen">
+        <view class="card-head">
+          <view class="heading grow" data-place="{{canteen.placeId}}" bindtap="openDetail">{{canteen.name}}</view>
+          <view class="map-link" data-place="{{canteen.placeId}}" bindtap="openMap" aria-label="在地图上查看">
+            <image src="/images/poi/map-pin.png" class="icon" />
+          </view>
+          <view class="chevron" data-place="{{canteen.placeId}}" bindtap="openDetail">›</view>
+        </view>
+        <view wx:if="{{!canteen.floors.length}}" class="floor-empty muted">该食堂的楼层信息正在完善中</view>
+        <view class="floor-row" wx:for="{{canteen.floors}}" wx:key="floorId" wx:for-item="floor" data-place="{{canteen.placeId}}" data-floor="{{floor.floorId}}" bindtap="openDetail">
+          <view class="floor-label">{{floor.shortLabel}}</view>
+          <view class="grow">
+            <view class="row"><text class="floor-name grow">{{floor.displayName}}</text><text class="muted">{{floor.statusText}}</text></view>
+            <view wx:if="{{floor.stallText}}" class="muted">{{floor.stallText}}</view>
+            <view class="chips"><text wx:for="{{floor.merchants}}" wx:key="id" class="chip {{item.closed ? 'closed' : ''}}">{{item.name}} {{item.openingHours}}</text></view>
+          </view>
+        </view>
+      </view>
+    </block>
+  </block>
 </view>
