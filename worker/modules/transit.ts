@@ -1,3 +1,5 @@
+import { resolveClientContract, contractHeaders } from "../lib/client-contracts";
+import { legacyTransitDayType } from "../lib/legacy-transit-contract";
 import type { RevisionLocationInput } from "../../shared/revision-contract";
 import type { SessionPrincipal } from "../domain/types";
 import type { D1PreparedStatement, Env } from "../types/cloudflare";
@@ -1043,6 +1045,7 @@ export type PublicDayType = "weekday" | "weekend" | "holiday" | "winter_break" |
  * publicJourneys 完全一致。
  */
 export async function publicCampusLines(request: Request, env: Env): Promise<Response> {
+  const contract = resolveClientContract(request);
   const url = new URL(request.url);
   const date = url.searchParams.get("date") ?? new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Shanghai" });
   const fromId = url.searchParams.get("from");
@@ -1053,9 +1056,9 @@ export async function publicCampusLines(request: Request, env: Env): Promise<Res
   if (!from || !to) throw new HttpError(404, "not_found", "One or both endpoints do not exist");
   const weekday = shanghaiWeekday(date);
   if (!(WEEKDAYS as readonly string[]).includes(weekday)) throw new HttpError(400, "validation_error", "Invalid date");
-  const headers = { "cache-control": "public, max-age=60" };
-  // 日型走校园级共享判定（纯校历，worker/lib/daytype.ts），与就餐页同口径。
-  const dayType = await resolveCampusDayType(env, date, weekday as WeekdayColumn);
+  const headers = { "cache-control": "public, max-age=60", ...contractHeaders(contract) };
+  // 旧客户端保持服务日历标签，新契约与就餐共用校园校历。班次查询不变。
+  const dayType = contract === "legacy" ? await legacyTransitDayType(env, date, weekday as WeekdayColumn) : await resolveCampusDayType(env, date, weekday as WeekdayColumn);
   const payload = {
     date,
     timezone: "Asia/Shanghai",

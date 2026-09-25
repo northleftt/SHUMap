@@ -1,3 +1,4 @@
+import { CLIENT_CONTRACT } from "../client-contract";
 // 校车时刻表逻辑。对齐 Web 端 src/lib/transit/schedule.ts（0024 校区对校区改版）：
 // 纯函数（日期分桶、剩余班次、线路预览）逐行移植；
 // 网络层从 publicApi 换成 lib/api 的 apiGet，并保留包内快照兜底。
@@ -257,6 +258,7 @@ export async function fetchCampusLines(
   date: Date,
 ): Promise<CampusLinesResponse> {
   return apiGet<CampusLinesResponse>("/api/public/transit/campus-lines", {
+    contract: CLIENT_CONTRACT,
     from: fromEndpointId,
     to: toEndpointId,
     date: toDateKey(date),

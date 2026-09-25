@@ -175,7 +175,7 @@ function database() {
 }
 
 function call(db, query) {
-  return publicCampusLines(new Request(`https://test/api/public/transit/campus-lines?${query}`), { DB: new D1Database(db) });
+  return publicCampusLines(new Request(`https://test/api/public/transit/campus-lines?contract=map-2026-09&${query}`), { DB: new D1Database(db) });
 }
 
 async function callJson(db, query) {
@@ -353,4 +353,12 @@ test("campus-lines 响应带 dayType，标签只读校历，与班次归属互�
   assert.equal(removed.dayType, "summer_break");
   assert.deepEqual(removed.lines.flatMap((line) => line.journeys), [], "removed 当天不该有班次");
   db.close();
+});
+
+
+test("legacy transit label preserves service calendars while modern label uses academic calendar", async () => {
+ const db=database();
+ const legacy=await (await publicCampusLines(new Request("https://test/api/public/transit/campus-lines?from=campus_baoshan&to=campus_jiading&date=2026-08-21"), {DB:new D1Database(db)})).json();
+ const modern=await callJson(db,"from=campus_baoshan&to=campus_jiading&date=2026-08-21");
+ assert.equal(legacy.dayType,"weekday");assert.equal(modern.dayType,"summer_break");assert.deepEqual(legacy.lines,modern.lines);db.close();
 });

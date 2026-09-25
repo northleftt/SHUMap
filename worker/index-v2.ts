@@ -1,3 +1,4 @@
+import { CLIENT_CONTRACTS, LATEST_CONTRACT } from "./lib/client-contracts";
 import type { Env, ExecutionContext, MessageBatch } from "./types/cloudflare";
 import type { QueueJobMessage, SessionPrincipal } from "./domain/types";
 import { asErrorResponse, HttpError, json } from "./lib/http";
@@ -140,13 +141,14 @@ async function route(request: Request, env: Env, _ctx: ExecutionContext, request
   if (method === "POST" && path === "/api/auth/logout") return handleLogout(request, env);
   if (method === "GET" && path === "/api/auth/session") return handleSession(request, env);
 
-  if (method === "GET" && path === "/api/public/releases/current") return getCurrentRelease(env);
+  if (method === "GET" && path === "/api/public/contracts") return json({ default: "legacy", latest: LATEST_CONTRACT, contracts: CLIENT_CONTRACTS }, { headers: { "cache-control": "public, max-age=300" } });
+  if (method === "GET" && path === "/api/public/releases/current") return getCurrentRelease(env, request);
   const versionedRelease = match(path, "/api/public/releases/:id");
-  if (method === "GET" && versionedRelease) return getVersionedRelease(env, versionedRelease.id);
+  if (method === "GET" && versionedRelease) return getVersionedRelease(env, versionedRelease.id, request);
   if (method === "GET" && path === "/api/public/search") return publicSearch(request, env);
   if (method === "GET" && path === "/api/public/places") return listPublicPlaces(env);
   const publicPlaceId = match(path, "/api/public/places/:id");
-  if (method === "GET" && publicPlaceId) return publicPlace(env, publicPlaceId.id);
+  if (method === "GET" && publicPlaceId) return publicPlace(env, publicPlaceId.id, request);
   if (method === "GET" && path === "/api/public/operations") return listOperationalEvents(env, true);
   if (method === "GET" && path === "/api/public/campaigns") return listCampaigns(env, true);
   if (method === "GET" && path === "/api/public/transit/journeys") return publicJourneys(request, env);

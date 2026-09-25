@@ -205,7 +205,7 @@ test("the public map asset endpoint is registered without a session gate", () =>
 
   const publicModule = fs.readFileSync(path.join(root, "worker/modules/public.ts"), "utf8");
   // Membership must be part of the SQL, not an afterthought in JS.
-  assert.match(publicModule, /join releases rel on rel\.id=rmv\.release_id and rel\.status='active'/);
+  assert.match(publicModule, /join releases rel on rel\.id=rmv\.release_id and \(rel\.status='active'/);
   assert.match(publicModule, /x-content-type-options": "nosniff/);
   assert.match(publicModule, /content-security-policy/);
   // The asset must not be routed through the submission photo copy channel.
