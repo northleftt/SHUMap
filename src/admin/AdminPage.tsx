@@ -2,6 +2,7 @@ import {
   BookOpenText,
   Building2,
   Bus,
+  CalendarDays,
   ChartColumn,
   FileText,
   Inbox,
@@ -14,6 +15,7 @@ import {
   SquareCheckBig,
   Tags,
   Users,
+  UtensilsCrossed,
   Wrench,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -31,6 +33,8 @@ import { OperationsPage } from "./pages/OperationsPage";
 import { OperationCreatePage } from "./pages/OperationCreatePage";
 import { OperationDetailPage } from "./pages/OperationDetailPage";
 import { TransitPage } from "./pages/TransitPage";
+import { CalendarPage } from "./pages/CalendarPage";
+import { DiningPage } from "./pages/DiningPage";
 import { MapsPage } from "./pages/MapsPage";
 import { SubmissionsPage } from "./pages/SubmissionsPage";
 import { ReleasesPage } from "./pages/ReleasesPage";
@@ -53,6 +57,7 @@ const NAV_GROUPS = [
       { to: "/admin/taxonomy", end: false, label: "分类管理", icon: Tags },
       { to: "/admin/organizations", end: false, label: "品牌与机构", icon: Building2, permission: "write:content" },
       { to: "/admin/maps", end: false, label: "地图版本", icon: MapIcon, permission: "write:maps" },
+      { to: "/admin/calendar", end: false, label: "日历管理", icon: CalendarDays, permission: "write:content" },
       { to: "/admin/review", end: false, label: "审核中心", icon: SquareCheckBig, permission: "review:content" },
       // 返校指南是独立模块：自己的页面、自己的编辑器、自己的发布。
       // external 让侧栏用 <a> 而不是 NavLink —— 它不是 React 路由，
@@ -75,6 +80,7 @@ const NAV_GROUPS = [
       // 运营数据 = 埋点统计 + 功能评分两个 tab，纯读数，read:admin 即可看。
       { to: "/admin/operations-data", end: false, label: "运营数据", icon: ChartColumn },
       { to: "/admin/transit", end: false, label: "校车时刻", icon: Bus, permission: "write:transit" },
+      { to: "/admin/dining", end: false, label: "就餐安排", icon: UtensilsCrossed, permission: "write:content" },
       { to: "/admin/submissions", end: false, label: "用户提交", icon: Inbox, permission: "review:content" },
     ],
   },
@@ -106,6 +112,8 @@ function titleFor(pathname: string): string {
   if (pathname.startsWith("/admin/operations/")) return "运营信息 · 事件详情与进展";
   if (pathname.startsWith("/admin/operations")) return "运营信息管理";
   if (pathname.startsWith("/admin/transit")) return "校车时刻";
+  if (pathname.startsWith("/admin/calendar")) return "日历管理";
+  if (pathname.startsWith("/admin/dining")) return "就餐安排";
   if (pathname.startsWith("/admin/maps")) return "地图版本管理";
   if (pathname.startsWith("/admin/submissions")) return "用户提交 · 处理";
   if (pathname.startsWith("/admin/releases")) return "发布中心";
@@ -321,6 +329,8 @@ export function AdminPage() {
         <Route path="operations/:id/edit" element={hasPermission("write:content") ? <OperationCreatePage /> : <Navigate to="/admin/operations" replace />} />
         <Route path="operations/:id" element={<OperationDetailPage />} />
         <Route path="transit" element={hasPermission("write:transit") ? <TransitPage /> : <Navigate to="/admin" replace />} />
+        <Route path="calendar" element={hasPermission("write:content") ? <CalendarPage /> : <Navigate to="/admin" replace />} />
+        <Route path="dining" element={hasPermission("write:content") ? <DiningPage /> : <Navigate to="/admin" replace />} />
         <Route path="floors" element={<Navigate to="/admin/content" replace />} />
         <Route path="maps" element={hasPermission("write:maps") ? <MapsPage /> : <Navigate to="/admin" replace />} />
         <Route path="submissions" element={hasPermission("review:content") ? <SubmissionsPage /> : <Navigate to="/admin" replace />} />

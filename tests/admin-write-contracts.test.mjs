@@ -236,8 +236,8 @@ test("calendar weekdays only accept explicit booleans", async () => {
 
 // 日型（0025）是必填且枚举受限：它决定客户端「今天是工作日/假日……」标签。
 // 漏填时宁可 400，也不要默默落成 'other' —— 那样标签会静默消失，而运营以为填好了。
-test("calendar dayType is required and enum-checked", async () => {
-  const { env } = environment();
+test("calendar dayType 可省略（默认 'other'），给了就按枚举校验", async () => {
+  const { env, database } = environment();
   const body = {
     name: "教学周",
     validFrom: "2026-09-01",
@@ -246,12 +246,13 @@ test("calendar dayType is required and enum-checked", async () => {
     exceptions: [],
     sourceId: null,
   };
+  // 日型标签已改由校历判定，day_type 只是历史遗留列：省略必须放行且默认写 'other'
+  await handlers.createCalendar(request(body), env, principal, "request_calendar_optional");
+  const insert = database.executions.find((entry) => entry.sql.includes("insert into service_calendars"));
+  assert.ok(insert.values.includes("other"), `省略 dayType 时应写 'other'：${JSON.stringify(insert.values)}`);
+  // 给了非法值仍然 400
   await rejectsValidation(
-    () => handlers.createCalendar(request(body), env, principal, "request_calendar"),
-    /dayType is required/,
-  );
-  await rejectsValidation(
-    () => handlers.createCalendar(request({ ...body, dayType: "winterBreak" }), env, principal, "request_calendar"),
+    () => handlers.createCalendar(request({ ...body, dayType: "winterBreak" }), env, principal, "request_calendar_bad"),
     /dayType/,
   );
 });

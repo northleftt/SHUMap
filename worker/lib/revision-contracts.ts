@@ -32,6 +32,7 @@ const LOCATION_PRECISIONS = ["campus", "building", "floor", "space", "exact", "u
 const GEOMETRY_TYPES = ["Point", "LineString", "Polygon", "MultiPolygon"] as const;
 const OPERATIONAL_STATUSES = ["available", "partially_available", "unavailable", "unknown"] as const;
 const PUBLIC_ACCESS_LEVELS = ["public", "restricted", "private", "unknown"] as const;
+const DINING_MEALS = ["breakfast", "lunner", "latenight"] as const;
 
 export type RevisionContract = PlaceRevisionWrite | FacilityRevisionWrite | MerchantRevisionWrite;
 export type RevisionContractType = "place" | "facility" | "merchant";
@@ -304,6 +305,31 @@ export function normalizePlaceContent(value: unknown, field = "content"): PlaceC
   });
   mediaValue(detail.media, `${field}.detail.media`);
   if (Object.hasOwn(content, "address")) text(content.address, `${field}.address`, 1_000);
+  // 楼层供餐（食堂专属）：营业单元 = 楼层，档口只是品类标签。levelCode 与 floors 表
+  // 的 level_code 对应，meals 决定该层参与哪些餐别（驱动时段灰化），stallTypes 是
+  // 「有哪些类型的菜」的自由标签。结构在此强校验——content 其余键透传，写歪了会
+  // 原样进 release，前台静默丢数据。
+  if (Object.hasOwn(content, "dining")) {
+    const dining = recordValue(content.dining, `${field}.dining`);
+    if (!Array.isArray(dining.floors) || dining.floors.length > 50) {
+      validation(`${field}.dining.floors must be an array with at most 50 items`);
+    }
+    (dining.floors as unknown[]).forEach((item, index) => {
+      const itemField = `${field}.dining.floors[${index}]`;
+      const row = exactOptionalRecord(item, itemField, ["levelCode", "meals", "stallTypes"]);
+      text(row.levelCode, `${itemField}.levelCode`, 50);
+      if (!Array.isArray(row.meals)) validation(`${itemField}.meals must be an array`);
+      (row.meals as unknown[]).forEach((meal, mealIndex) => {
+        enumValue(meal, `${itemField}.meals[${mealIndex}]`, DINING_MEALS);
+      });
+      if (!Array.isArray(row.stallTypes) || (row.stallTypes as unknown[]).length > 20) {
+        validation(`${itemField}.stallTypes must be an array with at most 20 items`);
+      }
+      (row.stallTypes as unknown[]).forEach((stall, stallIndex) => {
+        text(stall, `${itemField}.stallTypes[${stallIndex}]`, 50, true);
+      });
+    });
+  }
   return content as PlaceContent;
 }
 

@@ -32,9 +32,10 @@ const CALENDAR_NAMES = new Map([
 ]);
 const SHUTTLE_BUCKETS = ["weekday", "weekend", "holiday", "winterBreak", "summerBreak"];
 /**
- * bucket → service_calendars.day_type（0025 迁移）。客户端的「今天是工作日 / 假日……」
- * 标签读这一列（worker 的 resolveDayType），列名用下划线，和这里的 camelCase bucket
- * 不是同一套写法，所以要显式映射而不是直接塞 bucket。
+ * bucket → service_calendars.day_type（0025 迁移）。这一列如今只剩历史数据兼容：
+ * 「今天是工作日 / 假日……」标签只读校历 academic_* 表（worker 的
+ * resolveCampusDayType），服务日历只是班次调度规则。列名用下划线，和这里的
+ * camelCase bucket 不是同一套写法，所以要显式映射而不是直接塞 bucket。
  */
 const CALENDAR_DAY_TYPES = new Map([
   ["weekday", "weekday"],

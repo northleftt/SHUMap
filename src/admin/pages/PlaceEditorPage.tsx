@@ -1,4 +1,4 @@
-import { Layers, Plus, Trash2, Upload } from "lucide-react";
+import { Layers, Plus, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import * as admin from "../../lib/api/admin";
@@ -24,6 +24,7 @@ import {
   Pill,
   PrimaryButton,
   SelectField,
+  Chip,
   MarkerScaleField,
   TextArea,
   errorMessage,
@@ -56,6 +57,21 @@ interface FactRow {
   label: string;
   value: string;
 }
+
+/** 食堂楼层供餐：meals 决定该层参与哪些餐别，stallTypes 是品类自由标签。 */
+type DiningMeal = "breakfast" | "lunner" | "latenight";
+
+interface DiningFloorRow {
+  levelCode: string;
+  meals: DiningMeal[];
+  stallTypes: string[];
+}
+
+const DINING_MEAL_OPTIONS: Array<{ value: DiningMeal; label: string }> = [
+  { value: "breakfast", label: "早餐" },
+  { value: "lunner", label: "午晚餐" },
+  { value: "latenight", label: "夜宵" },
+];
 
 interface PlaceBuildingStructure {
   buildingCode: string | null;
@@ -114,6 +130,24 @@ function readFacts(value: unknown): FactRow[] {
       ...(id === undefined ? {} : { id }),
       label: requiredString(record.label, `${field}.label`),
       value: stringValue(record.value, `${field}.value`),
+    };
+  });
+}
+
+/** content.dining 缺字段等于「没填过供餐信息」，不是数据坏了，与 readMedia 同口径。 */
+function readDiningFloors(value: unknown): DiningFloorRow[] {
+  if (value === undefined || value === null) return [];
+  const dining = objectValue(value, "place_revisions.content_json.dining");
+  if (dining.floors === undefined || dining.floors === null) return [];
+  return arrayValue(dining.floors, "place_revisions.content_json.dining.floors").map((raw, index) => {
+    const field = `place_revisions.content_json.dining.floors[${index}]`;
+    const row = objectValue(raw, field);
+    return {
+      levelCode: requiredString(row.levelCode, `${field}.levelCode`),
+      meals: arrayValue(row.meals, `${field}.meals`)
+        .map((meal, mealIndex) => oneOf(meal, `${field}.meals[${mealIndex}]`, ["breakfast", "lunner", "latenight"] as const)),
+      stallTypes: arrayValue(row.stallTypes, `${field}.stallTypes`)
+        .map((stall, stallIndex) => requiredString(stall, `${field}.stallTypes[${stallIndex}]`)),
     };
   });
 }
@@ -200,6 +234,7 @@ export function PlaceEditorPage() {
   const [aliases, setAliases] = useState("");
   const [facts, setFacts] = useState<FactRow[]>([]);
   const [media, setMedia] = useState<MediaRow[]>([]);
+  const [diningFloors, setDiningFloors] = useState<DiningFloorRow[]>([]);
   const [baseContent, setBaseContent] = useState<PlaceContent>({ detail: { facts: [], media: [] } });
   const [markerSize, setMarkerSize] = useState(1);
   const [sourceId, setSourceId] = useState("");
@@ -232,6 +267,7 @@ export function PlaceEditorPage() {
     setMarkerSize(markerScaleFromContent(revision.content));
     setFacts(revision.facts);
     setMedia(revision.media);
+    setDiningFloors(readDiningFloors(revision.content.dining));
     setSourceId(revision.sourceId);
     setAliases(revision.aliases.join("、"));
     setLocationDrafts(revision.locations);
@@ -274,6 +310,12 @@ export function PlaceEditorPage() {
       .filter((fact) => fact.label && fact.value);
     const nextDetail: PlaceContent["detail"] = { ...previousDetail, facts: keptFacts, media };
     const next: PlaceContent = { ...baseContent, detail: nextDetail };
+    // 食堂专属：楼层供餐信息；非食堂类型不保留 dining，避免类型改走后留脏数据。
+    if (kindId === "canteen") {
+      next.dining = { floors: diningFloors };
+    } else {
+      delete next.dining;
+    }
     // 图钉大小：标准档不落字段，保持 content 干净；非标准写 content.marker.size。
     if (markerSize === 1) {
       delete next.marker;
@@ -536,6 +578,7 @@ export function PlaceEditorPage() {
           </Panel>
         ) : (
           <FloorPanel
+            dining={kindId === "canteen" ? { rows: diningFloors, onChange: setDiningFloors } : undefined}
             floors={floors}
             isBuilding={hasBuildingStructure}
             onDone={(message) => { setNotice(message); detail.reload(); }}
@@ -640,11 +683,14 @@ function FloorPanel({
   placeId,
   floors,
   isBuilding,
+  dining,
   onDone,
 }: {
   placeId: string;
   floors: Floor[];
   isBuilding: boolean;
+  /** 食堂专属：楼层餐别/品类编辑。非食堂类型不传，面板不渲染这块。 */
+  dining?: { rows: DiningFloorRow[]; onChange: (rows: DiningFloorRow[]) => void };
   onDone: (message: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
@@ -661,13 +707,17 @@ function FloorPanel({
     setBusy(true);
     setError("");
     try {
-      await admin.createFloor({
+      const created = await admin.createFloor({
         buildingPlaceId: placeId,
         levelCode: code,
         levelOrder: suggestFloorOrder(code),
         displayName: displayName.trim() || suggestFloorName(code),
         isPublic: true,
       });
+      // 新楼层的供餐行默认空餐别空品类，让管理员自己填。key 必须用服务端落库的
+      // 原始 levelCode（worker 只 trim 不规范化），否则填 "3" 时行挂到 "F3" 上，
+      // 之后按 floor.levelCode 永远匹配不到，餐别/品类静默丢失。
+      dining?.onChange([...dining.rows, { levelCode: created.levelCode, meals: [], stallTypes: [] }]);
       setLevelCode("");
       setDisplayName("");
       setAdding(false);
@@ -729,6 +779,7 @@ function FloorPanel({
     setError("");
     try {
       await admin.deleteFloor(floor.id);
+      dining?.onChange(dining.rows.filter((row) => row.levelCode !== floor.levelCode));
       onDone(`已删除楼层 ${floor.displayName}`);
     } catch (err) {
       // 有设施/商户/锚点挂着时服务端回 409 floor_in_use，明细在 message 里。
@@ -739,6 +790,13 @@ function FloorPanel({
   }
 
   const sorted = [...floors].sort((a, b) => a.levelOrder - b.levelOrder);
+
+  /** 按 levelCode upsert 供餐行；该楼层还没有行时以空行起步。 */
+  function changeDiningRow(next: DiningFloorRow) {
+    if (!dining) return;
+    const index = dining.rows.findIndex((row) => row.levelCode === next.levelCode);
+    dining.onChange(index === -1 ? [...dining.rows, next] : dining.rows.map((row, i) => (i === index ? next : row)));
+  }
 
   return (
     <Panel
@@ -797,7 +855,8 @@ function FloorPanel({
                 );
               }
               return (
-                <div key={floorId} className="flex items-center gap-3 py-2.5 text-body">
+                <div key={floorId} className="py-2.5">
+                  <div className="flex items-center gap-3 text-body">
                   {floor.imageUrl ? (
                     <img
                       alt={`${label} 平面图`}
@@ -861,6 +920,13 @@ function FloorPanel({
                   >
                     删除
                   </button>
+                  </div>
+                  {dining ? (
+                    <DiningFloorEditor
+                      onChange={changeDiningRow}
+                      row={dining.rows.find((row) => row.levelCode === code) ?? { levelCode: code, meals: [], stallTypes: [] }}
+                    />
+                  ) : null}
                 </div>
               );
             })}
@@ -869,5 +935,80 @@ function FloorPanel({
         <ErrorBanner message={error} />
       </div>
     </Panel>
+  );
+}
+
+/** 食堂楼层行下的餐别/品类编辑区：餐别是固定三选多，品类是自由文本标签。 */
+function DiningFloorEditor({
+  row,
+  onChange,
+}: {
+  row: DiningFloorRow;
+  onChange: (row: DiningFloorRow) => void;
+}) {
+  const [stallInput, setStallInput] = useState("");
+
+  function addStall() {
+    const value = stallInput.trim();
+    setStallInput("");
+    if (!value || row.stallTypes.includes(value)) return;
+    onChange({ ...row, stallTypes: [...row.stallTypes, value] });
+  }
+
+  return (
+    <div className="ml-12 mt-2 space-y-2 rounded-lg border border-line p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-10 shrink-0 text-label text-sub">餐别</span>
+        {DINING_MEAL_OPTIONS.map((option) => (
+          <Chip
+            active={row.meals.includes(option.value)}
+            key={option.value}
+            onClick={() =>
+              onChange({
+                ...row,
+                meals: row.meals.includes(option.value)
+                  ? row.meals.filter((meal) => meal !== option.value)
+                  : [...row.meals, option.value],
+              })
+            }
+          >
+            {option.label}
+          </Chip>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-10 shrink-0 text-label text-sub">品类</span>
+        {row.stallTypes.map((stall) => (
+          <span
+            className="inline-flex h-8 items-center gap-1 rounded-full bg-primary-container px-3 text-aux font-medium text-primary"
+            key={stall}
+          >
+            {stall}
+            <button
+              aria-label={`删除品类 ${stall}`}
+              onClick={() => onChange({ ...row, stallTypes: row.stallTypes.filter((value) => value !== stall) })}
+              type="button"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        <input
+          className="h-8 w-24 rounded-lg border border-line px-2 text-aux outline-none focus:border-primary"
+          onChange={(event) => setStallInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              addStall();
+            }
+          }}
+          placeholder="如 自选"
+          value={stallInput}
+        />
+        <button className="text-aux font-medium text-primary" onClick={addStall} type="button">
+          添加
+        </button>
+      </div>
+    </div>
   );
 }

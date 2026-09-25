@@ -3,6 +3,12 @@
 // returns 503 release_unavailable, surfaced as ApiError.isReleaseUnavailable.
 
 import { ApiError, apiFetch } from "./client";
+import {
+  parseDiningScheduleResponse,
+  parseMerchantStatusResponse,
+  type DiningScheduleResponse,
+  type MerchantStatusResponse,
+} from "../dining/schedule";
 import { parseReleaseManifest } from "../release/manifestContract";
 import { parseFacilityStatusResponse, parseOperationalEventsResponse } from "./publicContract";
 import type {
@@ -204,6 +210,22 @@ export function getCampusLines(
 export async function getFacilityStatus(signal?: AbortSignal): Promise<FacilityStatusResponse> {
   const value = await apiFetch<unknown>("/api/public/facility-status", { signal });
   return parseFacilityStatusResponse(value);
+}
+
+/**
+ * GET /api/public/dining/schedule — 就餐页实时数据源（日型 + 供餐时段 + 开放安排）。
+ *
+ * 不进 release：楼层开不开、时段怎么划改完 30s 内生效，快照里只冻食堂/楼层/商家本体。
+ */
+export async function getDiningSchedule(date: string, signal?: AbortSignal): Promise<DiningScheduleResponse> {
+  const value = await apiFetch<unknown>("/api/public/dining/schedule", { query: { date }, signal });
+  return parseDiningScheduleResponse(value);
+}
+
+/** GET /api/public/merchant-status — 商户营业状态的实时读端（盖在 release 快照上）。 */
+export async function getMerchantStatus(signal?: AbortSignal): Promise<MerchantStatusResponse> {
+  const value = await apiFetch<unknown>("/api/public/merchant-status", { signal });
+  return parseMerchantStatusResponse(value);
 }
 
 /** GET /api/public/operations — approved, currently-active operational events. */

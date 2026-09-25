@@ -4,6 +4,7 @@ import { AuthProvider } from "./admin/AuthContext";
 import { AppLayout } from "./components/layout/AppLayout";
 import { FeedbackPage } from "./pages/feedback/FeedbackPage";
 import { FloorsPage } from "./pages/floors/FloorsPage";
+import { CanteenDiningPage } from "./pages/dining/CanteenDiningPage";
 import { MapPage } from "./pages/map/MapPage";
 import { OffCampusPage } from "./pages/offcampus/OffCampusPage";
 import { OperationsPage } from "./pages/operations/OperationsPage";
@@ -35,6 +36,7 @@ export function App() {
           <Route path="/collect/:buildingId" element={<CollectionFormPage />} />
         </Route>
         <Route path="/places/:placeId/floors" element={<FloorsPage />} />
+        <Route path="/places/:placeId/dining" element={<CanteenDiningPage />} />
         <Route path="/places/:placeId/operations" element={<OperationsPage />} />
       </Route>
     </Routes>

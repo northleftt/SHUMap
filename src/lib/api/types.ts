@@ -404,7 +404,7 @@ export interface CampusLinesResponse {
   date: string;
   timezone: string;
   /**
-   * 当日日型，由**管理端的服务日历**决定（worker 的 resolveDayType）。
+   * 当日日型，由**校历**判定（worker/lib/daytype.ts 的 resolveCampusDayType）。
    * 客户端不要再自己算：曾经算在前端、数据源是 data/academic-calendar.json 那份
    * 手写草稿，与班次归属所依据的 service_calendars 没有任何连通，会出现「页面说
    * 今天是假日、但假日班次一个都不出」。

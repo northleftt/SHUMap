@@ -848,8 +848,9 @@ export interface TransitCalendarCreateInput {
   name: string;
   validFrom: string;
   validTo: string;
-  /** 日型：决定客户端的「今天是工作日/假日……」标签，'other' 表示不参与标签。 */
-  dayType: ServiceCalendarDayType;
+  /** 历史遗留：日型标签已由校历判定（GET /api/public/transit/campus-lines 的 dayType），
+      此列不再驱动行为；省略时 worker 写 'other'。 */
+  dayType?: ServiceCalendarDayType;
   weekdays: Record<"monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday", boolean>;
   exceptions: TransitCalendarExceptionInput[];
   sourceId: string | null;
@@ -944,6 +945,123 @@ export function deleteTransitTrip(tripId: string): Promise<{ id: string; status:
   return apiFetch<{ id: string; status: string }>(`/api/admin/transit/trips/${encodeURIComponent(tripId)}`, {
     method: "DELETE",
   });
+}
+
+// ---------------------------------------------------------------------------
+// 校历（academic calendar）+ 就餐（dining）
+//
+// 校历是校园级日型（工作日 / 周末 / 假日 / 寒暑假）的唯一数据源；就餐的开放
+// 安排按日型命中。两张表都即时生效、不进 release，写权限 write:content。
+// ---------------------------------------------------------------------------
+
+export type AcademicTermDayType = "term" | "winter_break" | "summer_break";
+export type AcademicDateKind = "holiday" | "workday_override";
+
+export interface AcademicTermRow {
+  id: string;
+  yearId: string;
+  name: string;
+  dayType: AcademicTermDayType;
+  validFrom: string;
+  validTo: string;
+  sortOrder: number;
+}
+
+export interface AcademicDateRow {
+  yearId: string;
+  serviceDate: string;
+  kind: AcademicDateKind;
+}
+
+export interface AcademicYearRow {
+  id: string;
+  name: string;
+  terms: AcademicTermRow[];
+  dates: AcademicDateRow[];
+}
+
+export interface AcademicYearWrite {
+  name: string;
+  terms: Array<{ name: string; dayType: AcademicTermDayType; validFrom: string; validTo: string; sortOrder?: number }>;
+  dates: Array<{ serviceDate: string; kind: AcademicDateKind }>;
+}
+
+export function listAcademicYears(signal?: AbortSignal): Promise<ListResponse<AcademicYearRow>> {
+  return apiFetch<ListResponse<AcademicYearRow>>("/api/admin/calendar/years", { signal });
+}
+
+export function createAcademicYear(body: AcademicYearWrite): Promise<{ id: string; name: string }> {
+  return apiFetch<{ id: string; name: string }>("/api/admin/calendar/years", { method: "POST", body });
+}
+
+export function updateAcademicYear(yearId: string, body: AcademicYearWrite): Promise<{ id: string; name: string }> {
+  return apiFetch<{ id: string; name: string }>(`/api/admin/calendar/years/${encodeURIComponent(yearId)}`, {
+    method: "PUT",
+    body,
+  });
+}
+
+/** DELETE /api/admin/calendar/years/:id — 覆盖今天的学年返回 409 `academic_year_current`。 */
+export function deleteAcademicYear(yearId: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/calendar/years/${encodeURIComponent(yearId)}`, { method: "DELETE" });
+}
+
+export type DiningMeal = "breakfast" | "lunner" | "latenight";
+export type DiningDayType = "weekday" | "weekend" | "holiday" | "winter_break" | "summer_break";
+
+export interface DiningMealPeriodRow {
+  id: string;
+  meal: DiningMeal;
+  startTime: string;
+  endTime: string;
+  sortOrder: number;
+}
+
+export interface DiningScheduleRow {
+  id: string;
+  validFrom: string;
+  validTo: string;
+  dayTypes: DiningDayType[];
+  updatedAt: string;
+  floors: Array<{ floorId: string; noBreakfast: boolean }>;
+}
+
+export interface DiningAdminResponse {
+  mealPeriods: DiningMealPeriodRow[];
+  schedules: DiningScheduleRow[];
+}
+
+export function listDiningAdmin(signal?: AbortSignal): Promise<DiningAdminResponse> {
+  return apiFetch<DiningAdminResponse>("/api/admin/dining", { signal });
+}
+
+/** PUT /api/admin/dining/meal-periods — 整表替换；数组顺序即展示顺序。 */
+export function replaceMealPeriods(
+  periods: Array<{ meal: DiningMeal; startTime: string; endTime: string; sortOrder?: number }>,
+): Promise<{ count: number }> {
+  return apiFetch<{ count: number }>("/api/admin/dining/meal-periods", { method: "PUT", body: { periods } });
+}
+
+export interface DiningScheduleWrite {
+  validFrom: string;
+  validTo: string;
+  dayTypes: DiningDayType[];
+  floors: Array<{ floorId: string; noBreakfast: boolean }>;
+}
+
+export function createDiningSchedule(body: DiningScheduleWrite): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>("/api/admin/dining/schedules", { method: "POST", body });
+}
+
+export function updateDiningSchedule(scheduleId: string, body: DiningScheduleWrite): Promise<{ id: string }> {
+  return apiFetch<{ id: string }>(`/api/admin/dining/schedules/${encodeURIComponent(scheduleId)}`, {
+    method: "PUT",
+    body,
+  });
+}
+
+export function deleteDiningSchedule(scheduleId: string): Promise<void> {
+  return apiFetch<void>(`/api/admin/dining/schedules/${encodeURIComponent(scheduleId)}`, { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------

@@ -106,9 +106,11 @@ export interface CampusLinesResponse {
   date: string;
   timezone: string;
   /**
-   * 当日日型，由**管理端的服务日历**决定（worker 的 resolveDayType）。
+   * 当日日型，由**校历**（academic_* 表，worker 的 resolveCampusDayType）决定；
+   * 校车班次归属也按同一日型匹配，两端必然同口径。服务日历只是班次调度规则，
+   * 不参与日型判定（0035/PR dining-calendar 起）。
    * 客户端不要再自己算：曾经算在前端、数据源是 data/academic-calendar 那份手写
-   * 草稿，与班次归属所依据的 service_calendars 没有任何连通，会出现「页面说今天是
+   * 草稿，与班次归属所依据的数据没有任何连通，会出现「页面说今天是
    * 假日、但假日班次一个都不出」。
    */
   dayType: PublicDayType;

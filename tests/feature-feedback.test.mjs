@@ -129,7 +129,8 @@ test("a valid rating is stored anonymously, with or without a reason", async () 
   );
   assert.equal(high.status, 204);
 
-  const rows = sqlite.prepare("select page, rating, reason from feature_feedback order by created_at").all();
+  // 同毫秒插入时 created_at 并列，顺序不稳定；按 page 作第二排序键保证确定顺序。
+  const rows = sqlite.prepare("select page, rating, reason from feature_feedback order by created_at, page").all();
   assert.equal(rows.length, 2);
   // node:sqlite 的行是 null-prototype 对象，逐字段比而不是 deepEqual 整个字面量。
   assert.equal(rows[0].page, "search");
