@@ -142,24 +142,24 @@ test("periodBarText renders the design-worded status line", () => {
   assert.equal(periodBarText(weekday, minutesOf("23:00")), "当前：今日供餐已结束");
 });
 
-test("periodBarText appends the arrangement suffix on weekends with a schedule", () => {
+test("periodBarText shows only the current period regardless of arrangement day type", () => {
   const weekend = scheduleResponse({
     dayType: "weekend",
     arrangement: { scheduleId: "ds_1", floors: [] },
   });
-  assert.equal(periodBarText(weekend, minutesOf("12:00")), "当前：午餐时段（至 13:00） · 周末营业安排");
+  assert.equal(periodBarText(weekend, minutesOf("12:00")), "当前：午餐时段（至 13:00）");
   const holiday = scheduleResponse({
     dayType: "holiday",
     arrangement: { scheduleId: "ds_1", floors: [] },
   });
-  assert.equal(periodBarText(holiday, minutesOf("12:00")), "当前：午餐时段（至 13:00） · 节假日营业安排");
-  // 工作日例外安排同样标注
+  assert.equal(periodBarText(holiday, minutesOf("12:00")), "当前：午餐时段（至 13:00）");
+  // 工作日例外也只显示当前时段
   const weekdayException = scheduleResponse({
     dayType: "weekday",
     arrangement: { scheduleId: "ds_2", floors: [] },
   });
-  assert.equal(periodBarText(weekdayException, minutesOf("12:00")), "当前：午餐时段（至 13:00） · 工作日营业安排");
-  // 无安排不加后缀（页面此时走「暂无安排信息」空态）
+  assert.equal(periodBarText(weekdayException, minutesOf("12:00")), "当前：午餐时段（至 13:00）");
+  // 无安排时保持同一时段文案（页面另有「暂无安排信息」空态）
   const noSchedule = scheduleResponse({ dayType: "weekend" });
   assert.equal(periodBarText(noSchedule, minutesOf("12:00")), "当前：午餐时段（至 13:00）");
 });
