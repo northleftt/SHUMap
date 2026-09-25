@@ -197,7 +197,7 @@ export function mealNow(periods: readonly DiningMealPeriod[], nowMinutes: number
 /**
  * 顶部时段条文案（纯文字）：
  * 「当前：午餐时段（至 13:00）」/「当前：午休中 · 晚餐 16:40 开始」/「当前：今日供餐已结束」。
- * 有开放安排命中时加「· 周末营业安排」类后缀（工作日例外安排同样标注）。
+ * 时段栏只展示当前供餐时段；开放安排由楼层状态和详情页表达。
  */
 export function periodBarText(schedule: DiningScheduleResponse, nowMinutes: number): string {
   const state = mealNow(schedule.mealPeriods, nowMinutes);
@@ -211,9 +211,6 @@ export function periodBarText(schedule: DiningScheduleResponse, nowMinutes: numb
     text = `当前：${isLunchBreak ? "午休中" : "供餐间歇"} · ${segmentMealName(state.next)} ${state.next.startTime} 开始`;
   } else {
     text = "当前：今日供餐已结束";
-  }
-  if (schedule.arrangement) {
-    text += ` · ${DAY_TYPE_LABELS[schedule.dayType]}营业安排`;
   }
   return text;
 }

@@ -203,7 +203,7 @@ export function PoiDetailSheet({
             食堂例外：有楼层就显示，入口去就餐详情页。 */}
         {building.entityType === "building" && (facilities.length > 0 || (building.kindId === "canteen" && hasFloors)) ? <div className="mt-4">
           <SectionHeader
-            title="楼内设施指引"
+            title={building.kindId === "canteen" ? "楼层与档口" : "楼内设施指引"}
             action={
               <button
                 type="button"
@@ -214,7 +214,7 @@ export function PoiDetailSheet({
                     : `/places/${building.entityId}/floors`,
                 )}
               >
-                {building.kindId === "canteen" ? "楼层与就餐详情 ›" : "查看楼层图 ›"}
+                {building.kindId === "canteen" ? "查看供餐详情 ›" : "查看楼层图 ›"}
               </button>
             }
           />
@@ -225,7 +225,7 @@ export function PoiDetailSheet({
           ) : null}
           {facilityStatus.status === "loading" && facilities.length > 0 ? (
             <p className="mt-2 text-aux text-sub">正在加载设施实时状态…</p>
-          ) : facilityStatus.status === "ready" ? (
+          ) : facilityStatus.status === "ready" && facilities.length > 0 ? (
             <div className="scrollbar-hidden mt-3 flex gap-4 overflow-x-auto pb-1">
               {facilities.map((facility) => {
                 // 不可用的设施在指引里就标出来，免得点进楼层页才发现。
@@ -251,7 +251,7 @@ export function PoiDetailSheet({
         {/* 楼内商户（release manifest merchants，按 hostPlaceId 归到本楼） */}
         {merchants.length > 0 ? (
           <div className="mt-4">
-            <SectionHeader title={`楼内商户 (${merchants.length})`} />
+            <SectionHeader title={`${building.kindId === "canteen" ? "食堂商户" : "楼内商户"} (${merchants.length})`} />
             <div className="mt-1 divide-y divide-line">
               {merchants.map((merchant) => (
                 <button

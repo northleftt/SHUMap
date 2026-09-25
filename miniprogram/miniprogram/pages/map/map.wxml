@@ -453,10 +453,10 @@
                 <!-- 楼内设施指引（圆形图标徽章横滑）+ 楼层图入口；未录入设施时整节不显示 -->
                 <block wx:if="{{detail.isBuilding && (detail.facilities.length > 0 || (detail.isCanteen && detail.hasFloors))}}">
                   <view class="section-head">
-                    <view class="section-title">楼内设施指引</view>
-                    <view class="section-action" bindtap="openFloors">{{detail.isCanteen ? '楼层与就餐详情 ›' : '查看楼层图 ›'}}</view>
+                    <view class="section-title">{{detail.isCanteen ? '楼层与档口' : '楼内设施指引'}}</view>
+                    <view class="section-action" bindtap="openFloors">{{detail.isCanteen ? '查看供餐详情 ›' : '查看楼层图 ›'}}</view>
                   </view>
-                  <scroll-view scroll-x class="badge-row" enhanced show-scrollbar="{{false}}">
+                  <scroll-view wx:if="{{detail.facilities.length > 0}}" scroll-x class="badge-row" enhanced show-scrollbar="{{false}}">
                     <view class="badge-row-inner">
                       <view class="icon-badge" wx:for="{{detail.facilities}}" wx:key="id">
                         <view class="icon-badge-circle">
@@ -471,7 +471,7 @@
                 <!-- 楼内商户 -->
                 <block wx:if="{{detail.isBuilding && detail.merchants.length > 0}}">
                   <view class="section-head">
-                    <view class="section-title">楼内商户 ({{detail.merchants.length}})</view>
+                    <view class="section-title">{{detail.isCanteen ? '食堂商户' : '楼内商户'}} ({{detail.merchants.length}})</view>
                   </view>
                   <view class="merchant-list">
                     <view
