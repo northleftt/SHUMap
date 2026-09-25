@@ -211,10 +211,12 @@
   入口在 debug 页（pages/debug/debug）顶部「运行环境」：清 release/map-asset 缓存
   → 写 storage → `wx.restartMiniProgram` 重启生效。staging 反代服务
   `cloudrun/shumap-api-staging/`（server.mjs 与生产逐字节一致，仅 Dockerfile 上游
-  不同，漂移门禁 `tests/miniprogram-cloudrun-staging-proxy.test.mjs`）**尚未部署**
-  （CloudBase CLI 凭据过期需人工登录，步骤见 cloudrun/README.md）；部署前在
-  devtools 测 staging 需临时把 `useCloudContainer` 改回 false 直连
-  `staging.map.shutf.com`。全量说明见主仓库 `docs/staging.md`。
+  不同，漂移门禁 `tests/miniprogram-cloudrun-staging-proxy.test.mjs`）
+  **2026-09-25 已部署**（默认域名
+  `https://shumap-api-staging-4227820-1465143788.ap-shanghai.run.tcloudbase.com`，
+  代理全链路 200 已验证）；devtools 保持 `useCloudContainer: true` 即可测 staging。
+  待手工：控制台配 `PROXY_SHARED_SECRET`（= staging worker 的
+  `MINIPROGRAM_PROXY_SECRET`），未配仅限流粒度变粗。全量说明见主仓库 `docs/staging.md`。
 - `cloudrun/shumap-api/`：零依赖 Node 反向代理容器（`server.mjs` + `Dockerfile`，监听 80），
   已部署到云环境 `cloudbase-d1gse9nsp7630b4e7`（个人版，ap-shanghai）服务 `shumap-api`。
 - **上游是 Worker 自定义域名 `https://map.shutf.com`，不是 workers.dev**：

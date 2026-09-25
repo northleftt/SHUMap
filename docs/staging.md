@@ -13,7 +13,7 @@
 | D1 | `shumap-v2` | `shumap-v2-staging`（`8b8986ef-492d-447d-b0cb-4759604697fc`） |
 | R2 | `shumap-assets` | `shumap-assets-staging` |
 | Queue | `shumap-import` | `shumap-import-staging` |
-| 云托管反代 | `shumap-api` | `shumap-api-staging`（源码已备，部署见下） |
+| 云托管反代 | `shumap-api` | `shumap-api-staging`（2026-09-25 已部署） |
 
 配置在 `wrangler.jsonc` 的 `env.staging`。注意 `secrets` 和 `durable_objects`
 **不被 env 继承**，staging 下必须重复声明（wrangler 部署时会警告漏配）。
@@ -95,14 +95,16 @@ printf '\n\n' | npx cloudbase cloudrun deploy -s shumap-api-staging --port 80 \
 # （值 = staging worker 的 MINIPROGRAM_PROXY_SECRET），保存触发滚动重启即可。
 ```
 
-**2026-09-17 建成时的状态**：CloudBase CLI 登录凭据已过期且重新登录需要人工
-浏览器授权，staging 反代只交付了源码与部署步骤，**尚未部署**。注意
-`useCloudContainer: true` 时开发者工具同样走云托管通道，所以反代部署前，
-在开发者工具里测 staging 需要把 `config.ts` 的 `useCloudContainer` 临时改为
-`false`（devtools 已设 `urlCheck: false`，`wx.request` 直连
-`staging.map.shutf.com` 不受白名单限制）；反代部署后改回 `true` 即可全通道测。
-真机体验版在反代部署前无法使用 staging（请求会打到不存在的
-`shumap-api-staging` 服务而失败）。
+**状态（2026-09-25）**：`shumap-api-staging` 已部署上线（CloudBase CLI 3.8.4，
+服务域名 `https://shumap-api-staging-4227820-1465143788.ap-shanghai.run.tcloudbase.com`，
+`/healthz` 回指 `staging.map.shutf.com`，release/底图经代理全链路 200）。
+开发者工具保持 `useCloudContainer: true` 即可测 staging（云通道会打到
+`shumap-api-staging` 服务）。**唯一未做的手工步骤**：控制台给
+`shumap-api-staging` 配环境变量 `PROXY_SHARED_SECRET`（值 = staging worker 的
+`MINIPROGRAM_PROXY_SECRET`，CLI 无此参数只能控制台配）——未配时小程序端
+公共限流退回按容器出口 IP 合计，功能正常，仅限流粒度变粗（与生产反代
+2026-08-25 之前的状态相同）。若反代暂时不可用，在 devtools 里把
+`useCloudContainer` 临时改为 `false` 也可直连 `staging.map.shutf.com` 测试。
 
 ## 哪些操作只能在 staging 做
 
