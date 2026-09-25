@@ -70,18 +70,20 @@ curl http://localhost:8099/api/public/releases/current
 见 `docs/staging.md`）。小程序侧由 `lib/env.ts` 的环境切换把 `cloudService` 换成
 `shumap-api-staging`。
 
-部署（CloudBase CLI 凭据过期需先 `npx cloudbase login --flow device` 人工授权）：
+部署（CloudBase CLI 凭据会过期，需先 `npx -y -p @cloudbase/cli cloudbase login --flow device` 人工授权）：
 
 ```bash
-cd tmp/cloudbase-cli
-printf '\n\n' | npx cloudbase cloudrun deploy -s shumap-api-staging --port 80 \
-  --source "$OLDPWD/miniprogram/cloudrun/shumap-api-staging" --wait --force \
+printf '\n\n' | npx -y -p @cloudbase/cli cloudbase cloudrun deploy -s shumap-api-staging --port 80 \
+  --source miniprogram/cloudrun/shumap-api-staging --wait --force \
   -e cloudbase-d1gse9nsp7630b4e7
 ```
 
 `PROXY_SHARED_SECRET` 同样在控制台环境变量里配，值用 **staging** worker 的
-`MINIPROGRAM_PROXY_SECRET`（与生产口令不同），配完保存触发滚动重启。
-2026-09-17 状态：源码已交付，服务**尚未部署**（CLI 凭据过期，需人工登录）。
+`MINIPROGRAM_PROXY_SECRET`（与生产口令不同），配完保存触发滚动重启；不配也能跑，
+只是 Worker 退回按容器出口 IP 限流（见下文）。
+2026-09-25 状态：**已部署**（默认域名
+`https://shumap-api-staging-4227820-1465143788.ap-shanghai.run.tcloudbase.com`，
+`/healthz` 与上游透传已验证）；`PROXY_SHARED_SECRET` 尚未配置。
 
 ## `PROXY_SHARED_SECRET`：让限流按人计数而不是按容器 IP
 

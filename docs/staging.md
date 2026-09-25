@@ -87,22 +87,21 @@ staging 有独立的反代服务源码 `miniprogram/cloudrun/shumap-api-staging/
 
 ```bash
 # CloudBase CLI 凭据会过期，需先人工重新登录（浏览器授权）：
-cd tmp/cloudbase-cli && npx cloudbase login --flow device
-printf '\n\n' | npx cloudbase cloudrun deploy -s shumap-api-staging --port 80 \
-  --source "$OLDPWD/miniprogram/cloudrun/shumap-api-staging" --wait --force \
+npx -y -p @cloudbase/cli cloudbase login --flow device
+printf '\n\n' | npx -y -p @cloudbase/cli cloudbase cloudrun deploy -s shumap-api-staging --port 80 \
+  --source miniprogram/cloudrun/shumap-api-staging --wait --force \
   -e cloudbase-d1gse9nsp7630b4e7
-# 再到控制台给 shumap-api-staging 配环境变量 PROXY_SHARED_SECRET
-# （值 = staging worker 的 MINIPROGRAM_PROXY_SECRET），保存触发滚动重启即可。
+# 可选：到控制台给 shumap-api-staging 配环境变量 PROXY_SHARED_SECRET
+# （值 = staging worker 的 MINIPROGRAM_PROXY_SECRET），保存触发滚动重启即可；
+# 不配仅影响限流按容器 IP 计数，功能不受影响。
 ```
 
-**2026-09-17 建成时的状态**：CloudBase CLI 登录凭据已过期且重新登录需要人工
-浏览器授权，staging 反代只交付了源码与部署步骤，**尚未部署**。注意
-`useCloudContainer: true` 时开发者工具同样走云托管通道，所以反代部署前，
-在开发者工具里测 staging 需要把 `config.ts` 的 `useCloudContainer` 临时改为
-`false`（devtools 已设 `urlCheck: false`，`wx.request` 直连
-`staging.map.shutf.com` 不受白名单限制）；反代部署后改回 `true` 即可全通道测。
-真机体验版在反代部署前无法使用 staging（请求会打到不存在的
-`shumap-api-staging` 服务而失败）。
+**2026-09-25 状态**：staging 反代 `shumap-api-staging` **已部署**（默认域名
+`https://shumap-api-staging-4227820-1465143788.ap-shanghai.run.tcloudbase.com`，
+`/healthz`、API 与 SVG 透传、content-encoding 剥离均已验证）。`PROXY_SHARED_SECRET`
+尚未配置——不配也能跑，Worker 只是退回按容器出口 IP 限流；要按人分桶就在控制台给
+该服务配环境变量（值 = staging worker 的 `MINIPROGRAM_PROXY_SECRET`），保存触发滚动
+重启。`useCloudContainer: true` 下 devtools 与真机/体验版现在都能直接测 staging。
 
 ## 哪些操作只能在 staging 做
 
