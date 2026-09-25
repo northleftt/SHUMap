@@ -52,8 +52,8 @@ function ReadyDiningPage({ release }: { release: LoadedRelease }) {
   return (
     <div className="flex h-full flex-col bg-page">
       <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
-        <header className="flex items-center justify-between gap-3 bg-surface px-4 pb-3 pt-4">
-          <h1 className="text-card">校内外就餐</h1>
+        <header className="flex items-end justify-between px-5 pb-3 pt-6">
+          <h1 className="text-title">校内外就餐</h1>
           <div className="flex shrink-0 overflow-hidden rounded-full bg-page p-0.5">
             {(
               [
