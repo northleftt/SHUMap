@@ -16,6 +16,7 @@
   </view>
 
   <scroll-view scroll-x class="floor-bar" wx:if="{{ready}}">
+    <view class="floor-pill {{activeFloorId === 'all' ? 'floor-pill-active' : ''}}" data-id="all" bindtap="switchFloorRow">全部楼层</view>
     <view
       wx:for="{{floors}}"
       wx:key="id"

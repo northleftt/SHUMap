@@ -121,3 +121,9 @@ test('noBreakfast arrangement removes breakfast times from the detail meal card 
     assert.equal(view.floor.mealRows.find(row => row.meal === 'lunner').served, true);
   }
 });
+
+test('missing weekend arrangement keeps detail status unknown, while a closed place remains resting', () => {
+  const missing = { ...schedule, dayType: 'weekend', arrangement: null };
+  assert.equal(diningView([canteen], missing, {}, 700, null, 'c1').floor.statusText, '');
+  assert.equal(diningView([{...canteen, closed: true}], missing, {}, 700, null, 'c1').floor.statusText, '今日休息');
+});

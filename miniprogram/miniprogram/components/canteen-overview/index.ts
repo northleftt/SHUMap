@@ -38,6 +38,6 @@ Component({
     },
     openFloor(e: any) { const floor = e.currentTarget.dataset.floor; wx.navigateTo({ url: `/pages/dining/dining?placeId=${encodeURIComponent(this.data.placeId)}${floor ? `&floor=${encodeURIComponent(floor)}` : ""}` }); },
     openMerchant(e: any) { this.triggerEvent("merchant", { id: e.currentTarget.dataset.id }); },
-    openFacilities() { wx.navigateTo({ url: `/pages/floors/floors?placeId=${encodeURIComponent(this.data.placeId)}` }); },
+    openFacilities() { wx.navigateTo({ url: `/pages/floors/floors?placeId=${encodeURIComponent(this.data.placeId)}&floor=all` }); },
   },
 });

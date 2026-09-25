@@ -147,7 +147,7 @@ Page({
       const floorRows = loaded.manifest.floors
         .filter((floor) => floor.buildingPlaceId === poi.entityId && floor.isPublic !== 0)
         .sort((left, right) => left.levelOrder - right.levelOrder);
-      if (!floorRows.length) throw new Error("该楼宇暂无公开的楼层信息");
+      if (!floorRows.length && !poi.facilities.length) throw new Error("该楼宇暂无公开的楼层信息");
 
       this.loadedRelease = loaded;
       this.poi = poi;
@@ -165,7 +165,7 @@ Page({
       // 深链指定的楼层优先（转发卡片带 ?floor=），匹配不上回落 levelOrder 最小的层
       const pendingFloor = this.pendingFloorId;
       this.pendingFloorId = "";
-      const target = pendingFloor && floorRows.some((floor) => floor.id === pendingFloor)
+      const target = pendingFloor === "all" || !floorRows.length ? "all" : pendingFloor && floorRows.some((floor) => floor.id === pendingFloor)
         ? pendingFloor
         : floorRows[0].id;
       await this.setupFloor(target);
@@ -180,6 +180,17 @@ Page({
   /** 切层装配：图纸 URL（如有）、列表数据，一次切完。 */
   async setupFloor(floorId: string) {
     const poi = this.poi;
+    if (poi && floorId === "all") {
+      this.planRequest++;
+      removeLocalAsset(this.planFile); this.planFile = "";
+      this.setData({ loading: false, ready: true, errorMessage: "", activeFloorId: "all", hasPlan: false, view: "list", planImageUrl: "", planLoading: false, planError: false, floorMedia: [], floorNote: "",
+        floorFacilities: poi.facilities.map(facility => ({ id: facility.id, name: facility.displayName, typeName: facility.typeName,
+          location: [this.floorRows.find(row => row.id === facility.floorId)?.displayName || "楼层待完善", typeof facility.content.locationDescription === "string" ? facility.content.locationDescription : ""].filter(Boolean).join(" · "),
+          statusLabel: facilityStatusLabel(facility.operationalStatus),
+        })),
+      });
+      this.updateReport(); return;
+    }
     const floor = this.floorRows.find((item) => item.id === floorId);
     if (!poi || !floor) return;
 
