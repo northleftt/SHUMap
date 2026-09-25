@@ -52,7 +52,7 @@ function ReadyDiningPage({ release }: { release: LoadedRelease }) {
     <div className="flex h-full flex-col bg-page">
       <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
         <header className="flex items-end justify-between px-5 pb-3 pt-6">
-          <h1 className="text-title">校内外就餐</h1>
+          <h1 className="text-title">校内就餐</h1>
         </header>
 
         {/* 校外就餐与校内/校外 switch 先下线，需要时再开（git 历史里有完整实现）。 */}
