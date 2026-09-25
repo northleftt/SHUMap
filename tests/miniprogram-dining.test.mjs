@@ -110,3 +110,20 @@ test('hidden page ignores late live responses and midnight clears yesterday whil
   await work;
   assert.equal(page.schedule, null);
 });
+
+test('noBreakfast arrangement removes breakfast times from the detail meal card for all day types', () => {
+  for (const dayType of ['weekday', 'weekend']) {
+    const view = diningView([canteen], { ...schedule, dayType, arrangement: { scheduleId: 's', floors: [{ floorId: 'f1', noBreakfast: true }] } }, {}, 480, null, 'c1');
+    const breakfast = view.floor.mealRows.find(row => row.meal === 'breakfast');
+    assert.equal(breakfast.served, false);
+    assert.equal(breakfast.unavailableText, '今日不供应');
+    assert.equal(breakfast.times, '');
+    assert.equal(view.floor.mealRows.find(row => row.meal === 'lunner').served, true);
+  }
+});
+
+test('missing weekend arrangement keeps detail status unknown, while a closed place remains resting', () => {
+  const missing = { ...schedule, dayType: 'weekend', arrangement: null };
+  assert.equal(diningView([canteen], missing, {}, 700, null, 'c1').floor.statusText, '');
+  assert.equal(diningView([{...canteen, closed: true}], missing, {}, 700, null, 'c1').floor.statusText, '今日休息');
+});

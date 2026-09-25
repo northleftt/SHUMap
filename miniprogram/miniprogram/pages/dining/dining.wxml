@@ -18,8 +18,13 @@
           <view class="row"><view class="heading grow">{{floor.shortLabel}} · {{floor.displayName}}</view><text class="muted">{{floor.statusText}}</text></view>
           <view wx:for="{{floor.mealRows}}" wx:key="meal" class="meal-row {{item.served ? '' : 'unserved'}}">
             <image class="icon" src="/images/sheet/{{item.icon}}.png" />
-            <view class="meal-name">{{item.label}}</view><view class="grow muted">{{item.served ? floor.stallText : '不供应'}}</view><view class="meal-times">{{item.times}}</view>
+            <view class="meal-name">{{item.label}}</view><view class="grow muted">{{item.served ? floor.stallText : item.unavailableText}}</view><view class="meal-times">{{item.times}}</view>
           </view>
+        </view>
+        <view wx:if="{{facilities.length}}" class="card padded">
+          <view class="row"><view class="heading grow">本层设施</view><text wx:if="{{floor.imageUrl}}" class="phone muted" bindtap="openFloorPlan">查看平面图 ›</text></view>
+          <view wx:if="{{facilityError}}" class="error" bindtap="retry">{{facilityError}}</view>
+          <view wx:for="{{facilities}}" wx:key="id" class="facility-row row"><image class="icon" src="/images/poi/{{item.icon}}.png"/><view class="grow"><view class="floor-name">{{item.name}}</view><view wx:if="{{item.location}}" class="muted">{{item.location}}</view></view><text class="facility-status">{{item.statusLabel}}</text></view>
         </view>
         <view wx:if="{{floor.merchants.length}}" class="card padded">
           <view class="heading">本层商家 ({{floor.merchants.length}})</view>

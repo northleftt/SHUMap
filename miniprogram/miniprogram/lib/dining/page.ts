@@ -6,6 +6,9 @@ import { campusKeyForGcj02Point } from "../map/user-location";
 import { mediaExtension, removeLocalAsset, writeLocalBinaryAsset } from "../local-assets";
 import { APP_SHARE_TITLE, enableShareMenus, sharePath } from "../share";
 import { DAY_TYPE_LABELS, parseDiningScheduleResponse, parseMerchantStatusResponse, periodBarText, shanghaiMinutes, shanghaiToday } from "./schedule";
+import { diningFacilities } from "./facilities";
+import { fetchFacilityStatuses } from "./live";
+import { facilityIconName } from "../map/poiIcons";
 import { canteensOf, diningView } from "./view";
 
 /** 列表与详情共享刷新、错误降级和页面生命周期，实时状态不落 release 缓存。 */
@@ -15,7 +18,7 @@ export function diningPage(detail: boolean): any {
       statusBarHeight: 0, loading: true, error: "", scheduleError: "", merchantError: "",
       periodText: "正在加载就餐时段…", arrangementText: "", groups: [], canteen: null,
       floor: null, floorTabs: [], noArrangement: false, wholeDayRest: false, alternatives: [],
-      photos: [], merchantPhotos: [], mediaError: false, openMerchantId: "",
+      facilities: [], facilityError: "", photos: [], merchantPhotos: [], mediaError: false, openMerchantId: "",
     },
     onLoad(query: Record<string, string>) {
       enableShareMenus();
@@ -25,6 +28,8 @@ export function diningPage(detail: boolean): any {
       this.schedule = null;
       this.statuses = {};
       this.located = null;
+      this.facilities = [];
+      this.facilityStatuses = null;
       this.assetCache = new Map();
       this.mediaFiles = new Set();
       this.assetPrefix = `dining-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -53,6 +58,7 @@ export function diningPage(detail: boolean): any {
         const release = await loadReleaseWithCache();
         if (!this.visible || generation !== this.generation) return;
         this.canteens = canteensOf(release);
+        this.facilities = release.pois.find(p => p.entityType === "building" && p.entityId === this.placeId)?.facilities || [];
         this.geoBounds = release.campuses.map(c => ({ key: c.key, geoTransform: c.geoTransform, viewBox: parseSvgViewBox(c.svgRaw) }));
         this.setData({ loading: false });
         this.render();
@@ -67,6 +73,15 @@ export function diningPage(detail: boolean): any {
       if (this.schedule && this.schedule.date !== date) { this.schedule = null; this.render(); }
       const current = () => this.visible && generation === this.generation;
       await Promise.all([
+        ...(detail ? [fetchFacilityStatuses().then(statuses => {
+          if (!current()) return;
+          this.facilityStatuses = statuses;
+          this.setData({ facilityError: "" }); this.render();
+        }).catch(() => {
+          if (!current()) return;
+          this.facilityStatuses = null;
+          this.setData({ facilityError: "设施状态加载失败，点击重试" }); this.render();
+        })] : []),
         apiGet("/api/public/dining/schedule", { date }).then(parseDiningScheduleResponse).then(schedule => {
           if (!current()) return;
           this.schedule = schedule;
@@ -102,6 +117,7 @@ export function diningPage(detail: boolean): any {
     render() {
       const view = diningView(this.canteens, this.schedule, this.statuses, shanghaiMinutes(), this.located, this.placeId, this.floorId);
       this.setData({ ...view,
+        facilities: view.floor ? diningFacilities(this.facilities || [], view.canteen?.floors || [], this.facilityStatuses, view.floor.floorId).map(row => ({ ...row, icon: facilityIconName(row.typeCode) })) : [],
         periodText: this.schedule ? periodBarText(this.schedule, shanghaiMinutes()) : "",
         arrangementText: this.schedule?.arrangement && !view.wholeDayRest ? `${DAY_TYPE_LABELS[this.schedule.dayType]}仅部分楼层开放，请以各楼层标注为准` : "",
       });
@@ -113,13 +129,11 @@ export function diningPage(detail: boolean): any {
     },
     retry() { void this.load(); },
     switchFloor(e: any) {
-      if (this.data.wholeDayRest) return;
       this.floorId = e.currentTarget.dataset.id;
       this.setData({ openMerchantId: "", photos: [], merchantPhotos: [] });
       this.render();
     },
     toggleMerchant(e: any) {
-      if (this.data.wholeDayRest) return;
       const id = e.currentTarget.dataset.id;
       this.setData({ openMerchantId: this.data.openMerchantId === id ? "" : id, merchantPhotos: [] });
       void this.loadImages();
@@ -149,13 +163,15 @@ export function diningPage(detail: boolean): any {
       this.setData({ photos, merchantPhotos, mediaError: [...photos, ...merchantPhotos].some(p => !p.url) });
     },
     previewImage(e: any) {
-      if (this.data.wholeDayRest) return;
       const rows = e.currentTarget.dataset.merchant ? this.data.merchantPhotos : this.data.photos;
       const urls = rows.map((row: any) => row.url).filter(Boolean);
       if (urls.length) wx.previewImage({ current: e.currentTarget.dataset.url, urls });
     },
+    openFloorPlan() {
+      if (this.data.floor?.imageUrl) wx.navigateTo({ url: `/pages/floors/floors?placeId=${encodeURIComponent(this.placeId)}&floor=${encodeURIComponent(this.floorId)}` });
+    },
     callPhone(e: any) {
-      if (e.currentTarget.dataset.label === "联系电话" && !this.data.wholeDayRest) wx.makePhoneCall({ phoneNumber: e.currentTarget.dataset.value.replace(/[^\d-]/g, "") });
+      if (e.currentTarget.dataset.label === "联系电话") wx.makePhoneCall({ phoneNumber: e.currentTarget.dataset.value.replace(/[^\d-]/g, "") });
     },
     openDetail(e: any) {
       const { place, floor } = e.currentTarget.dataset;

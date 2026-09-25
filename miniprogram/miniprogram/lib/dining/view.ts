@@ -8,7 +8,8 @@ export function canteensOf(release: LoadedRelease): CanteenView[] {
 }
 
 export function floorView(canteen: CanteenView, floor: DiningFloorView, schedule: DiningScheduleResponse | null, statuses: MerchantStatusResponse["statuses"], nowMinutes: number) {
-  const status = schedule ? floorOpenStatus({ ...schedule, periods: schedule.mealPeriods, floorId: floor.floorId, meals: floor.meals, nowMinutes, placeClosed: canteen.closed }) : null;
+  const status = schedule && (canteen.closed || schedule.dayType === "weekday" || schedule.arrangement) ? floorOpenStatus({ ...schedule, periods: schedule.mealPeriods, floorId: floor.floorId, meals: floor.meals, nowMinutes, placeClosed: canteen.closed }) : null;
+  const noBreakfast = Boolean(schedule?.arrangement?.floors.find(row => row.floorId === floor.floorId)?.noBreakfast);
   return {
     ...floor,
     shortLabel: levelShortLabel(floor.levelCode),
@@ -26,9 +27,10 @@ export function floorView(canteen: CanteenView, floor: DiningFloorView, schedule
       ].filter(fact => fact.value.trim()),
     })),
     mealRows: (["breakfast", "lunner", "latenight"] as const).map(meal => ({
-      meal, label: MEAL_LABELS[meal], served: floor.meals.includes(meal),
+      meal, label: MEAL_LABELS[meal], served: floor.meals.includes(meal) && !(meal === "breakfast" && noBreakfast),
+      unavailableText: meal === "breakfast" && noBreakfast ? "今日不供应" : "不供应",
       icon: meal === "breakfast" ? "sunrise" : meal === "lunner" ? "sun" : "moon",
-      times: floor.meals.includes(meal) ? (schedule?.mealPeriods || []).filter(period => period.meal === meal).map(period => `${period.startTime}–${period.endTime}`).join(" · ") : "",
+      times: floor.meals.includes(meal) && !(meal === "breakfast" && noBreakfast) ? (schedule?.mealPeriods || []).filter(period => period.meal === meal).map(period => `${period.startTime}–${period.endTime}`).join(" · ") : "",
     })),
     photos: [
       ...(floor.imageUrl ? [{ sourceUrl: floor.imageUrl, label: "平面图" }] : []),

@@ -110,7 +110,7 @@ export function MapPage() {
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [state.releaseStatus]);
 
   useEffect(() => {
     if (!isMobile) return;
@@ -409,7 +409,7 @@ export function MapPage() {
             {isMobile ? (
               <CampusSwitcher campuses={state.campuses} selectedCampus={state.selectedCampus} onSelect={state.resetForCampus} />
             ) : null}
-            <GuideBanner />
+            {!isMobile || (state.sheetMode !== "poi" && state.sheetMode !== "results") ? <GuideBanner /> : null}
           </div>
           <div className="flex flex-col items-end gap-2">
             <button

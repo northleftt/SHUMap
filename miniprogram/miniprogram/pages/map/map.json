@@ -4,6 +4,7 @@
   "renderer": "skyline",
   "disableScroll": true,
   "usingComponents": {
-    "feature-feedback": "/components/feature-feedback/index"
+    "feature-feedback": "/components/feature-feedback/index",
+    "canteen-overview": "/components/canteen-overview/index"
   }
 }

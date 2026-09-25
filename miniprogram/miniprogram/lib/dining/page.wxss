@@ -39,7 +39,7 @@ page { background: #f5f6f8; color: #0f172a; font-size: 15px; }
 .meal-name { font-weight: 600; flex-shrink: 0; }
 .meal-times { font-size: 11px; color: #64748b; max-width: 104px; text-align: right; }
 .unserved { opacity: .4; }
-.resting { opacity: .5; pointer-events: none; }
+.resting { opacity: .5; }
 .merchant-row { padding: 14px 0; }
 .fact-row { padding: 10px 0; border-top: 1px solid #e8ebef; }
 .fact-value { max-width: 65%; text-align: right; overflow-wrap: break-word; }
@@ -48,3 +48,6 @@ page { background: #f5f6f8; color: #0f172a; font-size: 15px; }
 .photo-strip { white-space: nowrap; margin-top: 12px; }
 .photo-item { display: inline-block; margin-right: 8px; text-align: center; }
 .photo { width: 160px; height: 112px; border-radius: 12px; }
+
+.facility-row { padding: 12px 0; align-items: flex-start; }
+.facility-status { color: #a16207; font-size: 12px; }

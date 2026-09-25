@@ -1,6 +1,6 @@
 import { LayoutList, Map as MapIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { FloorImageViewer } from "../../components/map/FloorImageViewer";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
@@ -146,9 +146,10 @@ export function FloorsPage() {
 }
 
 function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; placeId: string }) {
-  const [activeFloorId, setActiveFloorId] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const [activeFloorId, setActiveFloorId] = useState<string | null>(searchParams.get("floor"));
   const [activeType, setActiveType] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [viewMode, setViewMode] = useState<ViewMode>(searchParams.get("view") === "plan" ? "plan" : "list");
   usePageView("floors");
   // 运营状态盖在快照基线上，读取失败时在列表上方明确提示。
   const facilityStatus = useFacilityStatus();
@@ -168,8 +169,9 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
     return map;
   }, [floors]);
 
+  const allFloors = activeFloorId === "all";
   // 默认选中一层（levelOrder 最小且非地下）
-  const selectedFloorId = activeFloorId ?? floors[0]?.id ?? null;
+  const selectedFloorId = allFloors ? null : floors.some(floor => floor.id === activeFloorId) ? activeFloorId : floors[0]?.id ?? null;
   const floorImageUrl = selectedFloorId ? imageByFloor.get(selectedFloorId) ?? null : null;
   // 该楼层无平面图 → 平面图入口隐藏，内容回退列表版。
   const effectiveMode: ViewMode = floorImageUrl ? viewMode : "list";
@@ -247,8 +249,9 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
 
         <div className={effectiveMode === "plan" ? "flex min-h-0 flex-1 flex-col" : "flex-1 overflow-y-auto pb-6"}>
           {/* 楼层切换 pills */}
-          {floors.length > 1 ? (
+          {floors.length > 0 ? (
             <div className="scrollbar-hidden flex shrink-0 gap-2 overflow-x-auto px-4 pt-3">
+              <button type="button" onClick={() => switchFloor("all")} className={`h-11 shrink-0 rounded-xl px-3 text-body font-semibold ${allFloors ? "bg-primary text-white" : "bg-surface text-ink"}`}>全部楼层</button>
               {floors.map((floor) => {
                 const active = floor.id === selectedFloorId;
                 return (
@@ -376,8 +379,8 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                             </span>
                           ) : null}
                         </div>
-                        {locationDescription(facility) ? (
-                          <div className="mt-0.5 truncate text-aux text-sub">{locationDescription(facility)}</div>
+                        {allFloors || locationDescription(facility) ? (
+                          <div className="mt-0.5 truncate text-aux text-sub">{[allFloors ? floors.find(f => f.id === facility.floorId)?.displayName || "楼层待完善" : "", locationDescription(facility)].filter(Boolean).join(" · ")}</div>
                         ) : null}
                       </div>
                       <span className="text-sub">›</span>

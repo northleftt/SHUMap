@@ -28,6 +28,9 @@ import { useRelease } from "../../lib/release/ReleaseContext";
 import type { LoadedRelease } from "../../lib/release/mapData";
 import type { MerchantSummary } from "../../lib/types";
 
+import { DiningFacilities } from "../../components/dining/DiningFacilities";
+import { useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
+
 const MEAL_ICONS: Record<DiningMeal, typeof Sunrise> = {
   breakfast: Sunrise,
   lunner: Sun,
@@ -69,6 +72,7 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
   usePageView("canteen_dining");
   const scheduleState = useDiningSchedule();
   const merchantStatus = useMerchantStatus();
+  const facilitiesState = useFacilityStatus();
   const [searchParams] = useSearchParams();
   const [activeFloorId, setActiveFloorId] = useState<string | null>(searchParams.get("floor"));
   const [openMerchantId, setOpenMerchantId] = useState<string | null>(null);
@@ -108,6 +112,7 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
     ? activeFloorId
     : canteen.floors[0]?.floorId ?? null;
   const selectedFloor = canteen.floors.find((floor) => floor.floorId === selectedFloorId) ?? null;
+  const facilities = release.pois.find(poi => poi.entityId === placeId && poi.entityType === "building")?.facilities ?? [];
 
   function switchFloor(floorId: string) {
     setActiveFloorId(floorId);
@@ -182,8 +187,8 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
             </div>
           ) : null}
 
-          {/* 整楼休息态：主体灰化，仅保留引导列表可点 */}
-          <div className={wholeDayRest ? "pointer-events-none opacity-50 grayscale" : undefined}>
+          {/* 整楼休息态：主体灰化，设施、楼层资料和图片仍可查看 */}
+          <div className={wholeDayRest ? "opacity-50 grayscale" : undefined}>
             {/* 楼层 pills（与 FloorsPage 同式） */}
             {canteen.floors.length > 1 ? (
               <div className="scrollbar-hidden flex shrink-0 gap-2 overflow-x-auto px-4 pt-3">
@@ -213,6 +218,9 @@ function ReadyCanteenDiningPage({ release, placeId }: { release: LoadedRelease; 
                   nowMinutes={nowMinutes}
                   schedule={schedule}
                 />
+                {facilities.some(facility => facility.floorId === selectedFloor.floorId) ? <div className="mx-4 rounded-2xl bg-surface px-4 pb-1">
+                  <DiningFacilities facilities={facilities} floors={canteen.floors} floorId={selectedFloor.floorId} placeId={placeId} statuses={facilitiesState.status === "ready" ? facilitiesState.statuses : null} loading={facilitiesState.status === "loading"} error={facilitiesState.status === "error" ? facilitiesState.message : undefined} hasPlan={Boolean(selectedFloor.imageUrl)} iconKeyByTypeCode={new Map(release.manifest.facilityTypes.map(type => [type.code, type.iconKey]))} />
+                </div> : null}
                 <FloorMerchants
                   floor={selectedFloor}
                   merchantStatus={merchantStatus}
@@ -271,7 +279,7 @@ function FloorMealCard({
   schedule: DiningScheduleResponse | null;
   nowMinutes: number;
 }) {
-  const status = schedule
+  const status = schedule && (canteen.closed || schedule.dayType === "weekday" || schedule.arrangement)
     ? floorOpenStatus({
       dayType: schedule.dayType,
       arrangement: schedule.arrangement,
@@ -301,7 +309,9 @@ function FloorMealCard({
       </div>
       <div className="mt-2 divide-y divide-line">
         {MEAL_ORDER.map((meal) => {
-          const served = floor.meals.includes(meal);
+          const noBreakfast = meal === "breakfast"
+            && Boolean(schedule?.arrangement?.floors.find(row => row.floorId === floor.floorId)?.noBreakfast);
+          const served = floor.meals.includes(meal) && !noBreakfast;
           const Icon = MEAL_ICONS[meal];
           const periods = periodsByMeal.get(meal) ?? [];
           return (
@@ -309,7 +319,7 @@ function FloorMealCard({
               <Icon className="shrink-0 text-primary" size={18} />
               <span className="shrink-0 text-body font-semibold text-ink">{MEAL_LABELS[meal]}</span>
               <span className="min-w-0 flex-1 truncate text-aux text-sub">
-                {served ? floor.stallTypes.join(" · ") : "不供应"}
+                {served ? floor.stallTypes.join(" · ") : noBreakfast ? "今日不供应" : "不供应"}
               </span>
               <span className="shrink-0 text-[11px] text-sub">
                 {served ? periods.map((period) => `${period.startTime}–${period.endTime}`).join(" · ") : ""}
