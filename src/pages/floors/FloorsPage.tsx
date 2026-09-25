@@ -7,6 +7,7 @@ import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { ImagePreview } from "../../components/ui/ImagePreview";
 import type { PublicPlaceFacility, PublicPlaceFloor, ReleaseManifest } from "../../lib/api/types";
+import { useBreakpoint } from "../../lib/hooks/useBreakpoint";
 import { usePageView } from "../../lib/analytics";
 import { facilityDotColor } from "../../lib/facilityIcons";
 import { facilityStatusLabel, resolveFacilityStatus, useFacilityStatus } from "../../lib/hooks/useFacilityStatus";
@@ -146,6 +147,7 @@ export function FloorsPage() {
 }
 
 function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; placeId: string }) {
+  const wide = useBreakpoint() === "desktop";
   const [searchParams] = useSearchParams();
   const [activeFloorId, setActiveFloorId] = useState<string | null>(searchParams.get("floor"));
   const [activeType, setActiveType] = useState<string | null>(null);
@@ -215,12 +217,12 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
 
   return (
     <div className="flex h-full flex-col bg-page">
-      <div className="mx-auto flex h-full w-full max-w-[780px] flex-col">
+      <div className="mx-auto flex h-full w-full max-w-[780px] flex-col lg:max-w-none">
         <PageHeader
           title={`${place.displayName} · 楼层设施`}
           subtitle={floors.length > 0 ? `${kindLabel} · 共 ${floors.length} 层` : kindLabel}
           right={
-            floorImageUrl ? (
+            floorImageUrl && !wide ? (
               <div className="flex shrink-0 overflow-hidden rounded-full bg-page p-0.5">
                 {(
                   [
@@ -246,7 +248,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           }
         />
 
-        <div className={effectiveMode === "plan" ? "flex min-h-0 flex-1 flex-col" : "flex-1 overflow-y-auto pb-6"}>
+        <div className={wide || effectiveMode === "plan" ? "flex min-h-0 flex-1 flex-col" : "min-h-0 flex-1 overflow-y-auto pb-6"}>
           {/* 楼层切换 pills */}
           {floors.length > 1 ? (
             <div className="scrollbar-hidden flex shrink-0 gap-2 overflow-x-auto px-4 pt-3">
@@ -256,7 +258,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                   <button
                     key={floor.id}
                     type="button"
-                    className={`relative grid h-11 w-11 shrink-0 place-items-center rounded-xl text-body font-semibold ${
+                    className={`relative grid h-11 min-w-11 shrink-0 place-items-center whitespace-nowrap rounded-xl px-3 text-body font-semibold ${
                       active ? "bg-primary text-white" : "bg-surface text-ink active:bg-line"
                     }`}
                     onClick={() => switchFloor(floor.id)}
@@ -284,7 +286,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           ) : facilityStatus.status === "loading" && facilities.length > 0 ? (
             <div className="mx-4 mt-3 rounded-2xl bg-page px-4 py-3 text-aux text-sub">正在加载设施实时状态…</div>
           ) : null}
-          {notes && effectiveMode === "list" ? (
+          {notes && (wide || effectiveMode === "list") ? (
             <div className="mx-4 mt-3 rounded-2xl bg-primary-container px-4 py-3.5">
               <div className="text-label text-sub">信息提示</div>
               <div className="mt-1 whitespace-pre-line text-body font-medium leading-relaxed text-primary">
@@ -294,7 +296,7 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
           ) : null}
 
           {/* 本层实拍（采集照片，仅列表版） */}
-          {effectiveMode === "list" && floorPhotos.length > 0 ? (
+          {!wide && effectiveMode === "list" && floorPhotos.length > 0 ? (
             <div className="scrollbar-hidden mt-3 flex gap-2 overflow-x-auto px-4">
               {floorPhotos.map((url, index) => (
                 <ImagePreview
@@ -328,16 +330,19 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
             </ChipRow>
           ) : null}
 
-          {effectiveMode === "plan" && floorImageUrl ? (
-            <div className="relative mx-4 mb-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-2xl bg-surface shadow-card">
+          <div data-testid="floor-workspace" className={wide ? `grid min-h-0 flex-1 gap-4 p-4 ${floorImageUrl ? "grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"}` : effectiveMode === "plan" ? "flex min-h-0 flex-1 flex-col" : ""}>
+          {(wide || effectiveMode === "plan") && floorImageUrl ? (
+            <div data-testid="floor-plan-pane" className="relative mx-4 mb-4 mt-3 min-h-0 flex-1 overflow-hidden rounded-2xl bg-surface shadow-card lg:m-0">
               <FloorImageViewer
                 alt={`${place.displayName}${selectedFloor ? ` · ${floorLabel(selectedFloor)}` : ""} 平面图`}
                 src={floorImageUrl}
               />
             </div>
-          ) : (
+          ) : null}
+          {wide || effectiveMode !== "plan" || !floorImageUrl ? (
             /* 设施列表 */
-            <div className="mx-4 mt-3 overflow-hidden rounded-2xl bg-surface shadow-card">
+            <div data-testid="floor-facility-pane" className="mx-4 mt-3 overflow-hidden rounded-2xl bg-surface shadow-card lg:m-0 lg:min-h-0 lg:overflow-y-auto">
+              {wide ? <h2 className="px-4 pb-1 pt-4 text-emphasis">{selectedFloor ? `${floorLabel(selectedFloor)} · 本层设施` : "楼层设施"}</h2> : null}
               {visibleFacilities.length === 0 ? (
                 <EmptyState
                   title="该楼层暂无设施信息"
@@ -386,8 +391,10 @@ function ReadyFloorsPage({ manifest, placeId }: { manifest: ReleaseManifest; pla
                   );
                 })
               )}
+              {wide && floorPhotos.length > 0 ? <section className="border-t border-line p-4"><h2 className="mb-3 text-emphasis">本层实拍</h2><div className="grid grid-cols-2 gap-2">{floorPhotos.map((url,index) => <ImagePreview key={url} src={url} alt={`本层实拍 ${index+1}`} buttonClassName="h-28 w-full rounded-xl" imageClassName="h-full w-full object-cover" />)}</div></section> : null}
             </div>
-          )}
+          ) : null}
+          </div>
         </div>
       </div>
     </div>

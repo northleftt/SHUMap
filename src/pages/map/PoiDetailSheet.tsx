@@ -189,11 +189,11 @@ export function PoiDetailSheet({
                   <Icon size={17} className="shrink-0 text-sub" />
                   <span className="flex-1 text-body text-ink">{fact.label}</span>
                   {isPhone && fact.value.trim() ? (
-                    <a className="text-body text-primary no-underline" href={`tel:${fact.value.replace(/[^\d-]/g, "")}`}>
+                    <a className="max-w-[65%] break-words text-right text-body text-primary no-underline" href={`tel:${fact.value.replace(/[^\d-]/g, "")}`}>
                       {fact.value}
                     </a>
                   ) : (
-                    <span className="text-body text-ink">{fact.value.trim() || "—"}</span>
+                    <span className="max-w-[65%] break-words text-right text-body text-ink">{fact.value.trim() || "—"}</span>
                   )}
                 </div>
               );
@@ -414,11 +414,11 @@ function MerchantDetailView({
                   <Icon size={17} className="shrink-0 text-sub" />
                   <span className="flex-1 text-body text-ink">{fact.label}</span>
                   {fact.label === "联系电话" ? (
-                    <a className="text-body text-primary no-underline" href={`tel:${fact.value.replace(/[^\d-]/g, "")}`}>
+                    <a className="max-w-[65%] break-words text-right text-body text-primary no-underline" href={`tel:${fact.value.replace(/[^\d-]/g, "")}`}>
                       {fact.value}
                     </a>
                   ) : (
-                    <span className="text-body text-ink">{fact.value}</span>
+                    <span className="max-w-[65%] break-words text-right text-body text-ink">{fact.value}</span>
                   )}
                 </div>
               );

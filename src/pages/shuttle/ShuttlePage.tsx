@@ -639,7 +639,7 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
 
   return (
     <div className="flex h-full justify-center gap-6 overflow-hidden bg-page">
-      <div className="flex h-full w-full max-w-[780px] flex-col overflow-hidden">
+      <div className="flex h-full min-w-0 w-full max-w-[780px] flex-col overflow-hidden">
         <header className="flex items-end justify-between px-5 pb-3 pt-6">
           <h1 className="text-title">校车时刻表</h1>
           <button
@@ -651,7 +651,8 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-5 pb-6">
+        {isDesktop ? <div className="shrink-0 px-5 pb-4"><FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" /></div> : null}
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">
         {/* 校区选择卡 */}
         <div className="rounded-2xl bg-surface px-4 py-3.5 shadow-card">
           <div className="flex items-center">
@@ -776,15 +777,15 @@ function ReadyShuttlePage({ release }: { release: LoadedRelease }) {
         )}
 
         {/* 功能评分入口：提交过或关掉一次就不再出现（见 FeatureFeedback）。 */}
-        <div className="mt-6">
-          <FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" />
+        <div className={isDesktop ? "hidden" : "mt-6"}>
+          {!isDesktop && <FeatureFeedback page="shuttle" prompt="你觉得校车查询好用吗？" />}
         </div>
         </div>
       </div>
 
       {/* D2 桌面端：常驻右侧预览卡（不用底部弹卡） */}
       {isDesktop && preview ? (
-        <aside className="w-[400px] shrink-0 overflow-y-auto py-6 pr-5">
+        <aside className="w-[320px] shrink-0 overflow-y-auto py-6 pr-5 xl:w-[400px]">
           <div className="rounded-3xl bg-surface pt-3 shadow-card">
             <TripPreviewContent
               selection={preview}

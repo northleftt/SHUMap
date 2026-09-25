@@ -2,7 +2,7 @@ import { Star, X } from "lucide-react";
 import { useState } from "react";
 import { submitFeatureFeedback } from "../../lib/api/public";
 import { useLocalStore } from "../../lib/storage/localStore";
-import { SheetModal } from "../ui/SheetModal";
+import { FeedbackDialog } from "./FeedbackDialog";
 
 /**
  * 「你觉得这个功能好用吗？」星级评分入口。
@@ -104,7 +104,7 @@ export function FeatureFeedback({
         </button>
       </div>
 
-      <SheetModal open={open} onClose={closeSheet} initialHeight={rating > 0 && rating <= LOW_RATING_THRESHOLD ? 0.5 : 0.38}>
+      <FeedbackDialog open={open} onClose={closeSheet} title={prompt} height={rating > 0 && rating <= LOW_RATING_THRESHOLD ? 0.5 : 0.38}>
         <div className="px-5 pb-6 pt-1">
           <h2 className="text-card text-ink">{prompt}</h2>
           {done ? (
@@ -160,7 +160,7 @@ export function FeatureFeedback({
             </>
           )}
         </div>
-      </SheetModal>
+      </FeedbackDialog>
     </>
   );
 }
