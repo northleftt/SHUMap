@@ -152,7 +152,7 @@ function readDiningFloors(value: unknown): DiningFloorRow[] {
   });
 }
 
-function parsePlaceEditorData(response: PlaceDetailResponse): PlaceEditorData {
+export function parsePlaceEditorData(response: PlaceDetailResponse): PlaceEditorData {
   const place = objectValue(response.place, "place");
   const structure = jsonObject(place.structure_json, "place_revisions.structure_json");
   const content = jsonObject(place.content_json, "place_revisions.content_json");
@@ -175,8 +175,12 @@ function parsePlaceEditorData(response: PlaceDetailResponse): PlaceEditorData {
       ),
     };
   }
-  const locations = arrayValue(structure.locations, "place_revisions.structure_json.locations")
-    .map((location, index) => locationDraftFromApi(objectValue(location, `place_revisions.structure_json.locations[${index}]`), index));
+  // 已审核修订中的位置是历史快照；导入地图后以当前有效绑定初始化下一次编辑。
+  // 草稿和待审核修订保留编辑者尚未应用的位置修改（包括主动清空）。
+  const pending = place.editorial_status === "draft" || place.editorial_status === "in_review";
+  const locationField = pending ? "place_revisions.structure_json.locations" : "locations";
+  const locations = arrayValue(pending ? structure.locations : response.locations, locationField)
+    .map((location, index) => locationDraftFromApi(objectValue(location, `${locationField}[${index}]`), index));
   return {
     response,
     lifecycleStatus: oneOf(place.lifecycle_status, "places.lifecycle_status", PLACE_LIFECYCLES),

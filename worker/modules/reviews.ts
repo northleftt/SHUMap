@@ -21,6 +21,7 @@ import { normalizeStoredSubmissionPayload } from "../lib/submission-contracts";
 import { audit } from "./audit";
 import { publicMediaPath } from "./media";
 import { planLocation } from "./locations";
+import { migrateRevisionFootprint } from "../lib/footprint-migration";
 
 const REVISION_CONFIG = {
   place: { table: "place_revisions", parentTable: "places", parentColumn: "place_id" },
@@ -40,9 +41,11 @@ async function validateStoredRevision(
   type: RevisionType,
   row: Record<string, unknown>,
   entityId: string,
+  migrateFootprint = false,
 ): Promise<ValidatedRevision> {
   if (type === "place") {
     const revision = normalizeStoredRevision("place", row);
+    if (migrateFootprint) await migrateRevisionFootprint(env, revision);
     await validatePlaceRevision(env, revision, entityId);
     return { type, revision };
   }
@@ -118,7 +121,7 @@ export async function reviewRevision(
   if (!row) throw new HttpError(404, "not_found", "Revision does not exist");
   if (row.editorial_status !== "in_review") throw new HttpError(409, "invalid_state", "Only revisions in review can be decided");
   const entityId = row[config.parentColumn] as string;
-  const revision = await validateStoredRevision(env, type, row, entityId);
+  const revision = await validateStoredRevision(env, type, row, entityId, decision === "approve");
   const nextStatus = decision === "approve" ? "approved" : "rejected";
   const now = isoNow();
   const statements = [
@@ -126,6 +129,15 @@ export async function reviewRevision(
       .bind(nextStatus, principal.userId, now, note, revisionId),
   ];
   if (decision === "approve") {
+    // Keep the approved snapshot/hash aligned with the migrated structure applied below.
+    if (revision.type === "place") {
+      const applied = revision.revision;
+      const structureJson = jsonString(applied.structure);
+      const contentJson = jsonString(applied.content);
+      const contentHash = await sha256(`${applied.displayName}\n${applied.summary ?? ""}\n${applied.description ?? ""}\n${contentJson}\n${structureJson}`);
+      statements.push(env.DB.prepare("update place_revisions set structure_json=?,content_hash=? where id=?")
+        .bind(structureJson, contentHash, revisionId));
+    }
     statements.push(
       env.DB.prepare(`update ${config.table} set editorial_status='superseded' where ${config.parentColumn}=? and editorial_status='draft' and id<>?`)
         .bind(entityId, revisionId),
