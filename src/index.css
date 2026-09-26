@@ -140,3 +140,6 @@ button:disabled {
   transform-box: fill-box;
   animation: event-pulse 1.8s ease-out infinite;
 }
+
+/* Inactive dining titles retain readable contrast without dimming independent merchants. */
+.text-dining-muted { color: #64748b; }

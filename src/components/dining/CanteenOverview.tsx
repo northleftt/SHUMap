@@ -35,12 +35,14 @@ export function CanteenOverview({ poi, onOpenMerchant, facilityStatuses, facilit
       {!floors.length && <p className="mt-3 text-aux text-sub">该食堂的楼层信息正在完善中</p>}
       <div className="mt-2 divide-y divide-line">
         {floors.map(floor => {
-          const status = schedule && (!noArrangement || canteen?.closed) ? floorStatusLabel(floorOpenStatus({ ...schedule, periods: schedule.mealPeriods, floorId: floor.floorId, meals: floor.meals, nowMinutes: shanghaiMinutes(now), placeClosed: Boolean(canteen?.closed) })) : null;
+          const openStatus = schedule && (!noArrangement || canteen?.closed) ? floorOpenStatus({ ...schedule, periods: schedule.mealPeriods, floorId: floor.floorId, meals: floor.meals, nowMinutes: shanghaiMinutes(now), placeClosed: Boolean(canteen?.closed) }) : null;
+          const status = openStatus ? floorStatusLabel(openStatus) : null;
+          const unavailable = openStatus !== null && openStatus.kind !== "open";
           return <div className="flex items-start gap-3 py-3" key={floor.floorId}>
-            <button type="button" onClick={() => openFloor(floor.floorId)} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary-container font-semibold text-primary" aria-label={`查看${floor.displayName}`}>{levelShortLabel(floor.levelCode)}</button>
+            <button type="button" onClick={() => openFloor(floor.floorId)} className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg font-semibold ${unavailable ? "bg-page text-dining-muted" : "bg-primary-container text-primary"}`} aria-label={`查看${floor.displayName}`}>{levelShortLabel(floor.levelCode)}</button>
             <div className="min-w-0 flex-1">
               <button type="button" className="w-full text-left" onClick={() => openFloor(floor.floorId)}>
-                <span className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1"><span className="text-body font-semibold">{floor.displayName}</span>{status && <span className="text-aux text-sub">{status}</span>}</span>
+                <span className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1"><span className={`text-body font-semibold ${unavailable ? "text-dining-muted" : ""}`}>{floor.displayName}</span>{status && <span className="text-aux text-sub">{status}</span>}</span>
                 {floor.stallTypes.length > 0 && <span className="mt-0.5 block break-words text-aux text-sub">{floor.stallTypes.join(" · ")}</span>}
               </button>
               <div className="mt-1.5 flex flex-wrap gap-1.5">{floor.merchants.map(m => <button key={m.id} type="button" onClick={() => onOpenMerchant(m.id)} className={`max-w-full break-words rounded-full px-2.5 py-1 text-left text-label ${closed(m.id) ? "bg-page text-sub line-through" : "bg-primary-container text-primary"}`}>{m.name}{m.openingHours ? ` ${m.openingHours}` : ""}</button>)}</div>

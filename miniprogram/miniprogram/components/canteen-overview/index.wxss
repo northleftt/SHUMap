@@ -19,3 +19,6 @@
 .other,.facility { padding: 12px 0; border-bottom: 1px solid #e8ebef; }
 .facility-icon { width: 32px; height: 32px; padding: 4px; background: #e8f1f8; border-radius: 50%; flex-shrink: 0; }
 .status { color: #a16207; font-size: 12px; }
+
+.name.dining-muted { color: #64748b; }
+.floor-label.dining-inactive { background: #f5f6f8; color: #64748b; }
