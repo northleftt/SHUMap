@@ -15,7 +15,7 @@
       <view class="group-heading">{{group.label}} <text wx:if="{{group.located}}" class="badge">当前</text></view>
       <view class="card" wx:for="{{group.canteens}}" wx:key="placeId" wx:for-item="canteen">
         <view class="card-head">
-          <view class="heading grow" data-place="{{canteen.placeId}}" bindtap="openDetail">{{canteen.name}}</view>
+          <view class="heading grow {{canteen.unavailable ? 'dining-muted' : ''}}" data-place="{{canteen.placeId}}" bindtap="openDetail">{{canteen.name}}</view>
           <view class="map-link" data-place="{{canteen.placeId}}" bindtap="openMap" aria-label="在地图上查看">
             <image src="/images/poi/map-pin.png" class="icon" />
           </view>
@@ -23,9 +23,9 @@
         </view>
         <view wx:if="{{!canteen.floors.length}}" class="floor-empty muted">该食堂的楼层信息正在完善中</view>
         <view class="floor-row" wx:for="{{canteen.floors}}" wx:key="floorId" wx:for-item="floor" data-place="{{canteen.placeId}}" data-floor="{{floor.floorId}}" bindtap="openDetail">
-          <view class="floor-label">{{floor.shortLabel}}</view>
+          <view class="floor-label {{floor.unavailable ? 'dining-inactive' : ''}}">{{floor.shortLabel}}</view>
           <view class="grow">
-            <view class="row"><text class="floor-name grow">{{floor.displayName}}</text><text class="muted">{{floor.statusText}}</text></view>
+            <view class="row"><text class="floor-name grow {{floor.unavailable ? 'dining-muted' : ''}}">{{floor.displayName}}</text><text class="muted">{{floor.statusText}}</text></view>
             <view wx:if="{{floor.stallText}}" class="muted">{{floor.stallText}}</view>
             <view class="chips"><text wx:for="{{floor.merchants}}" wx:key="id" class="chip {{item.closed ? 'closed' : ''}}">{{item.name}} {{item.openingHours}}</text></view>
           </view>

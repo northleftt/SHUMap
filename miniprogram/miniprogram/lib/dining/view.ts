@@ -14,6 +14,7 @@ export function floorView(canteen: CanteenView, floor: DiningFloorView, schedule
     ...floor,
     shortLabel: levelShortLabel(floor.levelCode),
     stallText: floor.stallTypes.join(" · "),
+    unavailable: status !== null && status.kind !== "open",
     statusText: status ? floorStatusLabel(status) || "" : "",
     merchants: floor.merchants.map(merchant => ({
       ...merchant,
@@ -48,7 +49,10 @@ export function diningView(canteens: CanteenView[], schedule: DiningScheduleResp
   return {
     noArrangement, wholeDayRest, canteen,
     groups: keys.map(key => ({ key, label: canteens.find(c => c.campusKey === key)!.campusLabel, located: key === located,
-      canteens: canteens.filter(c => c.campusKey === key).map(c => ({ ...c, floors: c.floors.map(f => floorView(c, f, schedule, statuses, nowMinutes)) })),
+      canteens: canteens.filter(c => c.campusKey === key).map(c => {
+        const floors = c.floors.map(f => floorView(c, f, schedule, statuses, nowMinutes));
+        return { ...c, floors, unavailable: c.closed || (floors.length > 0 && floors.every(f => f.unavailable)) };
+      }),
     })),
     floor: canteen && selected ? floorView(canteen, selected, schedule, statuses, nowMinutes) : null,
     floorTabs: (canteen?.floors || []).map(f => ({ id: f.floorId, label: levelShortLabel(f.levelCode), active: f.floorId === selected?.floorId })),

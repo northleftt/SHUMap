@@ -215,12 +215,16 @@ function CanteenCard({
   onOpenMap: (placeId: string) => void;
   onOpenDetail: (placeId: string, floorId?: string) => void;
 }) {
+  const unavailable = canteen.closed || (canteen.floors.length > 0 && canteen.floors.every(floor => {
+    const status = floorStatusOf(canteen, floor, scheduleState, nowMinutes);
+    return status !== null && status.kind !== "open";
+  }));
   return (
     <div className="overflow-hidden rounded-2xl bg-surface shadow-card">
       {/* 卡片头：食堂名 + 地图 pin + ›（本体点击进详情） */}
       <div className="flex items-center gap-1 pl-4 pr-2 pt-1">
         <button
-          className="min-w-0 flex-1 py-2.5 text-left text-emphasis text-ink active:text-primary"
+          className={`min-w-0 flex-1 py-2.5 text-left text-emphasis active:text-primary ${unavailable ? "text-dining-muted" : "text-ink"}`}
           onClick={() => onOpenDetail(canteen.placeId)}
           type="button"
         >
@@ -282,18 +286,19 @@ function FloorRow({
 }) {
   const status = floorStatusOf(canteen, floor, scheduleState, nowMinutes);
   const statusText = status ? floorStatusLabel(status) : null;
+  const unavailable = status !== null && status.kind !== "open";
   return (
     <button
       className="flex w-full items-start gap-3 px-4 py-2.5 text-left active:bg-page"
       onClick={() => onOpenDetail(canteen.placeId, floor.floorId)}
       type="button"
     >
-      <span className="grid h-9 w-10 shrink-0 place-items-center rounded-lg bg-primary-container text-body font-semibold text-primary">
+      <span className={`grid h-9 w-10 shrink-0 place-items-center rounded-lg text-body font-semibold ${unavailable ? "bg-page text-dining-muted" : "bg-primary-container text-primary"}`}>
         {levelShortLabel(floor.levelCode)}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
-          <span className="truncate text-body font-semibold text-ink">{floor.displayName}</span>
+          <span className={`truncate text-body font-semibold ${unavailable ? "text-dining-muted" : "text-ink"}`}>{floor.displayName}</span>
           {/* 右侧只标例外：正常营业不标注 */}
           {statusText ? <span className="shrink-0 text-aux text-sub">{statusText}</span> : null}
         </span>

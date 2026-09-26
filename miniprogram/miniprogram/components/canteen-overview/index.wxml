@@ -5,9 +5,9 @@
   <view wx:if="{{noArrangement}}" class="muted hint">今日暂无就餐安排信息</view>
   <view wx:if="{{!floors.length}}" class="muted hint">该食堂的楼层信息正在完善中</view>
   <view wx:for="{{floors}}" wx:key="floorId" wx:for-item="floor" class="floor-row">
-    <view class="floor-label" data-floor="{{floor.floorId}}" bindtap="openFloor">{{floor.shortLabel}}</view>
+    <view class="floor-label {{floor.unavailable ? 'dining-inactive' : ''}}" data-floor="{{floor.floorId}}" bindtap="openFloor">{{floor.shortLabel}}</view>
     <view class="grow">
-      <view data-floor="{{floor.floorId}}" bindtap="openFloor"><view class="row"><text class="name grow">{{floor.displayName}}</text><text class="muted">{{floor.statusText}}</text></view><view class="muted">{{floor.stallText}}</view></view>
+      <view data-floor="{{floor.floorId}}" bindtap="openFloor"><view class="row"><text class="name grow {{floor.unavailable ? 'dining-muted' : ''}}">{{floor.displayName}}</text><text class="muted">{{floor.statusText}}</text></view><view class="muted">{{floor.stallText}}</view></view>
       <view class="chips"><view wx:for="{{floor.merchants}}" wx:key="id" class="chip {{item.closed ? 'closed' : ''}}" data-id="{{item.id}}" catchtap="openMerchant">{{item.name}} {{item.openingHours}}</view></view>
     </view>
   </view>

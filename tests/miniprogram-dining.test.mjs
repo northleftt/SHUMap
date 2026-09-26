@@ -127,3 +127,22 @@ test('missing weekend arrangement keeps detail status unknown, while a closed pl
   assert.equal(diningView([canteen], missing, {}, 700, null, 'c1').floor.statusText, '');
   assert.equal(diningView([{...canteen, closed: true}], missing, {}, 700, null, 'c1').floor.statusText, '今日休息');
 });
+
+test('inactive dining floors dim independently of merchants; mixed and unknown canteens stay available', () => {
+  const merchant = { id: 'm1', name: '咖啡店', businessType: '咖啡', openingHours: '全天', phone: '', stallCode: '', avgPrice: '', media: [], menu: [] };
+  const c = { ...canteen, floors: [{ ...floor, merchants: [merchant] }, { ...floor, floorId: 'f2', meals: ['lunner'] }] };
+  const rows = (data, minutes, input = c) => diningView([input], data, {}, minutes, null).groups[0].canteens[0];
+  const early = rows(schedule, 300);
+  assert.equal(early.unavailable, true);
+  assert.ok(early.floors.every(f => f.unavailable));
+  assert.equal(early.floors[0].merchants[0].closed, false);
+  const breakfast = rows(schedule, 390);
+  assert.equal(breakfast.unavailable, false);
+  assert.deepEqual(breakfast.floors.map(f => f.unavailable), [false, true]);
+  assert.equal(rows(schedule, 1400).unavailable, true);
+  assert.equal(rows({ ...schedule, arrangement: { scheduleId: 's', floors: [] } }, 700).unavailable, true);
+  assert.equal(rows(null, 700).unavailable, false);
+  assert.equal(rows({ ...schedule, dayType: 'weekend' }, 700).unavailable, false);
+  assert.equal(rows(schedule, 700, { ...c, floors: [] }).unavailable, false);
+  assert.equal(rows(schedule, 700, { ...c, closed: true }).unavailable, true);
+});
