@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -15,12 +16,15 @@ if (upload.length > 1 || (upload.length === 1 && upload[0] !== "--upload-remote"
 }
 
 const seenKeys = new Set();
+const canonicalBytes = new Map();
 for (const entry of entries) {
   assertEntry(entry);
   if (seenKeys.has(entry.objectKey)) throw new Error(`Duplicate R2 object key: ${entry.objectKey}`);
   seenKeys.add(entry.objectKey);
   const source = path.join(root, entry.sourcePath);
-  const bytes = fs.readFileSync(source);
+  // Git on Windows can check out text SVGs with CRLF; asset checksums use LF.
+  const bytes = Buffer.from(fs.readFileSync(source, "utf8").replace(/\r\n/g, "\n"));
+  canonicalBytes.set(entry.key, bytes);
   const digest = crypto.createHash("sha256").update(bytes).digest("hex");
   if (bytes.byteLength !== entry.byteSize) {
     throw new Error(`${entry.sourcePath} has ${bytes.byteLength} bytes; expected ${entry.byteSize}`);
@@ -31,22 +35,33 @@ for (const entry of entries) {
 }
 
 if (upload[0] === "--upload-remote") {
-  for (const entry of entries) {
-    const result = spawnSync(
-      process.execPath,
-      [
-        path.join(root, "node_modules/wrangler/bin/wrangler.js"),
-        "r2", "object", "put", `shumap-assets/${entry.objectKey}`,
-        "--file", path.join(root, entry.sourcePath),
-        "--content-type", "image/svg+xml",
-        "--cache-control", "private, no-store",
-        "--remote",
-        "--force",
-      ],
-      { cwd: root, stdio: "inherit" },
-    );
-    if (result.error) throw result.error;
-    if (result.status !== 0) throw new Error(`Wrangler failed for ${entry.objectKey} with exit code ${result.status}`);
+  const uploadDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "shumap-canonical-"));
+  try {
+    for (const entry of entries) {
+      const uploadFile = path.join(uploadDirectory, `${entry.key}.svg`);
+      fs.writeFileSync(uploadFile, canonicalBytes.get(entry.key));
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            path.join(root, "node_modules/wrangler/bin/wrangler.js"),
+            "r2", "object", "put", `shumap-assets/${entry.objectKey}`,
+            "--file", uploadFile,
+            "--content-type", "image/svg+xml",
+            "--cache-control", "private, no-store",
+            "--remote",
+            "--force",
+          ],
+          { cwd: root, stdio: "inherit" },
+        );
+        if (result.error) throw result.error;
+        if (result.status !== 0) throw new Error(`Wrangler failed for ${entry.objectKey} with exit code ${result.status}`);
+      } finally {
+        fs.unlinkSync(uploadFile);
+      }
+    }
+  } finally {
+    fs.rmdirSync(uploadDirectory);
   }
 }
 

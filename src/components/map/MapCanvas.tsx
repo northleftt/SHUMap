@@ -273,6 +273,7 @@ export function MapCanvas({
   focusRequest,
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const gestureLayerRef = useRef<HTMLDivElement | null>(null);
   const svgHostRef = useRef<HTMLDivElement | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const featureIdBySourceElementId = useMemo(
@@ -337,6 +338,16 @@ export function MapCanvas({
       | null,
     dragged: false,
   });
+
+  // React 的 wheel 委托监听在浏览器中可能是 passive，无法阻止外层页面滚动。
+  // 在地图手势层注册非 passive 监听，缩放时只消费地图上的滚轮事件。
+  useEffect(() => {
+    const layer = gestureLayerRef.current;
+    if (!layer) return;
+    const preventPageScroll = (event: WheelEvent) => event.preventDefault();
+    layer.addEventListener("wheel", preventPageScroll, { passive: false });
+    return () => layer.removeEventListener("wheel", preventPageScroll);
+  }, []);
 
   useEffect(() => {
     featureIdBySourceElementIdRef.current = featureIdBySourceElementId;
@@ -805,6 +816,7 @@ export function MapCanvas({
   return (
     <div ref={containerRef} className="absolute inset-0 overflow-hidden bg-map-ground">
       <div
+        ref={gestureLayerRef}
         className="absolute inset-0 touch-none"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

@@ -7,6 +7,7 @@ import { parseSvgFeatures } from "../shared/svg-geometry.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const campusPlaces = JSON.parse(fs.readFileSync(path.join(root, "data/campus-buildings.picked.json"), "utf8"));
+const additionalCampusPlaces = JSON.parse(fs.readFileSync(path.join(root, "data/campus-buildings.additions.json"), "utf8"));
 const campusMapAssets = JSON.parse(fs.readFileSync(path.join(root, "data/campus-map-assets.json"), "utf8"));
 const shuttle = JSON.parse(fs.readFileSync(path.join(root, "data/shuttle-schedule.json"), "utf8"));
 const calendar = JSON.parse(fs.readFileSync(path.join(root, "data/academic-calendar.json"), "utf8"));
@@ -66,6 +67,9 @@ const stopId = (name) => `stop_${slug(name) || hash(name).slice(0, 12)}`;
 if (!Array.isArray(campusPlaces) || campusPlaces.length !== 121) {
   throw new Error("Campus place source must contain exactly 121 records");
 }
+if (!Array.isArray(additionalCampusPlaces) || additionalCampusPlaces.length !== 2) {
+  throw new Error("Additional campus place source must contain exactly 2 records");
+}
 if (!Array.isArray(calendar.academicYears) || calendar.academicYears.length !== 1
   || typeof calendar.academicYears[0]?.id !== "string" || !calendar.academicYears[0].id.trim()) {
   throw new Error("Academic calendar must declare exactly one identified academic year");
@@ -121,7 +125,8 @@ for (const [routeIndex, route] of shuttle.routes.entries()) {
 
 const featureGeometryTypes = new Map();
 for (const asset of campusMapAssets) {
-  const bytes = fs.readFileSync(path.join(root, asset.sourcePath));
+  // Windows checkout may convert LF to CRLF. The manifest hashes canonical LF bytes.
+  const bytes = Buffer.from(fs.readFileSync(path.join(root, asset.sourcePath), "utf8").replace(/\r\n/g, "\n"));
   if (bytes.byteLength !== asset.byteSize || hash(bytes) !== asset.sha256) {
     throw new Error(`Canonical map asset does not match its manifest: ${asset.sourcePath}`);
   }
@@ -141,9 +146,27 @@ const lines = [
   `insert or ignore into data_sources(id,source_type,title,url,reliability,metadata_json,created_at) values('source_academic_calendar','official','校历数据',null,'authoritative',${j({ source: "data/academic-calendar.json" })},${now});`,
 ];
 
+// 0011 固定了最初的 30 个嘉定图形。后来底图新增了 7 个 id，其中两栋楼需要
+// footprint 特性；全新数据库在历史迁移之后补齐这些图形，才能绑定新地点。
+const historicalJiadingFeatureIds = new Set(parseSvgFeatures(
+  fs.readFileSync(path.join(root, "地图/嘉定校区地图.svg"), "utf8"),
+).map((feature) => feature.sourceElementId));
+const jiadingAsset = campusMapAssets.find((asset) => asset.key === "jiading");
+if (!jiadingAsset) throw new Error("Missing canonical Jiading map asset");
+const addedPlaceBySvgId = new Map(additionalCampusPlaces.map((item) => [item.svgElementId, item]));
+for (const feature of parseSvgFeatures(fs.readFileSync(path.join(root, jiadingAsset.sourcePath), "utf8"))) {
+  if (historicalJiadingFeatureIds.has(feature.sourceElementId)) continue;
+  const place = addedPlaceBySvgId.get(feature.sourceElementId);
+  const placeId = place ? `place_jiading_${slug(feature.sourceElementId)}` : null;
+  const geometryJson = feature.geometry ? JSON.stringify(feature.geometry) : null;
+  lines.push(
+    `insert or ignore into map_features(id,map_version_id,stable_feature_key,source_element_id,feature_kind,geometry_json,bbox_json,shape_hash,label,metadata_json) values(${q(`map_feature_jiading_${feature.sourceElementId}`)},'map_version_campus_jiading',${q(placeId ? `place:${placeId}` : feature.stableKey)},${q(feature.sourceElementId)},${q(placeId ? "building_footprint" : "other")},${q(geometryJson)},${q(feature.bbox ? JSON.stringify(feature.bbox) : null)},${q(geometryJson ? hash(geometryJson) : null)},${q(feature.label)},${j({ sourceOrder: feature.order, ...(placeId ? { placeId } : {}) })});`,
+  );
+}
+
 const seenPlaceCodes = new Map();
 const seenSvgElements = new Set();
-for (const [index, item] of campusPlaces.entries()) {
+for (const [index, item] of [...campusPlaces, ...additionalCampusPlaces].entries()) {
   const campus = campusOf(item.campus);
   const kindId = kindOf(item.category);
   if (typeof item.svgElementId !== "string" || !item.svgElementId) {
@@ -176,7 +199,7 @@ for (const [index, item] of campusPlaces.entries()) {
   //
   // picked.json 里的 navigation 经纬度是早期随手标的（多在楼角/围墙上，不是入口），
   // 已由 scripts/generate_navigation_purge.mjs 从库里清除。种子若继续产出，
-  // 下次 db:seed:v2 会把 121 个锚点原样插回来（锚点 id 是 placeId 的确定性哈希、
+  // 下次 db:seed:v2 会把历史地点及新增地点的锚点原样插回来（锚点 id 是确定性的，
   // insert or ignore），而 structure_json 因 revision 已存在被跳过，
   // 两处就此长期不一致 —— 关系表有导航点、编辑器里没有。
   //

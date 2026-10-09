@@ -7,10 +7,18 @@ export type SubmissionTargetType =
 
 export type FeedbackType = "correction" | "new_place" | "shuttle" | "other";
 
+export interface FeedbackLocationReference {
+  placeId: string;
+  placeName: string;
+  campusLabel: string;
+}
+
 export interface FeedbackSubmissionPayload {
   submissionKind: "feedback";
   feedbackType: FeedbackType;
   description: string;
+  /** 新地点建议所选的现有地点，仅用作位置参考，不是反馈目标。 */
+  locationReference?: FeedbackLocationReference;
 }
 
 export interface CollectedFacility {

@@ -1,0 +1,20 @@
+[
+  {
+    "svgElementId": "waiyu_building",
+    "name": "数字系外语楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 数字系外语楼"
+    }
+  },
+  {
+    "svgElementId": "microelectronic_B_building",
+    "name": "微电子B楼",
+    "campus": "嘉定校区",
+    "category": "building",
+    "navigation": {
+      "address": "上海市嘉定区城中路20号 上海大学嘉定校区 微电子B楼"
+    }
+  }
+]

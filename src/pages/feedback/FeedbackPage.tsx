@@ -1,14 +1,17 @@
 import { ChevronRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { MapCanvas, type MapViewWindow } from "../../components/map/MapCanvas";
+import { MapPoiOverlay } from "../../components/map/MapPoiOverlay";
 import { Chip, ChipRow } from "../../components/ui/Chip";
 import { EmptyState, LoadingState } from "../../components/ui/EmptyState";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { PhotoPicker } from "../../components/ui/PhotoPicker";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { createSubmission } from "../../lib/api/public";
+import { ApiError } from "../../lib/api/client";
 import { recordAnalyticsEvent, usePageView } from "../../lib/analytics";
-import type { FeedbackType, SubmissionTargetType } from "../../../shared/submission-contract";
+import type { FeedbackSubmissionInput, FeedbackType, SubmissionTargetType } from "../../../shared/submission-contract";
 import {
   buildPlaceTargets,
   buildStopTargets,
@@ -67,6 +70,8 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   // （独立地点的 poiKey 带 place: 前缀，回查楼宇列表会漏）。
   const [selected, setSelected] = useState<FeedbackTargetResult | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<"map" | "list">("list");
+  const [viewWindow, setViewWindow] = useState<MapViewWindow | null>(null);
   const [campusKey, setCampusKey] = useState("");
   const [query, setQuery] = useState("");
   const [content, setContent] = useState("");
@@ -91,7 +96,7 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
   );
 
   const typeConfig = FEEDBACK_TYPES.find((item) => item.key === type)!;
-  const targetRequired = type !== "new_place";
+  const isNewPlace = type === "new_place";
   const isStop = type === "shuttle";
   const options = isStop ? stopTargets : placeTargets;
   const campusOptions = useMemo(
@@ -102,20 +107,67 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
     () => filterFeedbackTargets(options, { campusKey, query }),
     [options, campusKey, query],
   );
+  const mapCampus = release.campuses.find((campus) => campus.key === campusKey) ?? release.campuses[0];
+  const mapMatches = useMemo(
+    () => filterFeedbackTargets(options, { campusKey: mapCampus.key, query, limit: options.length }).items,
+    [options, mapCampus.key, query],
+  );
+  const mapTargetById = useMemo(
+    () => new Map(mapMatches.map((item) => [item.targetId, item])),
+    [mapMatches],
+  );
+  const mapPois = useMemo(
+    () => release.pois.filter((poi) =>
+      poi.campusKey === mapCampus.key
+      && (isStop ? poi.entityType === "transit_stop" : poi.entityType === "building" || poi.entityType === "place")
+      && mapTargetById.has(poi.entityId),
+    ),
+    [release.pois, mapCampus.key, isStop, mapTargetById],
+  );
+  const mapFeatureBindings = useMemo(
+    () => mapPois.flatMap((poi) => poi.mapFeatureId && poi.sourceElementId
+      ? [{ id: poi.mapFeatureId, sourceElementId: poi.sourceElementId }]
+      : []),
+    [mapPois],
+  );
+  const mapTargetByFeature = useMemo(
+    () => new Map(mapPois.filter((poi) => poi.mapFeatureId).map((poi) => [poi.mapFeatureId!, poi.entityId])),
+    [mapPois],
+  );
+  const mapTargetByPoiKey = useMemo(
+    () => new Map(mapPois.map((poi) => [poi.poiKey, poi.entityId])),
+    [mapPois],
+  );
+  const selectedMapPoi = mapPois.find((poi) => poi.entityId === selected?.targetId) ?? null;
+
+  const chooseTarget = (item: FeedbackTargetResult) => {
+    setSelected(item);
+    setCampusKey(options.find((option) => option.targetId === item.targetId)?.campusKey ?? "");
+    recordAnalyticsEvent({
+      eventType: "popup_close",
+      meta: { popup: "target_picker", feedbackType: type, selected: true },
+    });
+    setPickerOpen(false);
+    setQuery("");
+  };
 
   const uploading = uploads.photos.some((photo) => photo.status === "uploading");
   // 禁用理由要能说出口：光有布尔值就只能给一个灰按钮，用户猜不到差什么（见 targets.ts 注释）。
-  const blockReason = feedbackSubmitBlockReason({
+  const submitBlockReason = feedbackSubmitBlockReason({
     content,
-    targetRequired,
+    targetRequired: true,
     hasTarget: selected !== null,
     uploadingPhotoCount: uploads.photos.filter((photo) => photo.status === "uploading").length,
   });
+  const blockReason = isNewPlace && submitBlockReason === "请先选择关联的地点或站点"
+    ? "请先选择位置参考地点"
+    : submitBlockReason;
   const canSubmit = blockReason === "" && !submitting;
 
   const resetTarget = () => {
     setSelected(null);
     setPickerOpen(false);
+    setPickerMode("list");
     setCampusKey("");
     setQuery("");
   };
@@ -131,26 +183,53 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
         if (!selected?.revisionId) throw new Error("所选地点已不在当前发布版本中，请重新选择");
         baseRevisionId = selected.revisionId;
       }
-      const result = await createSubmission({
+      const submission: FeedbackSubmissionInput = {
         targetType: typeConfig.targetType,
-        targetId: targetRequired ? selected!.targetId : null,
+        targetId: isNewPlace ? null : selected!.targetId,
         baseRevisionId,
         payload: {
           submissionKind: "feedback",
           feedbackType: type,
           description: content.trim(),
+          ...(isNewPlace && selected ? {
+            locationReference: {
+              placeId: selected.targetId,
+              placeName: selected.name,
+              campusLabel: selected.campusLabel,
+            },
+          } : {}),
         },
         // 上传失败的照片不在 mediaIds 里，文字提交照常进行
         photoMediaIds: uploads.mediaIds,
         // 登录时留空即由服务端回落到账号名；未登录时这就是唯一的自称，可以为 null。
         submitterName: nickname.trim() || null,
         submitterContact: contact.trim() || null,
-      });
+      };
+      let result;
+      try {
+        result = await createSubmission(submission);
+      } catch (submitError) {
+        // 本地 Vite 可代理尚未更新的线上 Worker。旧接口只认识 description，
+        // 仅在它明确拒绝新字段时，把位置参考写进描述后重试一次。
+        if (!isNewPlace || !selected || !(submitError instanceof ApiError)
+          || submitError.status !== 400 || !submitError.message.includes("locationReference")) {
+          throw submitError;
+        }
+        const locationLine = `位置参考：${feedbackTargetLabel(selected)}（地点 ID：${selected.targetId}）`;
+        const fallbackDescription = `${locationLine}\n${content.trim()}`;
+        if (fallbackDescription.length > 2_000) {
+          throw new Error("反馈内容过长，请缩短后重试，以便保存位置参考");
+        }
+        result = await createSubmission({
+          ...submission,
+          payload: { submissionKind: "feedback", feedbackType: type, description: fallbackDescription },
+        });
+      }
       addSubmission({
         id: result.id,
         targetType: typeConfig.targetType,
-        targetId: selected?.targetId,
-        targetName: selected?.name,
+        targetId: isNewPlace ? undefined : selected?.targetId,
+        targetName: isNewPlace ? `参考位置：${selected?.name ?? ""}` : selected?.name,
         title: title || "反馈",
       });
       setDone(true);
@@ -205,10 +284,9 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
           ))}
         </ChipRow>
 
-        {/* 关联目标：校区筛选 + 搜索，不再是一个几百项的下拉 */}
-        {targetRequired ? (
-          <>
-            <h2 className="mt-5 text-emphasis">{isStop ? "关联站点" : "关联地点"}</h2>
+        {/* 新地点选择现有地点作位置参考；其余反馈选择关联目标。 */}
+        <>
+            <h2 className="mt-5 text-emphasis">{isNewPlace ? "位置参考地点" : isStop ? "关联站点" : "关联地点"}</h2>
             <button
               type="button"
               className="mt-2.5 flex w-full items-center justify-between rounded-2xl bg-surface px-4 py-3.5 shadow-card"
@@ -221,12 +299,29 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
               }}
             >
               <span className={selected ? "text-body text-ink" : "text-body text-sub"}>
-                {selected ? feedbackTargetLabel(selected) : isStop ? "选择站点" : "搜索并选择地点"}
+                {selected ? feedbackTargetLabel(selected) : isStop ? "选择站点" : isNewPlace ? "选择附近的现有地点" : "搜索并选择地点"}
               </span>
               <ChevronRight size={16} className={`text-sub transition-transform ${pickerOpen ? "rotate-90" : ""}`} />
             </button>
+            {isNewPlace ? (
+              <p className="mt-2 text-aux text-sub">选一个附近的现有地点作定位参考，再在反馈内容中说明新地点的准确位置。</p>
+            ) : null}
             {pickerOpen ? (
               <div className="mt-2 rounded-2xl bg-surface p-3 shadow-card">
+                <div className="mb-3 flex gap-2" role="tablist" aria-label="选择方式">
+                  {(["map", "list"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="tab"
+                      aria-selected={pickerMode === mode}
+                      className={`flex-1 rounded-xl px-3 py-2 text-aux font-medium ${pickerMode === mode ? "bg-primary-container text-primary" : "bg-page text-sub"}`}
+                      onClick={() => setPickerMode(mode)}
+                    >
+                      {mode === "map" ? "在图中选择" : "在列表中选择"}
+                    </button>
+                  ))}
+                </div>
                 <SearchInput
                   value={query}
                   onChange={setQuery}
@@ -235,10 +330,10 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
                 />
                 {campusOptions.length > 2 ? (
                   <ChipRow className="mt-2.5">
-                    {campusOptions.map((campus) => (
+                    {campusOptions.filter((campus) => pickerMode === "list" || campus.key !== "").map((campus) => (
                       <Chip
                         key={campus.key || "all"}
-                        active={campusKey === campus.key}
+                        active={(pickerMode === "map" ? mapCampus.key : campusKey) === campus.key}
                         onClick={() => setCampusKey(campus.key)}
                       >
                         {campus.label}
@@ -246,48 +341,75 @@ function ReadyFeedbackPage({ release }: { release: LoadedRelease }) {
                     ))}
                   </ChipRow>
                 ) : null}
-                <div className="mt-2 max-h-72 overflow-y-auto">
-                  {page.items.map((item) => (
-                    <button
-                      key={item.targetId}
-                      type="button"
-                      className={`block w-full rounded-lg px-3 py-2.5 text-left active:bg-page ${
-                        item.targetId === selected?.targetId ? "text-primary" : "text-ink"
-                      }`}
-                      onClick={() => {
-                        setSelected(item);
-                        recordAnalyticsEvent({
-                          eventType: "popup_close",
-                          meta: { popup: "target_picker", feedbackType: type, selected: true },
-                        });
-                        setPickerOpen(false);
-                        setQuery("");
-                      }}
-                    >
-                      <span className="text-body">{item.name}</span>
-                      {item.campusLabel ? (
-                        <span className="ml-1.5 text-aux text-sub">{item.campusLabel}</span>
-                      ) : null}
-                      {item.matchHint ? (
-                        <span className="mt-0.5 block text-aux text-sub">{item.matchHint}</span>
-                      ) : null}
-                    </button>
-                  ))}
-                  {page.items.length === 0 ? (
-                    <div className="px-3 py-4 text-center text-aux text-sub">
-                      没有匹配的{isStop ? "站点" : "地点"}，换个关键词试试
+                {pickerMode === "map" ? (
+                  <div className="mt-3">
+                    <div className="relative h-[min(50vh,420px)] min-h-72 overflow-hidden rounded-xl" aria-label="选择关联位置的校园地图">
+                      <MapCanvas
+                        campus={mapCampus}
+                        featureBindings={mapFeatureBindings}
+                        matchedFeatureIds={mapFeatureBindings.map((binding) => binding.id)}
+                        selectedFeatureId={selectedMapPoi?.mapFeatureId ?? null}
+                        selectedPoint={selectedMapPoi?.markerPoint ?? null}
+                        onSelectFeature={(featureId) => {
+                          const item = mapTargetById.get(mapTargetByFeature.get(featureId) ?? "");
+                          if (item) chooseTarget(item);
+                        }}
+                        onTapOverlayPoi={(poiKey) => {
+                          const item = mapTargetById.get(mapTargetByPoiKey.get(poiKey) ?? "");
+                          if (item) chooseTarget(item);
+                        }}
+                        onViewWindowChange={setViewWindow}
+                        overlay={
+                          <MapPoiOverlay
+                            viewWindow={viewWindow}
+                            pois={mapPois.filter((poi) => poi.markerPoint !== null)}
+                            selectedPoiKey={selectedMapPoi?.poiKey ?? null}
+                            onSelect={(poiKey) => {
+                              const item = mapTargetById.get(mapTargetByPoiKey.get(poiKey) ?? "");
+                              if (item) chooseTarget(item);
+                            }}
+                          />
+                        }
+                      />
                     </div>
-                  ) : null}
-                </div>
-                {page.truncated ? (
+                    <p className="mt-2 text-aux text-sub">点选地图上的楼宇或图钉；没有地图标注的地点可切换到列表选择。</p>
+                    {mapPois.length === 0 ? <p className="mt-2 text-aux text-sub">当前校区或搜索条件下没有可点选的地图标注。</p> : null}
+                  </div>
+                ) : (
+                  <div className="mt-2 max-h-72 overflow-y-auto">
+                    {page.items.map((item) => (
+                      <button
+                        key={item.targetId}
+                        type="button"
+                        className={`block w-full rounded-lg px-3 py-2.5 text-left active:bg-page ${
+                          item.targetId === selected?.targetId ? "text-primary" : "text-ink"
+                        }`}
+                        onClick={() => chooseTarget(item)}
+                      >
+                        <span className="text-body">{item.name}</span>
+                        {item.campusLabel ? (
+                          <span className="ml-1.5 text-aux text-sub">{item.campusLabel}</span>
+                        ) : null}
+                        {item.matchHint ? (
+                          <span className="mt-0.5 block text-aux text-sub">{item.matchHint}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                    {page.items.length === 0 ? (
+                      <div className="px-3 py-4 text-center text-aux text-sub">
+                        没有匹配的{isStop ? "站点" : "地点"}，换个关键词试试
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+                {pickerMode === "list" && page.truncated ? (
                   <p className="mt-1 px-3 text-aux text-sub">
                     共 {page.total} 个匹配，仅显示前 {page.items.length} 个，继续输入可缩小范围。
                   </p>
                 ) : null}
               </div>
             ) : null}
-          </>
-        ) : null}
+        </>
 
         {/* 反馈内容 */}
         <h2 className="mt-5 text-emphasis">反馈内容</h2>

@@ -180,17 +180,33 @@ function collectionValue(
 }
 
 function feedbackPayloadValue(value: unknown, field: string, reject: Reject): FeedbackSubmissionPayload {
+  const raw = recordValue(value, field, reject);
+  const hasLocationReference = Object.hasOwn(raw, "locationReference");
   const payload = exactRecord(
     value,
     field,
-    ["submissionKind", "feedbackType", "description"],
+    ["submissionKind", "feedbackType", "description", ...(hasLocationReference ? ["locationReference"] : [])],
     reject,
   );
   if (payload.submissionKind !== "feedback") reject(`${field}.submissionKind must be feedback`);
+  const kind = feedbackType(payload.feedbackType, `${field}.feedbackType`, reject);
+  if (hasLocationReference && kind !== "new_place") {
+    reject(`${field}.locationReference is only supported for new_place`);
+  }
+  const locationReference = hasLocationReference
+    ? exactRecord(payload.locationReference, `${field}.locationReference`, ["placeId", "placeName", "campusLabel"], reject)
+    : null;
   return {
     submissionKind: "feedback",
-    feedbackType: feedbackType(payload.feedbackType, `${field}.feedbackType`, reject),
+    feedbackType: kind,
     description: text(payload.description, `${field}.description`, 2_000, reject),
+    ...(locationReference ? {
+      locationReference: {
+        placeId: text(locationReference.placeId, `${field}.locationReference.placeId`, 100, reject),
+        placeName: text(locationReference.placeName, `${field}.locationReference.placeName`, 200, reject),
+        campusLabel: text(locationReference.campusLabel, `${field}.locationReference.campusLabel`, 100, reject, true),
+      },
+    } : {}),
   };
 }
 
