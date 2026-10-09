@@ -15,6 +15,7 @@ __pycache__/
 .dev.vars.*
 .playwright-mcp/
 .playwright-cli/
+/启动网站.bat
 m1-check.png
 map-check.png
 admin-login.png

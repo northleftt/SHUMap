@@ -160,6 +160,14 @@ export async function createSubmission(
   const payload = normalizeFeedbackSubmissionPayload(body.payload);
   assertFeedbackTarget(payload, targetType);
   await validateFeedbackTarget(env, targetType, targetId, baseRevisionId);
+  if (payload.locationReference) {
+    const reference = await first<{ id: string }>(
+      env.DB,
+      "select id from places where id=? and lifecycle_status<>'retired'",
+      [payload.locationReference.placeId],
+    );
+    if (!reference) throw new HttpError(404, "target_not_found", "Location reference does not exist");
+  }
   const photoMediaIds = await assertAttachablePhotos(env, body.photoMediaIds);
   // 昵称是展示用的自称，登录时缺省回落到账号名；账号归属由 submitter_user_id 单独承载。
   const submitterName = nullableText(body.submitterName, "submitterName", 100) ?? principal?.displayName ?? null;

@@ -34,7 +34,12 @@ import type { CollectionPayload } from "../../../shared/submission-contract";
 /** GET /api/public/releases/current — the sole production content source. */
 export async function getCurrentRelease(signal?: AbortSignal): Promise<ReleaseManifest> {
   const value = await apiFetch<unknown>("/api/public/releases/current", { query: { contract: CLIENT_CONTRACT }, signal });
-  return parseReleaseManifest(value);
+  const manifest = parseReleaseManifest(value);
+  if (import.meta.env.DEV) {
+    const { withLocalBuildingAdditions } = await import("../release/devReleaseAdditions");
+    return withLocalBuildingAdditions(manifest);
+  }
+  return manifest;
 }
 
 /** GET /api/public/releases/current — null only when no release is active. */

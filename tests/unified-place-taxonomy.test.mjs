@@ -61,21 +61,39 @@ test("fresh v2 data forms one canonical place, chip, and SVG feature system", ()
   const sql = seedSql();
   db.exec(sql);
 
-  assert.equal(scalar(db, "select count(*) as value from places"), 121);
-  assert.equal(scalar(db, "select count(*) as value from buildings"), 121);
-  assert.equal(scalar(db, "select count(*) as value from map_features"), 125);
+  assert.equal(scalar(db, "select count(*) as value from places"), 123);
+  assert.equal(scalar(db, "select count(*) as value from buildings"), 123);
+  assert.equal(scalar(db, "select count(*) as value from map_features"), 132);
   assert.equal(scalar(
     db,
     `select count(*) as value
        from places p join place_revisions r on r.id=p.current_revision_id
       where r.place_id=p.id and r.editorial_status='approved'`,
-  ), 121);
+  ), 123);
+
+  const newJiadingBuildings = db.prepare(`
+    select p.id,r.display_name as name,mf.source_element_id as sourceElementId,
+           mf.feature_kind as featureKind,c.key as filterKey
+      from places p
+      join place_revisions r on r.id=p.current_revision_id
+      join entity_locations el on el.entity_type='place' and el.entity_id=p.id and el.role='footprint'
+      join location_anchors la on la.id=el.anchor_id
+      join map_features mf on mf.id=la.map_feature_id
+      join map_filter_members member on member.place_kind_id=p.kind_id
+      join map_filter_categories c on c.id=member.category_id
+     where p.id in ('place_jiading_waiyu-building','place_jiading_microelectronic-b-building')
+     order by p.id
+  `).all();
+  assert.deepEqual(newJiadingBuildings.map((row) => ({ ...row })), [
+    { id: "place_jiading_microelectronic-b-building", name: "微电子B楼", sourceElementId: "microelectronic_B_building", featureKind: "building_footprint", filterKey: "teaching" },
+    { id: "place_jiading_waiyu-building", name: "数字系外语楼", sourceElementId: "waiyu_building", featureKind: "building_footprint", filterKey: "teaching" },
+  ]);
 
   const kindCounts = Object.fromEntries(db.prepare(
     "select kind_id as kindId,count(*) as count from places group by kind_id order by kind_id",
   ).all().map((row) => [row.kindId, row.count]));
   assert.deepEqual(kindCounts, {
-    building: 66,
+    building: 68,
     canteen: 7,
     library: 4,
     other: 7,
@@ -91,7 +109,7 @@ test("fresh v2 data forms one canonical place, chip, and SVG feature system", ()
        join buildings b on b.place_id=el.entity_id and b.place_id=la.building_place_id
       where el.entity_type='place' and el.role='footprint' and el.valid_to is null
         and la.role='footprint' and la.valid_to is null and mf.feature_kind='building_footprint'`,
-  ), 121);
+  ), 123);
 
   const revisions = db.prepare(
     `select r.id,r.display_name as displayName,r.summary,r.description,
@@ -100,7 +118,7 @@ test("fresh v2 data forms one canonical place, chip, and SVG feature system", ()
        from places p join place_revisions r on r.id=p.current_revision_id
       order by p.id`,
   ).all();
-  assert.equal(revisions.length, 121);
+  assert.equal(revisions.length, 123);
   for (const row of revisions) {
     const content = JSON.parse(row.contentJson);
     assert.deepEqual(Object.keys(content).sort(), ["address", "detail"], `${row.id} content keys`);

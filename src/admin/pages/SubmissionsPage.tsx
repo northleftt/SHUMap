@@ -311,9 +311,16 @@ export function SubmissionsPage() {
               <div>
                 <p className="mb-2 text-emphasis">提交内容{selectedPending ? "（逐字段核对，勾选 = 采纳）" : ""}</p>
                 {selected.payload.submissionKind === "feedback" ? (
-                  <p className="mb-2 text-label text-sub">
-                    反馈类型：{FEEDBACK_TYPE_LABELS[selected.payload.feedbackType]}
-                  </p>
+                  <div className="mb-2 text-label text-sub">
+                    <p>反馈类型：{FEEDBACK_TYPE_LABELS[selected.payload.feedbackType]}</p>
+                    {selected.payload.locationReference ? (
+                      <p className="mt-1">
+                        位置参考：{selected.payload.locationReference.placeName}
+                        {selected.payload.locationReference.campusLabel ? ` · ${selected.payload.locationReference.campusLabel}` : ""}
+                        （地点 ID：{selected.payload.locationReference.placeId}）
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
                 {fields.length > 0 ? (
                   <div className="divide-y divide-line rounded-lg border border-line">

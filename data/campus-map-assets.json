@@ -10,10 +10,10 @@
   {
     "campusId": "campus_jiading",
     "key": "jiading",
-    "sourcePath": "地图/嘉定校区地图.svg",
+    "sourcePath": "地图/嘉定校区地图_0820修订_id修正.svg",
     "objectKey": "maps/campus/jiading.svg",
-    "byteSize": 17784,
-    "sha256": "a940cec01a7e0c569698f87650b59605f354813ef01cd480ac450ac32438efcb"
+    "byteSize": 22622,
+    "sha256": "1e947158aa2ab368f9350d74450128b6e628a61fece4ca41f49f66e1848ea2db"
   },
   {
     "campusId": "campus_yanchang",
